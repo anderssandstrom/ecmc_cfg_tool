@@ -1,0 +1,17 @@
+Terminator = LF;
+ReplyTimeout = 1000;
+ReadTimeout  = 1000;
+WriteTimeout = 1000;
+ExtraInput   = Ignore;
+
+/* Runtime text command from record VAL (stringout) */
+sendCmd {
+  out "%s";
+  in  "%*39c";   # consume reply (ignored)
+}
+
+/* Fixed query command passed as protocol argument */
+query {
+  out "$1";
+  in  "%39c";
+}
