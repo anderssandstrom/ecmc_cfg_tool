@@ -21,12 +21,15 @@ Run from the ecmc repo root:
 
 ```bash
 cd ../ecmc_cfg_stream
-python3 ecmc_stream_qt.py \
-  --catalog ecmc_commands.json \
-  --favorites ecmc_favorites.json \
-  --cmd-pv IOC:ECMC:CMD \
-  --qry-pv IOC:ECMC:QRY
+./start.sh IOC:ECMC
 ```
+
+This sets:
+
+- Command PV: `<prefix>:MCU-Cmd.AOUT`
+- Readback PV: `<prefix>:MCU-Cmd.AINP`
+
+Example: `./start.sh MYIOC:SYS1` uses `MYIOC:SYS1:MCU-Cmd.AOUT` and `MYIOC:SYS1:MCU-Cmd.AINP`.
 
 ## Dependencies
 
@@ -42,7 +45,7 @@ One EPICS client backend:
 ## Notes
 
 - `CMD` PV is used to send arbitrary command strings.
-- `QRY` PV is read using `QRY.PROC` + `QRY` readback.
+- Readback PV is read after triggering the parent record `.PROC` (works for field PVs like `.AINP`).
 - The command browser templates are extracted from `devEcmcSup/com/ecmcCmdParser.c`.
 - Descriptions are matched from all header doc blocks under `devEcmcSup/` when available.
 - Favorites are loaded at startup and saved on add/remove (or with `Save Favorites`).

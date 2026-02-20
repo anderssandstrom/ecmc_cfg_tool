@@ -15,6 +15,7 @@ except Exception:
 
 
 PLACEHOLDER_RE = re.compile(r'<([^>]+)>')
+FLOAT_LITERAL_RE = re.compile(r'(?<![A-Za-z0-9_])([+-]?(?:(?:\d+\.\d*)|(?:\.\d+))(?:[eE][+-]?\d+)?)(?![A-Za-z0-9_])')
 
 
 class EpicsClient:
@@ -88,6 +89,63 @@ def fill_template(template, values):
         v = values.get(name, '').strip()
         out = out.replace(f'<{name}>', v if v else f'<{name}>')
     return out
+
+
+def _join_prefix_pv(prefix, suffix):
+    p = str(prefix or '').strip()
+    s = str(suffix or '').strip()
+    if not p:
+        return s
+    if p.endswith(':'):
+        return f'{p}{s}'
+    return f'{p}:{s}'
+
+
+def _proc_pv_for_readback(pv):
+    p = str(pv or '').strip()
+    if not p:
+        return ''
+    if '.' in p:
+        return f"{p.split('.', 1)[0]}.PROC"
+    return f'{p}.PROC'
+
+
+def _trim_float_literal_zeros(token):
+    t = str(token or '').strip()
+    if not t:
+        return t
+    exp = ''
+    base = t
+    for sep in ('e', 'E'):
+        if sep in base:
+            i = base.find(sep)
+            exp = base[i:]
+            base = base[:i]
+            break
+
+    sign = ''
+    if base[:1] in '+-':
+        sign = base[:1]
+        base = base[1:]
+
+    if '.' not in base:
+        return t
+
+    int_part, frac_part = base.split('.', 1)
+    frac_part = frac_part.rstrip('0')
+    if not int_part:
+        int_part = '0'
+    if frac_part:
+        # Compact fractional literals to save PV payload bytes: 0.3 -> .3, -0.3 -> -.3
+        if int_part == '0':
+            int_part = ''
+        return f'{sign}{int_part}.{frac_part}{exp}'
+    return f'{sign}{int_part}{exp}'
+
+
+def normalize_float_literals(cmd):
+    s = str(cmd or '')
+    return FLOAT_LITERAL_RE.sub(lambda m: _trim_float_literal_zeros(m.group(1)), s)
 
 
 class SpinBoxWithButtons(QtWidgets.QWidget):
@@ -446,6 +504,8 @@ class MultiCommandDialog(QtWidgets.QDialog):
             self._add_row(c)
 
         close_btn = QtWidgets.QPushButton('Close')
+        close_btn.setAutoDefault(False)
+        close_btn.setDefault(False)
         close_btn.clicked.connect(self.close)
         layout.addWidget(close_btn)
         self._fit_to_contents()
@@ -649,6 +709,11 @@ class MultiCommandDialog(QtWidgets.QDialog):
         write_btn = QtWidgets.QPushButton('Write')
         read_btn = QtWidgets.QPushButton('Read')
         copy_btn = QtWidgets.QPushButton('Copy')
+        for btn in (write_btn, read_btn, copy_btn):
+            # Prevent Enter/Return in any editor from triggering an implicit
+            # "default" action button on the dialog.
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
         write_btn.setMaximumWidth(58)
         read_btn.setMaximumWidth(58)
         copy_btn.setMaximumWidth(58)
@@ -661,6 +726,7 @@ class MultiCommandDialog(QtWidgets.QDialog):
         result.setWordWrap(False)
         self.table.setCellWidget(row_idx, 3, result)
 
+        data_idx = len(self.rows)
         row = {
             'template': template,
             'param_names': param_names,
@@ -670,9 +736,9 @@ class MultiCommandDialog(QtWidgets.QDialog):
         }
         self.rows.append(row)
 
-        write_btn.clicked.connect(lambda _=False, i=row_idx: self._write_row(i))
-        read_btn.clicked.connect(lambda _=False, i=row_idx: self._read_row(i))
-        copy_btn.clicked.connect(lambda _=False, i=row_idx: self._copy_row(i))
+        write_btn.clicked.connect(lambda _=False, i=data_idx: self._write_row(i))
+        read_btn.clicked.connect(lambda _=False, i=data_idx: self._read_row(i))
+        copy_btn.clicked.connect(lambda _=False, i=data_idx: self._copy_row(i))
 
     def _build_command(self, row_idx):
         row = self.rows[row_idx]
@@ -1032,7 +1098,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def send_raw_command(self, cmd):
         pv = self.cmd_pv.text().strip()
-        cmd = (cmd or '').strip()
+        cmd = normalize_float_literals((cmd or '').strip())
         if not pv:
             msg = 'ERROR: Command PV is empty'
             self._log(msg)
@@ -1043,11 +1109,11 @@ class MainWindow(QtWidgets.QMainWindow):
             return False, msg
         try:
             self.client.put(pv, cmd, wait=True)
-            msg = f'CMD -> {pv}: {cmd}'
+            msg = f'CMD -> {pv} ({len(cmd)} chars): {cmd}'
             self._log(msg)
             return True, msg
         except Exception as ex:
-            msg = f'ERROR sending command: {ex}'
+            msg = f'ERROR sending command ({len(cmd)} chars): {ex} | CMD={cmd}'
             self._log(msg)
             return False, msg
 
@@ -1063,7 +1129,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return True, msg
 
         try:
-            self.client.put(f'{qp}.PROC', 1, wait=True)
+            proc_pv = _proc_pv_for_readback(qp)
+            self.client.put(proc_pv, 1, wait=True)
             val = self.client.get(qp, as_string=True)
             msg = f'QRY <- {qp}: {val}'
             self._log(msg)
@@ -1082,7 +1149,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._log('ERROR: Query PV is empty')
             return
         try:
-            self.client.put(f'{qp}.PROC', 1, wait=True)
+            proc_pv = _proc_pv_for_readback(qp)
+            self.client.put(proc_pv, 1, wait=True)
             val = self.client.get(qp, as_string=True)
             self._log(f'QRY <- {qp}: {val}')
         except Exception as ex:
@@ -1104,17 +1172,25 @@ def main():
     ap = argparse.ArgumentParser(description='Qt app to send ecmc commands via EPICS PVs')
     ap.add_argument('--catalog', default='ecmc_commands.json', help='Path to command catalog JSON')
     ap.add_argument('--favorites', default='ecmc_favorites.json', help='Path to favorites JSON')
-    ap.add_argument('--cmd-pv', default='IOC:ECMC:CMD', help='Command PV name')
-    ap.add_argument('--qry-pv', default='IOC:ECMC:QRY', help='Query PV name')
+    ap.add_argument('--prefix', default='', help='PV prefix (e.g. IOC:ECMC)')
+    ap.add_argument('--cmd-pv', default='', help='Command PV name (overrides --prefix)')
+    ap.add_argument('--qry-pv', default='', help='Query PV name/readback PV (overrides --prefix)')
     ap.add_argument('--timeout', type=float, default=2.0, help='EPICS timeout in seconds')
     args = ap.parse_args()
+
+    default_cmd_pv = args.cmd_pv.strip() if args.cmd_pv else _join_prefix_pv(args.prefix, 'MCU-Cmd.AOUT')
+    default_qry_pv = args.qry_pv.strip() if args.qry_pv else _join_prefix_pv(args.prefix, 'MCU-Cmd.AINP')
+    if not default_cmd_pv:
+        default_cmd_pv = 'IOC:ECMC:CMD'
+    if not default_qry_pv:
+        default_qry_pv = 'IOC:ECMC:QRY'
 
     app = QtWidgets.QApplication(sys.argv)
     w = MainWindow(
         catalog_path=args.catalog,
         favorites_path=args.favorites,
-        default_cmd_pv=args.cmd_pv,
-        default_qry_pv=args.qry_pv,
+        default_cmd_pv=default_cmd_pv,
+        default_qry_pv=default_qry_pv,
         timeout=args.timeout,
     )
     w.show()
