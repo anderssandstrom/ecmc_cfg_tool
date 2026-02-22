@@ -7,9 +7,9 @@ from datetime import datetime
 from pathlib import Path
 
 try:
-    from PyQt5 import QtCore, QtWidgets
+    from PyQt5 import QtCore, QtGui, QtWidgets
 except Exception:
-    from PySide6 import QtCore, QtWidgets  # type: ignore
+    from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
 
 from ecmc_stream_qt import (
     EpicsClient,
@@ -47,6 +47,8 @@ def _build_pairs(commands, include_set_only=False):
             continue
         item = pairs.setdefault(base, {'name': base, 'get': '', 'set': '', 'group': _group_for_name(base)})
         item[kind] = tmpl
+        if kind == 'set' and not item.get('get'):
+            item['get'] = _derive_get_template_from_set(tmpl)
     if include_set_only:
         return [pairs[k] for k in sorted(pairs.keys(), key=lambda x: x.lower())]
     # Exclude set-only commands in table tuning view: every row should support readback.
@@ -71,6 +73,17 @@ def _split_csv(text):
     return [x.strip() for x in t.split(',') if x.strip()]
 
 
+def _derive_get_template_from_set(set_template):
+    s = str(set_template or '').strip()
+    m = re.match(r'^(Cfg\.)Set([A-Za-z0-9_]+)\((.*)\)$', s)
+    if not m:
+        return ''
+    prefix, base, args = m.groups()
+    args = [a.strip() for a in str(args).split(',') if a.strip()]
+    axis_arg = args[0] if args else '<axisIndex>'
+    return f'{prefix}Get{base}({axis_arg})'
+
+
 def _group_for_name(name):
     low = str(name or '').lower()
     if 'scale' in low:
@@ -88,8 +101,153 @@ def _group_for_name(name):
     return 'Other'
 
 
+class ImageOverlayCanvas(QtWidgets.QWidget):
+    def __init__(self, image_path):
+        super().__init__()
+        self._pixmap = QtGui.QPixmap(str(image_path)) if image_path else QtGui.QPixmap()
+        self._base_w = self._pixmap.width() if not self._pixmap.isNull() else 1920
+        self._base_h = self._pixmap.height() if not self._pixmap.isNull() else 1080
+        self._items = []
+        self._widget_index = {}
+        self._calibration_enabled = False
+        self._drag_widget = None
+        self._drag_offset = QtCore.QPoint(0, 0)
+        self.setMinimumHeight(560)
+
+    def has_image(self):
+        return not self._pixmap.isNull()
+
+    def add_overlay_widget(self, rel_x, rel_y, widget, anchor='center', name=''):
+        widget.setParent(self)
+        widget.setProperty('overlayName', str(name or ''))
+        widget.show()
+        idx = len(self._items)
+        self._items.append([float(rel_x), float(rel_y), widget, str(anchor)])
+        self._widget_index[widget] = idx
+        widget.installEventFilter(self)
+        self._layout_items()
+
+    def set_calibration_enabled(self, enabled):
+        self._calibration_enabled = bool(enabled)
+        # During calibration, child controls must not consume mouse events,
+        # otherwise drag gestures never reach the overlay cell.
+        for _x, _y, widget, _a in self._items:
+            if not bool(widget.property('overlayCell')):
+                continue
+            for ch in widget.findChildren(QtWidgets.QWidget):
+                ch.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, self._calibration_enabled)
+
+    def overlay_positions(self):
+        out = {}
+        for rel_x, rel_y, widget, _anchor in self._items:
+            name = str(widget.property('overlayName') or '').strip()
+            if name:
+                out[name] = [float(rel_x), float(rel_y)]
+        return out
+
+    def _target_rect(self):
+        if self._base_w <= 0 or self._base_h <= 0:
+            return QtCore.QRect(0, 0, self.width(), self.height())
+        wr = float(self.width()) / float(self._base_w)
+        hr = float(self.height()) / float(self._base_h)
+        s = min(wr, hr)
+        tw = int(self._base_w * s)
+        th = int(self._base_h * s)
+        x = (self.width() - tw) // 2
+        y = (self.height() - th) // 2
+        return QtCore.QRect(x, y, tw, th)
+
+    def _layout_items(self):
+        rect = self._target_rect()
+        scale = min(float(rect.width()) / float(self._base_w), float(rect.height()) / float(self._base_h))
+        for rel_x, rel_y, widget, anchor in self._items:
+            x = int(rect.x() + rel_x * rect.width())
+            y = int(rect.y() + rel_y * rect.height())
+            hint = widget.sizeHint()
+            if bool(widget.property('overlayCell')):
+                # Keep overlay boxes fixed size; only position is image-relative.
+                ww = int(widget.property('overlayBaseW') or hint.width())
+                wh = int(widget.property('overlayBaseH') or hint.height())
+            else:
+                min_w = 30
+                min_h = 18
+                ww = max(min_w, int(hint.width() * scale))
+                wh = max(min_h, int(hint.height() * scale))
+            widget.resize(ww, wh)
+            if anchor == 'left':
+                widget.move(x, y - wh // 2)
+            elif anchor == 'right':
+                widget.move(x - ww, y - wh // 2)
+            else:
+                widget.move(x - ww // 2, y - wh // 2)
+
+    def _event_global_point(self, event):
+        gp = getattr(event, 'globalPos', None)
+        if callable(gp):
+            return gp()
+        gp2 = getattr(event, 'globalPosition', None)
+        if callable(gp2):
+            return gp2().toPoint()
+        return QtCore.QPoint(0, 0)
+
+    def eventFilter(self, obj, event):
+        if obj not in self._widget_index:
+            return super().eventFilter(obj, event)
+        if not self._calibration_enabled:
+            return super().eventFilter(obj, event)
+
+        et = event.type()
+        if et == QtCore.QEvent.MouseButtonPress and event.button() == QtCore.Qt.LeftButton:
+            self._drag_widget = obj
+            self._drag_offset = event.pos()
+            return True
+        if et == QtCore.QEvent.MouseMove and self._drag_widget is obj and (event.buttons() & QtCore.Qt.LeftButton):
+            idx = self._widget_index.get(obj)
+            if idx is None:
+                return True
+            rel_x, rel_y, _w, anchor = self._items[idx]
+            rect = self._target_rect()
+            g = self._event_global_point(event)
+            p = self.mapFromGlobal(g) - self._drag_offset
+            ww = max(1, obj.width())
+            wh = max(1, obj.height())
+            if anchor == 'left':
+                cx = p.x()
+                cy = p.y() + wh // 2
+            elif anchor == 'right':
+                cx = p.x() + ww
+                cy = p.y() + wh // 2
+            else:
+                cx = p.x() + ww // 2
+                cy = p.y() + wh // 2
+            if rect.width() > 0 and rect.height() > 0:
+                rel_x = float(cx - rect.x()) / float(rect.width())
+                rel_y = float(cy - rect.y()) / float(rect.height())
+                rel_x = max(0.0, min(1.0, rel_x))
+                rel_y = max(0.0, min(1.0, rel_y))
+                self._items[idx][0] = rel_x
+                self._items[idx][1] = rel_y
+                self._layout_items()
+            return True
+        if et == QtCore.QEvent.MouseButtonRelease and self._drag_widget is obj:
+            self._drag_widget = None
+            return True
+        return super().eventFilter(obj, event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._layout_items()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = QtGui.QPainter(self)
+        p.fillRect(self.rect(), QtGui.QColor('#d9d9d9'))
+        if not self._pixmap.isNull():
+            p.drawPixmap(self._target_rect(), self._pixmap)
+
+
 class CntrlWindow(QtWidgets.QMainWindow):
-    def __init__(self, catalog_path, default_cmd_pv, default_qry_pv, timeout, default_axis_id='1', title_prefix=''):
+    def __init__(self, catalog_path, default_cmd_pv, default_qry_pv, timeout, default_axis_id='1', title_prefix='', sketch_image_path=''):
         super().__init__()
         p = str(title_prefix or '').strip()
         self.setWindowTitle(f'ecmc PID/Controller Tuning [{p}]' if p else 'ecmc PID/Controller Tuning')
@@ -102,6 +260,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._diagram_read_rows = []
         self._diagram_value_pairs = []
         self.default_axis_id = str(default_axis_id).strip() or '1'
+        self.sketch_image_path = str(sketch_image_path or '').strip()
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._populate_table()
         self._log(f'Connected via backend: {self.client.backend}')
@@ -120,7 +279,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(root)
         layout = QtWidgets.QVBoxLayout(root)
 
-        cfg_group = QtWidgets.QGroupBox('PV Configuration')
+        cfg_group = QtWidgets.QGroupBox('General Configuration')
         cfg = QtWidgets.QGridLayout(cfg_group)
         self.cmd_pv = QtWidgets.QLineEdit(default_cmd_pv)
         self.qry_pv = QtWidgets.QLineEdit(default_qry_pv)
@@ -135,24 +294,63 @@ class CntrlWindow(QtWidgets.QMainWindow):
         cfg.addWidget(self.qry_pv, 1, 1)
         cfg.addWidget(QtWidgets.QLabel('Timeout [s]'), 2, 0)
         cfg.addWidget(self.timeout_edit, 2, 1)
-        cfg_group.setVisible(False)
+
+        tools_group = QtWidgets.QGroupBox('Layout Tools')
+        tools_layout = QtWidgets.QVBoxLayout(tools_group)
+        tools_layout.setContentsMargins(8, 8, 8, 8)
+        path_row = QtWidgets.QHBoxLayout()
+        self.sketch_image_edit = QtWidgets.QLineEdit(self.sketch_image_path)
+        self.sketch_image_edit.editingFinished.connect(self._update_sketch_image)
+        path_row.addWidget(QtWidgets.QLabel('Sketch Image'))
+        path_row.addWidget(self.sketch_image_edit, stretch=1)
+        tools_layout.addLayout(path_row)
+        cfg_tools = QtWidgets.QHBoxLayout()
+        self.calibrate_btn = QtWidgets.QPushButton('Calibrate')
+        self.calibrate_btn.setCheckable(True)
+        self.calibrate_btn.setAutoDefault(False)
+        self.calibrate_btn.setDefault(False)
+        self.calibrate_btn.toggled.connect(self._toggle_calibration)
+        cfg_tools.addWidget(self.calibrate_btn)
+        self.save_layout_btn = QtWidgets.QPushButton('Save Layout')
+        self.save_layout_btn.setAutoDefault(False)
+        self.save_layout_btn.setDefault(False)
+        self.save_layout_btn.clicked.connect(self._save_current_layout)
+        cfg_tools.addWidget(self.save_layout_btn)
+        cfg_tools.addStretch(1)
+        tools_layout.addLayout(cfg_tools)
+        tools_layout.addStretch(1)
+
+        cfg_panel = QtWidgets.QWidget()
+        cfg_panel_layout = QtWidgets.QHBoxLayout(cfg_panel)
+        cfg_panel_layout.setContentsMargins(0, 0, 0, 0)
+        cfg_panel_layout.setSpacing(10)
+        cfg_panel_layout.addWidget(cfg_group, stretch=1)
+        cfg_panel_layout.addWidget(tools_group, stretch=0)
+        cfg_panel.setVisible(False)
 
         top_row = QtWidgets.QHBoxLayout()
-        self.pv_cfg_toggle = QtWidgets.QPushButton('Show PV Config')
+        self.pv_cfg_toggle = QtWidgets.QPushButton('Show Config')
         self.pv_cfg_toggle.setCheckable(True)
         self.pv_cfg_toggle.setChecked(False)
         self.pv_cfg_toggle.setAutoDefault(False)
         self.pv_cfg_toggle.setDefault(False)
         self.pv_cfg_toggle.toggled.connect(
             lambda checked: (
-                cfg_group.setVisible(bool(checked)),
-                self.pv_cfg_toggle.setText('Hide PV Config' if checked else 'Show PV Config'),
+                cfg_panel.setVisible(bool(checked)),
+                self.pv_cfg_toggle.setText('Hide Config' if checked else 'Show Config'),
             )
         )
         top_row.addWidget(self.pv_cfg_toggle)
+        self.log_toggle_btn = QtWidgets.QPushButton('Show Log')
+        self.log_toggle_btn.setCheckable(True)
+        self.log_toggle_btn.setChecked(False)
+        self.log_toggle_btn.setAutoDefault(False)
+        self.log_toggle_btn.setDefault(False)
+        self.log_toggle_btn.toggled.connect(self._toggle_log_visible)
+        top_row.addWidget(self.log_toggle_btn)
         top_row.addStretch(1)
         layout.addLayout(top_row)
-        layout.addWidget(cfg_group)
+        layout.addWidget(cfg_panel)
 
         search_row = QtWidgets.QHBoxLayout()
         self.search = QtWidgets.QLineEdit()
@@ -161,8 +359,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
         search_row.addWidget(self.search)
         search_row.addWidget(QtWidgets.QLabel('View'))
         self.view_mode = QtWidgets.QComboBox()
-        self.view_mode.addItems(['Flat', 'Schematic', 'Diagram'])
-        self.view_mode.setCurrentText('Diagram')
+        self.view_mode.addItems(['Flat', 'Schematic', 'Diagram', 'Controller Sketch'])
+        self.view_mode.setCurrentText('Controller Sketch')
         self.view_mode.currentTextChanged.connect(self._populate_table)
         search_row.addWidget(self.view_mode)
         search_row.addWidget(QtWidgets.QLabel('Axis All'))
@@ -219,6 +417,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
 
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
+        self.log.setVisible(False)
         layout.addWidget(self.log, stretch=0)
 
     def _log(self, msg):
@@ -232,9 +431,14 @@ class CntrlWindow(QtWidgets.QMainWindow):
         return [r for r in self.rows if txt in r['name'].lower()]
 
     def _populate_table(self):
-        if self.view_mode.currentText() == 'Diagram':
+        mode = self.view_mode.currentText()
+        if mode == 'Diagram':
             self.stack.setCurrentIndex(1)
             self._populate_diagram()
+            return
+        if mode == 'Controller Sketch':
+            self.stack.setCurrentIndex(1)
+            self._populate_controller_sketch()
             return
 
         self.stack.setCurrentIndex(0)
@@ -262,6 +466,353 @@ class CntrlWindow(QtWidgets.QMainWindow):
 
         for row_def in sorted(data, key=lambda r: r['name'].lower()):
             self._insert_command_row(row_def)
+
+
+    def _clear_diagram_layout(self):
+        self._diagram_read_rows = []
+        self._diagram_value_pairs = []
+        for i in reversed(range(self.diagram_layout.count())):
+            item = self.diagram_layout.itemAt(i)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+
+    def _row_def(self, name):
+        return self._rows_all_by_name.get(name)
+
+    def _make_sketch_cell(self, row_def, overlay=False):
+        cell = QtWidgets.QWidget()
+        if overlay:
+            cell.setProperty('overlayCell', True)
+            cell.setFixedSize(76, 28)
+            cell.setProperty('overlayBaseW', 76)
+            cell.setProperty('overlayBaseH', 28)
+        cl = QtWidgets.QHBoxLayout(cell)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(1 if overlay else 2)
+
+        edit = QtWidgets.QLineEdit('')
+        if overlay:
+            edit.setFixedSize(62, 28)
+        else:
+            edit.setFixedSize(96, 34)
+        edit.setAlignment(QtCore.Qt.AlignCenter)
+        edit.setStyleSheet(
+            'QLineEdit {'
+            ' border: 2px solid #0f3345;'
+            ' background: #efefef;'
+            ' color: #111;'
+            f' font-size: {"11px" if overlay else "13px"};'
+            '}'
+        )
+
+        rb = QtWidgets.QPushButton('R')
+        wb = QtWidgets.QPushButton('W')
+        for b in (rb, wb):
+            b.setAutoDefault(False)
+            b.setDefault(False)
+            if overlay:
+                b.setFixedSize(14, 13)
+            else:
+                b.setFixedSize(20, 16)
+            b.setStyleSheet(
+                'QPushButton {'
+                ' border: 1px solid #0f3345;'
+                ' background: #e6eef2;'
+                f' font-size: {"7px" if overlay else "8px"};'
+                ' font-weight: 700;'
+                '}'
+            )
+
+        if row_def is None:
+            edit.setEnabled(False)
+            rb.setEnabled(False)
+            wb.setEnabled(False)
+        else:
+            rb.setEnabled(bool(row_def.get('get')))
+            wb.setEnabled(bool(row_def.get('set')))
+            rb.clicked.connect(lambda _=False, rd=row_def, e=edit: self._read_row(rd, self.axis_all_edit, e))
+            wb.clicked.connect(lambda _=False, rd=row_def, e=edit: self._write_row(rd, self.axis_all_edit, e, e))
+            if row_def.get('get'):
+                self._diagram_read_rows.append((row_def, edit))
+            self._diagram_value_pairs.append((edit, edit))
+
+        cl.addWidget(edit)
+        btn_col = QtWidgets.QVBoxLayout()
+        btn_col.setContentsMargins(0, 0, 0, 0)
+        btn_col.setSpacing(1)
+        btn_col.addWidget(rb)
+        btn_col.addWidget(wb)
+        btn_col.addStretch(1)
+        cl.addLayout(btn_col)
+        return cell
+
+    def _populate_controller_sketch(self):
+        self._clear_diagram_layout()
+        image_path = self.sketch_image_edit.text().strip() if hasattr(self, 'sketch_image_edit') else self.sketch_image_path
+        if image_path:
+            p = Path(image_path)
+            if p.exists():
+                self._populate_controller_sketch_overlay(str(p))
+                return
+
+        sketch = QtWidgets.QWidget()
+        sketch.setStyleSheet('QWidget { background: #e1e1e1; color: #1e1e1e; }')
+        grid = QtWidgets.QGridLayout(sketch)
+        grid.setContentsMargins(18, 14, 18, 14)
+        grid.setHorizontalSpacing(22)
+        grid.setVerticalSpacing(14)
+
+        def _t(text, css=''):
+            w = QtWidgets.QLabel(text)
+            if css:
+                w.setStyleSheet(css)
+            return w
+
+        hdr = _t('PID sets:', 'QLabel { font-size: 26px; font-weight: 700; color: #111; }')
+        grid.addWidget(hdr, 0, 0, 1, 2)
+
+        grid.addWidget(_t('outer PID: e >', 'QLabel { font-size: 18px; }'), 1, 0)
+        grid.addWidget(_t('inner PID: e <', 'QLabel { font-size: 18px; }'), 2, 0)
+        grid.addWidget(_t('tol.', 'QLabel { font-size: 18px; }'), 1, 1)
+        grid.addWidget(self._make_sketch_cell(self._row_def('AxisCntrlInnerTol')), 2, 1)
+
+        gains = QtWidgets.QWidget()
+        gl = QtWidgets.QGridLayout(gains)
+        gl.setContentsMargins(0, 0, 0, 0)
+        gl.setHorizontalSpacing(10)
+        gl.setVerticalSpacing(8)
+        gl.addWidget(_t('outer', 'QLabel { font-size: 18px; font-weight: 600; }'), 0, 1)
+        gl.addWidget(_t('inner', 'QLabel { font-size: 18px; font-weight: 600; }'), 0, 2)
+        for rr, (lbl, outer, inner) in enumerate([
+            ('Kp', 'AxisCntrlKp', 'AxisCntrlInnerKp'),
+            ('Ki', 'AxisCntrlKi', 'AxisCntrlInnerKi'),
+            ('Kd', 'AxisCntrlKd', 'AxisCntrlInnerKd'),
+        ], start=1):
+            gl.addWidget(_t(lbl, 'QLabel { font-size: 18px; font-weight: 600; }'), rr, 0)
+            gl.addWidget(self._make_sketch_cell(self._row_def(outer)), rr, 1)
+            gl.addWidget(self._make_sketch_cell(self._row_def(inner)), rr, 2)
+        grid.addWidget(gains, 0, 2, 3, 2)
+
+        ff_col = QtWidgets.QWidget()
+        fl = QtWidgets.QGridLayout(ff_col)
+        fl.setContentsMargins(0, 0, 0, 0)
+        fl.setHorizontalSpacing(8)
+        fl.setVerticalSpacing(8)
+        fl.addWidget(_t('ff', 'QLabel { font-size: 18px; font-weight: 600; }'), 0, 0)
+        fl.addWidget(_t('drv. scale', 'QLabel { font-size: 18px; font-weight: 600; }'), 1, 0)
+        fl.addWidget(_t('Kff', 'QLabel { font-size: 18px; font-weight: 600; }'), 2, 0)
+        fl.addWidget(self._make_sketch_cell(self._row_def('AxisCntrlKff')), 2, 1)
+        fl.addWidget(_t('denom', 'QLabel { font-size: 18px; }'), 1, 2)
+        fl.addWidget(self._make_sketch_cell(self._row_def('AxisDrvScaleDenom')), 1, 1)
+        fl.addWidget(_t('num', 'QLabel { font-size: 18px; }'), 2, 2)
+        fl.addWidget(self._make_sketch_cell(self._row_def('AxisDrvScaleNum')), 3, 1)
+        grid.addWidget(ff_col, 0, 4, 4, 2)
+
+        chain = QtWidgets.QWidget()
+        cl = QtWidgets.QHBoxLayout(chain)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(14)
+
+        def _blk(text, w=90, h=62, dark=True):
+            b = QtWidgets.QLabel(text)
+            b.setAlignment(QtCore.Qt.AlignCenter)
+            if dark:
+                b.setStyleSheet(
+                    f'QLabel {{ background: #0f5b79; color: #f3f3f3; border: 2px solid #0f3345;'
+                    f' font-size: 24px; font-weight: 700; min-width: {w}px; min-height: {h}px; }}'
+                )
+            else:
+                b.setStyleSheet(
+                    f'QLabel {{ background: transparent; color: #0f3345; border: 2px solid #0f3345;'
+                    f' font-size: 28px; font-weight: 700; min-width: {w}px; min-height: {h}px; border-radius: {h//2}px; }}'
+                )
+            return b
+
+        cl.addWidget(_blk('-', 54, 220, dark=False))
+        cl.addWidget(_t('->', 'QLabel { font-size: 24px; color: #666; }'))
+
+        pid_col = QtWidgets.QWidget()
+        pl = QtWidgets.QVBoxLayout(pid_col)
+        pl.setContentsMargins(0, 0, 0, 0)
+        pl.setSpacing(10)
+        pl.addWidget(_blk('P', 68, 58))
+        pl.addWidget(_blk('I', 68, 58))
+        pl.addWidget(_blk('D', 68, 58))
+        cl.addWidget(pid_col)
+
+        cl.addWidget(_t('->', 'QLabel { font-size: 24px; color: #666; }'))
+        cl.addWidget(_blk('+', 54, 220, dark=False))
+        cl.addWidget(_t('->', 'QLabel { font-size: 24px; color: #666; }'))
+        cl.addWidget(_blk('+', 54, 220, dark=False))
+        cl.addWidget(_t('->', 'QLabel { font-size: 24px; color: #666; }'))
+        cl.addWidget(_blk('Deadband', 150, 220))
+        cl.addWidget(_t('->', 'QLabel { font-size: 24px; color: #666; }'))
+        cl.addWidget(_blk('Process', 210, 220))
+        grid.addWidget(chain, 4, 1, 2, 6)
+
+        deadband_vals = QtWidgets.QWidget()
+        dl = QtWidgets.QGridLayout(deadband_vals)
+        dl.setContentsMargins(0, 0, 0, 0)
+        dl.setHorizontalSpacing(8)
+        dl.addWidget(_t('tol.', 'QLabel { font-size: 18px; }'), 0, 0)
+        dl.addWidget(self._make_sketch_cell(self._row_def('AxisCntrlDeadband')), 0, 1)
+        dl.addWidget(_t('time [cyc]', 'QLabel { font-size: 18px; }'), 0, 2)
+        dl.addWidget(self._make_sketch_cell(self._row_def('AxisCntrlDeadbandTime')), 0, 3)
+        grid.addWidget(deadband_vals, 6, 4, 1, 3)
+
+        at_target = QtWidgets.QWidget()
+        atl = QtWidgets.QGridLayout(at_target)
+        atl.setContentsMargins(0, 0, 0, 0)
+        atl.setHorizontalSpacing(8)
+        atl.setVerticalSpacing(6)
+        atl.addWidget(_t('At target:', 'QLabel { font-size: 20px; font-weight: 600; }'), 0, 0, 1, 2)
+        atl.addWidget(_t('tol.', 'QLabel { font-size: 18px; }'), 1, 0)
+        atl.addWidget(self._make_sketch_cell(self._row_def('AxisMonAtTargetTol')), 1, 1)
+        atl.addWidget(_t('time [cyc]', 'QLabel { font-size: 18px; }'), 1, 2)
+        atl.addWidget(self._make_sketch_cell(self._row_def('AxisMonAtTargetTime')), 1, 3)
+        grid.addWidget(at_target, 7, 0, 2, 4)
+
+        enc = QtWidgets.QWidget()
+        el = QtWidgets.QGridLayout(enc)
+        el.setContentsMargins(0, 0, 0, 0)
+        el.setHorizontalSpacing(8)
+        el.setVerticalSpacing(6)
+        el.addWidget(_t('Enc. scale', 'QLabel { font-size: 20px; font-weight: 600; }'), 0, 0, 1, 2)
+        el.addWidget(_t('num', 'QLabel { font-size: 18px; }'), 1, 0)
+        el.addWidget(self._make_sketch_cell(self._row_def('AxisEncScaleNum')), 1, 1)
+        el.addWidget(_t('denom', 'QLabel { font-size: 18px; }'), 2, 0)
+        el.addWidget(self._make_sketch_cell(self._row_def('AxisEncScaleDenom')), 2, 1)
+        grid.addWidget(enc, 7, 4, 2, 2)
+
+        for c in range(7):
+            grid.setColumnStretch(c, 1)
+
+        self.diagram_layout.addWidget(sketch, 0, 0)
+
+    def _populate_controller_sketch_overlay(self, image_path):
+        canvas = ImageOverlayCanvas(image_path)
+        if not canvas.has_image():
+            self._log(f'Cannot load sketch image: {image_path}')
+            return
+
+        self.diagram_layout.addWidget(canvas, 0, 0)
+        self._current_overlay_canvas = canvas
+
+        img_name = Path(image_path).name.lower()
+        is_original = (
+            img_name == 'original.png'
+            or img_name.startswith('original.')
+            or (canvas._base_w == 1696 and canvas._base_h == 856)
+        )
+        self._log(f'Controller sketch image: {img_name} ({canvas._base_w}x{canvas._base_h}), using {"original" if is_original else "default"} map')
+        coords_default = {
+            'AxisCntrlInnerTol': (0.165, 0.155),
+            'AxisCntrlKp': (0.330, 0.090),
+            'AxisCntrlKi': (0.330, 0.165),
+            'AxisCntrlKd': (0.330, 0.240),
+            'AxisCntrlInnerKp': (0.460, 0.090),
+            'AxisCntrlInnerKi': (0.460, 0.165),
+            'AxisCntrlInnerKd': (0.460, 0.240),
+            'AxisDrvScaleDenom': (0.665, 0.090),
+            'AxisCntrlKff': (0.665, 0.175),
+            'AxisDrvScaleNum': (0.665, 0.260),
+            'AxisCntrlDeadband': (0.635, 0.735),
+            'AxisCntrlDeadbandTime': (0.850, 0.735),
+            'AxisMonAtTargetTol': (0.100, 0.860),
+            'AxisMonAtTargetTime': (0.360, 0.860),
+            'AxisEncScaleNum': (0.670, 0.860),
+            'AxisEncScaleDenom': (0.670, 0.935),
+            'AxisCntrlIPartHL': (0.475, 0.365),
+            'AxisCntrlIPartLL': (0.475, 0.530),
+            'AxisCntrlOutHL': (0.675, 0.365),
+            'AxisCntrlOutLL': (0.675, 0.530),
+        }
+        # Explicit per-field placement for original.png (1696x856), no global remap.
+        if is_original:
+            coords = {
+                'AxisCntrlInnerTol': (408 / 1696.0, 149 / 856.0),
+                'AxisCntrlKp': (528 / 1696.0, 105 / 856.0),
+                'AxisCntrlKi': (528 / 1696.0, 176 / 856.0),
+                'AxisCntrlKd': (528 / 1696.0, 248 / 856.0),
+                'AxisCntrlInnerKp': (645 / 1696.0, 105 / 856.0),
+                'AxisCntrlInnerKi': (645 / 1696.0, 176 / 856.0),
+                'AxisCntrlInnerKd': (645 / 1696.0, 248 / 856.0),
+                'AxisDrvScaleDenom': (996 / 1696.0, 145 / 856.0),
+                'AxisDrvScaleNum': (996 / 1696.0, 194 / 856.0),
+                'AxisCntrlKff': (996 / 1696.0, 293 / 856.0),
+                'AxisCntrlIPartHL': (779 / 1696.0, 346 / 856.0),
+                'AxisCntrlIPartLL': (779 / 1696.0, 483 / 856.0),
+                'AxisCntrlOutHL': (1088 / 1696.0, 346 / 856.0),
+                'AxisCntrlOutLL': (1088 / 1696.0, 483 / 856.0),
+                'AxisCntrlDeadband': (1234 / 1696.0, 536 / 856.0),
+                'AxisCntrlDeadbandTime': (1348 / 1696.0, 536 / 856.0),
+                'AxisMonAtTargetTol': (265 / 1696.0, 633 / 856.0),
+                'AxisMonAtTargetTime': (384 / 1696.0, 633 / 856.0),
+                'AxisEncScaleNum': (995 / 1696.0, 730 / 856.0),
+                'AxisEncScaleDenom': (995 / 1696.0, 785 / 856.0),
+            }
+            loaded = self._load_layout_for_image(image_path)
+            if loaded:
+                for k, v in loaded.items():
+                    if k in coords and isinstance(v, (list, tuple)) and len(v) == 2:
+                        try:
+                            coords[k] = (float(v[0]), float(v[1]))
+                        except Exception:
+                            pass
+            for name, (x, y) in coords.items():
+                canvas.add_overlay_widget(x, y, self._make_sketch_cell(self._row_def(name), overlay=True), anchor='center', name=name)
+        else:
+            coords = coords_default
+            for name, (x, y) in coords.items():
+                canvas.add_overlay_widget(x, y, self._make_sketch_cell(self._row_def(name), overlay=True), anchor='center', name=name)
+        canvas.set_calibration_enabled(bool(self.calibrate_btn.isChecked()))
+
+    def _layout_file_for_image(self, image_path):
+        p = Path(image_path)
+        return p.with_suffix('.layout.json')
+
+    def _load_layout_for_image(self, image_path):
+        path = self._layout_file_for_image(image_path)
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text())
+            if isinstance(data, dict):
+                return data
+        except Exception as ex:
+            self._log(f'Failed to load layout {path.name}: {ex}')
+        return {}
+
+    def _save_current_layout(self):
+        if not hasattr(self, '_current_overlay_canvas') or self._current_overlay_canvas is None:
+            self._log('No overlay canvas to save')
+            return
+        image_path = self.sketch_image_edit.text().strip() if hasattr(self, 'sketch_image_edit') else self.sketch_image_path
+        if not image_path:
+            self._log('No sketch image path set')
+            return
+        out = self._current_overlay_canvas.overlay_positions()
+        path = self._layout_file_for_image(image_path)
+        try:
+            path.write_text(json.dumps(out, indent=2, sort_keys=True))
+            self._log(f'Saved overlay layout: {path.name} ({len(out)} fields)')
+        except Exception as ex:
+            self._log(f'Failed to save layout: {ex}')
+
+    def _toggle_calibration(self, checked):
+        if hasattr(self, '_current_overlay_canvas') and self._current_overlay_canvas is not None:
+            self._current_overlay_canvas.set_calibration_enabled(bool(checked))
+        self._log('Calibration mode ON (drag boxes, then Save Layout)' if checked else 'Calibration mode OFF')
+
+    def _toggle_log_visible(self, checked):
+        self.log.setVisible(bool(checked))
+        self.log_toggle_btn.setText('Hide Log' if checked else 'Show Log')
+
+    def _update_sketch_image(self):
+        self.sketch_image_path = self.sketch_image_edit.text().strip()
+        if self.view_mode.currentText() == 'Controller Sketch':
+            self._populate_table()
 
     def _populate_diagram(self):
         self._diagram_read_rows = []
@@ -472,7 +1023,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._log(f'Applied axis {axis_value} to {updated} rows')
 
     def _read_all_rows(self):
-        if self.view_mode.currentText() == 'Diagram':
+        if self.view_mode.currentText() in {'Diagram', 'Controller Sketch'}:
             count = 0
             for row_def, read_edit in self._diagram_read_rows:
                 self._read_row(row_def, self.axis_all_edit, read_edit)
@@ -497,7 +1048,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
 
     def _copy_all_read_to_set(self):
         copied = 0
-        if self.view_mode.currentText() == 'Diagram':
+        if self.view_mode.currentText() in {'Diagram', 'Controller Sketch'}:
             for set_edit, read_edit in self._diagram_value_pairs:
                 if set_edit is None or read_edit is None:
                     continue
@@ -602,11 +1153,20 @@ def main():
     ap.add_argument('--cmd-pv', default='', help='Command PV name (overrides --prefix)')
     ap.add_argument('--qry-pv', default='', help='Readback PV name (overrides --prefix)')
     ap.add_argument('--axis-id', default='1', help='Default axis id for Axis All')
+    ap.add_argument('--sketch-image', default='', help='Path to background image for Controller Sketch overlay')
     ap.add_argument('--timeout', type=float, default=2.0, help='EPICS timeout in seconds')
     args = ap.parse_args()
 
     default_cmd_pv = args.cmd_pv.strip() if args.cmd_pv else _join_prefix_pv(args.prefix, 'MCU-Cmd.AOUT')
     default_qry_pv = args.qry_pv.strip() if args.qry_pv else _join_prefix_pv(args.prefix, 'MCU-Cmd.AINP')
+    sketch_image = args.sketch_image.strip()
+    if not sketch_image:
+        base_dir = Path(__file__).resolve().parent
+        for name in ('original.png', 'controller_sketch.png'):
+            candidate = base_dir / name
+            if candidate.exists():
+                sketch_image = str(candidate)
+                break
 
     app = QtWidgets.QApplication(sys.argv)
     w = CntrlWindow(
@@ -616,6 +1176,7 @@ def main():
         timeout=args.timeout,
         default_axis_id=args.axis_id,
         title_prefix=args.prefix,
+        sketch_image_path=sketch_image,
     )
     w.show()
     sys.exit(app.exec_())

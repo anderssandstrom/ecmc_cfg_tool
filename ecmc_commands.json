@@ -4,7 +4,7 @@
     "headers_root": "devEcmcSup",
     "header_count_scanned": 64
   },
-  "command_count": 341,
+  "command_count": 353,
   "commands": [
     {
       "command": "Cfg.AddAxisEnc(<int>)",
@@ -109,7 +109,7 @@
       "description": "Append axis sync. PLC expression.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.setAxisPLCExpr(5)=ax2.drv.enable:=ax1.drv.enable or ax5.drv.enable|",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2792",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2823",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -128,7 +128,7 @@
       "description": "Appends data to the end of storage buffer.\\n",
       "header_source": "devEcmcSup/misc/ecmcMisc.h",
       "header_example": "AppendDataStorage(3)=0,0,0,0,0,0.....",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4216",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4315",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Storage buffer operation; allowed at runtime in parser."
@@ -146,7 +146,7 @@
       "description": "Load PLC file.\\n",
       "header_source": "devEcmcSup/plc/ecmcPLC.h",
       "header_example": "appendPLCExpr()",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2839",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2870",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -163,7 +163,7 @@
       "description": "Clear PLC expression.\\n",
       "header_source": "devEcmcSup/plc/ecmcPLC.h",
       "header_example": "Cfg.ClearPLCExpr(5)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2908",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2939",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -180,7 +180,7 @@
       "description": "Clear data storage buffer.",
       "header_source": "devEcmcSup/misc/ecmcMisc.h",
       "header_example": "Cfg.ClearStorage(4)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3067",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3098",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -197,7 +197,7 @@
       "description": "Compile Axis PLC code\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.CompileAxisPLC(5)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2922",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2953",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -214,7 +214,7 @@
       "description": "Compile PLC expression.\\n",
       "header_source": "devEcmcSup/plc/ecmcPLC.h",
       "header_example": "Cfg.CompilePLC(5)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2915",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2946",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -229,7 +229,7 @@
       "description": "Resets the controller error code.\\n",
       "header_source": "devEcmcSup/main/ecmcGeneral.h",
       "header_example": "ControllerErrorReset()",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3535",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3566",
       "runtime_safe": false,
       "runtime_class": "unknown",
       "runtime_note": "Runtime behavior not clearly guaranteed; verify for your application state."
@@ -403,7 +403,7 @@
       "description": "Create a data storage object.",
       "header_source": "devEcmcSup/misc/ecmcMisc.h",
       "header_example": "Cfg.CreateStorage(1,1000,0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3031",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3062",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -853,7 +853,7 @@
       "description": "Get index of a memmap object based on its name id string",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "EcGetMemMapId(",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3673",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3704",
       "runtime_safe": false,
       "runtime_class": "unknown",
       "runtime_note": "Runtime behavior not clearly guaranteed; verify for your application state."
@@ -872,7 +872,7 @@
       "description": "Read product code of selected ethercat slave",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "EcGetSlaveProductCode(0,3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3649",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3680",
       "runtime_safe": false,
       "runtime_class": "unknown",
       "runtime_note": "Runtime behavior not clearly guaranteed; verify for your application state."
@@ -891,7 +891,7 @@
       "description": "revision number id of selected ethercat slave",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "EcGetSlaveRevisionNum(0,3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3657",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3688",
       "runtime_safe": false,
       "runtime_class": "unknown",
       "runtime_note": "Runtime behavior not clearly guaranteed; verify for your application state."
@@ -910,7 +910,7 @@
       "description": "Read serial number of selected ethercat slave",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "EcGetSlaveSerialNum(0,3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3665",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3696",
       "runtime_safe": false,
       "runtime_class": "unknown",
       "runtime_note": "Runtime behavior not clearly guaranteed; verify for your application state."
@@ -929,7 +929,7 @@
       "description": "Read vendor id of selected ethercat slave",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "EcGetSlaveVendorId(0,3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3641",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3672",
       "runtime_safe": false,
       "runtime_class": "unknown",
       "runtime_note": "Runtime behavior not clearly guaranteed; verify for your application state."
@@ -944,7 +944,7 @@
       "description": "Prints all hardware connected to selected master.\\n",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "EcPrintAllHardware()",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4223",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4322",
       "runtime_safe": false,
       "runtime_class": "unknown",
       "runtime_note": "Runtime behavior not clearly guaranteed; verify for your application state."
@@ -959,7 +959,7 @@
       "description": "Prints hardware configuration for a selected slave.\\n",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "EcPrintSlaveConfig(1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4227",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4326",
       "runtime_safe": false,
       "runtime_class": "unknown",
       "runtime_note": "Runtime behavior not clearly guaranteed; verify for your application state."
@@ -980,7 +980,7 @@
       "description": "Read a Service Data Object.",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "Cfg.EcReadSdo(2,0x8010,0x1,2)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3611",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3642",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -1001,7 +1001,7 @@
       "description": "Read SoE \\n",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "Cfg.EcReadSoE(2,0,0x1000,2)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3627",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3658",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -1465,7 +1465,52 @@
       "description": "Get axis allow command from PLC.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "getAxisAllowCommandsFromPLC(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3993",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4092",
+      "runtime_safe": true,
+      "runtime_class": "runtime",
+      "runtime_note": "Read/query command usable during runtime."
+    },
+    {
+      "command": "GetAxisAllowSourceChangeWhenEnabled(<int>)",
+      "command_named": "GetAxisAllowSourceChangeWhenEnabled(<int>)",
+      "param_names": [],
+      "parser_command": "GetAxisAllowSourceChangeWhenEnabled(<int>)",
+      "name": "GetAxisAllowSourceChangeWhenEnabled",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4024",
+      "runtime_safe": true,
+      "runtime_class": "runtime",
+      "runtime_note": "Read/query command usable during runtime."
+    },
+    {
+      "command": "GetAxisAutoDisableAfterTime(<int>)",
+      "command_named": "GetAxisAutoDisableAfterTime(<int>)",
+      "param_names": [],
+      "parser_command": "GetAxisAutoDisableAfterTime(<int>)",
+      "name": "GetAxisAutoDisableAfterTime",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4052",
+      "runtime_safe": true,
+      "runtime_class": "runtime",
+      "runtime_note": "Read/query command usable during runtime."
+    },
+    {
+      "command": "GetAxisAutoEnableTimeout(<int>)",
+      "command_named": "GetAxisAutoEnableTimeout(<int>)",
+      "param_names": [],
+      "parser_command": "GetAxisAutoEnableTimeout(<int>)",
+      "name": "GetAxisAutoEnableTimeout",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4044",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1483,7 +1528,7 @@
       "description": "Get axis block external com.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisBlockCom(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3695",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3726",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1498,7 +1543,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3750",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3781",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1513,7 +1558,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3758",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3789",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1528,7 +1573,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3766",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3797",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1543,7 +1588,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3774",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3805",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1558,7 +1603,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3814",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3845",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1573,7 +1618,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3806",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3837",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1588,7 +1633,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3798",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3829",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1603,7 +1648,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3822",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3853",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1618,7 +1663,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3734",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3765",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1633,7 +1678,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3742",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3773",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1648,7 +1693,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3726",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3757",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1663,7 +1708,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3718",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3749",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1678,7 +1723,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3782",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3813",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1693,7 +1738,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3790",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3821",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1711,7 +1756,7 @@
       "description": "Get axis execution cycle counter.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisCycleCounter(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3703",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3734",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1726,7 +1771,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3953",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3984",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1744,7 +1789,7 @@
       "description": "Get drive output scale numerator.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3945",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3976",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1762,7 +1807,52 @@
       "description": "Get enable alarms at limits bit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisEnableAlarmAtHardLimits(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3913",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3944",
+      "runtime_safe": true,
+      "runtime_class": "runtime",
+      "runtime_note": "Read/query command usable during runtime."
+    },
+    {
+      "command": "GetAxisEnableConstVel(<int>)",
+      "command_named": "GetAxisEnableConstVel(<int>)",
+      "param_names": [],
+      "parser_command": "GetAxisEnableConstVel(<int>)",
+      "name": "GetAxisEnableConstVel",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4008",
+      "runtime_safe": true,
+      "runtime_class": "runtime",
+      "runtime_note": "Read/query command usable during runtime."
+    },
+    {
+      "command": "GetAxisEnableHome(<int>)",
+      "command_named": "GetAxisEnableHome(<int>)",
+      "param_names": [],
+      "parser_command": "GetAxisEnableHome(<int>)",
+      "name": "GetAxisEnableHome",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4016",
+      "runtime_safe": true,
+      "runtime_class": "runtime",
+      "runtime_note": "Read/query command usable during runtime."
+    },
+    {
+      "command": "GetAxisEnablePos(<int>)",
+      "command_named": "GetAxisEnablePos(<int>)",
+      "param_names": [],
+      "parser_command": "GetAxisEnablePos(<int>)",
+      "name": "GetAxisEnablePos",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4000",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1779,7 +1869,7 @@
       "description": "Get index of current encoder being configured.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.GetAxisEncConfigIndex(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3969",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4068",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -1794,7 +1884,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3977",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4076",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1812,7 +1902,7 @@
       "description": "Get raw unscaled encoder value.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisEncPosRaw(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4092",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4191",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1829,7 +1919,7 @@
       "description": "Get index of current encoder being used for control (PID).\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.GetAxisEncPrimaryIndex(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3961",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3992",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -1847,7 +1937,7 @@
       "description": "Get the denominator part of the encoder scale.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "ADSPORT=501/.ADR.16#5008,16#24,8,5?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3937",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3968",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1865,7 +1955,7 @@
       "description": "Get the numerator part of the encoder scale.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "ADSPORT=501/.ADR.16#5003,16#23,8,5?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3929",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3960",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1883,7 +1973,7 @@
       "description": "Get axis encoder data source.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisEncSourceType(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3921",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3952",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1900,7 +1990,7 @@
       "description": "Get total group count",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisGroupCount()",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3687",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3718",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1918,7 +2008,7 @@
       "description": "Get index of axis group by name",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisGroupIndexByName('VirtAxes')",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3680",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3711",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1936,7 +2026,7 @@
       "description": "Get axis modulo range.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisModRange(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3830",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3861",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1954,7 +2044,7 @@
       "description": "Set axis modulo motion type.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisModType(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3838",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3869",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1972,7 +2062,7 @@
       "description": "Get \"at target\" monitoring time (cycles).\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3896",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3927",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -1990,7 +2080,7 @@
       "description": "Get \"at target\" monitoring tolerance.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3888",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3919",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2008,7 +2098,7 @@
       "description": "Get enable \"at target\" monitoring.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3904",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3935",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2026,7 +2116,7 @@
       "description": "Get polarity of motion axis interlock from EtherCAT entry.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisMonExtHWInterlockPolarity(7)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3870",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3901",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2044,7 +2134,7 @@
       "description": "Get polarity of home switch.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisMonHomeSwitchPolarity(7)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3862",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3893",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2062,7 +2152,7 @@
       "description": "Get latch on limit settings.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3880",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3911",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2080,7 +2170,7 @@
       "description": "Get polarity of hard low limit switch.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisMonLimitBwdPolarity(7)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3854",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3885",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2098,7 +2188,7 @@
       "description": "Get polarity of hard high limit switch.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisMonLimitFwdPolarity(7)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3846",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3877",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2116,7 +2206,7 @@
       "description": "Get axis enable for axis sync. PLC.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "getAxisPLCEnable(5)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4004",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4103",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2134,7 +2224,22 @@
       "description": "Get axis sync. PLC expression.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "getAxisPLCExpr(5)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4019",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4118",
+      "runtime_safe": true,
+      "runtime_class": "runtime",
+      "runtime_note": "Read/query command usable during runtime."
+    },
+    {
+      "command": "GetAxisSrcChgEn(<int>)",
+      "command_named": "GetAxisSrcChgEn(<int>)",
+      "param_names": [],
+      "parser_command": "GetAxisSrcChgEn(<int>)",
+      "name": "GetAxisSrcChgEn",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4034",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2152,7 +2257,22 @@
       "description": "Get axis trajectory data source.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisTrajSourceType(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3985",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4084",
+      "runtime_safe": true,
+      "runtime_class": "runtime",
+      "runtime_note": "Read/query command usable during runtime."
+    },
+    {
+      "command": "GetAxisTweakDist(<int>)",
+      "command_named": "GetAxisTweakDist(<int>)",
+      "param_names": [],
+      "parser_command": "GetAxisTweakDist(<int>)",
+      "name": "GetAxisTweakDist",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4060",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2170,7 +2290,7 @@
       "description": "Get axis type.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "GetAxisType(8)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3711",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3742",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2185,7 +2305,7 @@
       "description": "Returns the controller error code.\\n",
       "header_source": "devEcmcSup/main/ecmcGeneral.h",
       "header_example": "GetControllerError()",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3529",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3560",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2200,7 +2320,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3540",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3571",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2218,7 +2338,7 @@
       "description": "Set enable of PLC.\\n",
       "header_source": "devEcmcSup/plc/ecmcPLC.h",
       "header_example": "GetPLCEnable(5)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4012",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4111",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2236,7 +2356,7 @@
       "description": "Get PLC expression.\\n",
       "header_source": "devEcmcSup/plc/ecmcPLC.h",
       "header_example": "getPLCExpr(5)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4056",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4155",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2253,7 +2373,7 @@
       "description": "Get current index of data in storage buffer.\\n",
       "header_source": "devEcmcSup/misc/ecmcMisc.h",
       "header_example": "GetStorageDataIndex(4)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4165",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4264",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2268,7 +2388,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3082",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3113",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2476,7 +2596,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2886",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2917",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2494,7 +2614,7 @@
       "description": "Load and create lookup table (LUT).\\n",
       "header_source": "devEcmcSup/misc/ecmcMisc.h",
       "header_example": "Cfg.LoadLUTFile(1,'test.lut')",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3075",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3106",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2512,7 +2632,7 @@
       "description": "Append Line to PLC expression.\\n",
       "header_source": "devEcmcSup/plc/ecmcPLC.h",
       "header_example": "StopMotion(axid)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2894",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2925",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2530,7 +2650,7 @@
       "description": "Load PLC Libray to PLC.\\n",
       "header_source": "devEcmcSup/plc/ecmcPLC.h",
       "header_example": "Cfg.LoadPLCLibFile(5,/home/iocuser/dummyPLC.plc_lib)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2901",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2932",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2549,7 +2669,7 @@
       "description": "Load a ecmc plugin.\\n",
       "header_source": "devEcmcSup/plugin/ecmcPlugin.h",
       "header_example": "Cfg.LoadPlugin(0,./ecmcExampleLip.so,",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2971",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3002",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2568,7 +2688,7 @@
       "description": "Load a ecmc plugin.\\n",
       "header_source": "devEcmcSup/plugin/ecmcPlugin.h",
       "header_example": "Cfg.LoadPlugin(0,./ecmcExampleLip.so,",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2950",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2981",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2586,7 +2706,7 @@
       "description": "Load safety plugin to ecmc (executes just before data is sent to the bus).\\n",
       "header_source": "devEcmcSup/plugin/ecmcPlugin.h",
       "header_example": "Cfg.LoadSafetyPlugin(./ecmcExampleLip.so,",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2961",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2992",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2607,7 +2727,7 @@
       "description": "Move axis to an absolute position.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "MoveAbsolutePosition(5,1234,10,100,200)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4108",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4207",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Motion execution command intended for runtime operation."
@@ -2628,7 +2748,7 @@
       "description": "Move axis to a relative position.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "MoveRelativePosition(5,1234,10,100,200)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4123",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4222",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Motion execution command intended for runtime operation."
@@ -2648,7 +2768,7 @@
       "description": "Move axis in a constant velocity.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "MoveVelocity(5,10,100,200)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4138",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4237",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Motion execution command intended for runtime operation."
@@ -2665,7 +2785,7 @@
       "description": "Print contents of buffer.\\n",
       "header_source": "devEcmcSup/misc/ecmcMisc.h",
       "header_example": "Cfg.PrintDataStorage(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3050",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3081",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2684,7 +2804,7 @@
       "description": "Reads contents of storage buffer.\\n",
       "header_source": "devEcmcSup/misc/ecmcMisc.h",
       "header_example": "ReadDataStorage(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4173",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4272",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2703,7 +2823,7 @@
       "description": "Read a value from an EtherCAT entry.\\n",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "ReadEcEntry(3,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3546",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3577",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2722,7 +2842,7 @@
       "description": "Read a value from an EtherCAT entry addressed by slaveBusPosition",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "Cfg.EcAddEntryComplete() for more information",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3554",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3585",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2741,7 +2861,7 @@
       "description": "Read the object Index of an entry addressed by slaveBusPosition",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "Cfg.EcAddEntryComplete() for more information",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3563",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3594",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2758,7 +2878,7 @@
       "description": "Read the object Index of an slave addressed by slaveBusPosition.\\n",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "ReadEcSlaveIndex(5)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3575",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3606",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2777,7 +2897,7 @@
       "description": "Read PLC variable.\\n",
       "header_source": "devEcmcSup/plc/ecmcPLC.h",
       "header_example": "ReadPLCVar(5,static.test)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3601",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3632",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -2794,7 +2914,7 @@
       "description": "Printout details of plugin.\\n",
       "header_source": "devEcmcSup/plugin/ecmcPlugin.h",
       "header_example": "Cfg.ReportPlugin(1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2978",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3009",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2883,7 +3003,7 @@
       "description": "Set axis acceleration setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.fAcceleration=500",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2647",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2678",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2901,7 +3021,7 @@
       "description": "Allow commands from PLCs.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.setAxisAllowCommandsFromPLC(3,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2930",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2961",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2919,7 +3039,7 @@
       "description": "Allow change of encoder and trajectory source when axis is enabled",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisAllowSourceChangeWhenEnabled(3,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2479",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2500",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2973,7 +3093,7 @@
       "description": "Set axis auto mode command for homing.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "linkEcEntryToAxisSeqAutoModeSet()",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2440",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2461",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -2991,7 +3111,7 @@
       "description": "Set axis auto mode command for motion.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "linkEcEntryToAxisSeqAutoModeSet()",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2448",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2469",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3009,7 +3129,7 @@
       "description": "Block/unblock communicatiom from via cmd parser.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisBlockCom(3,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2626",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2657",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3288,7 +3408,7 @@
       "description": "Set axis deceleration setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.fDeceleration=500",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2654",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2685",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3306,7 +3426,7 @@
       "description": "Disable axis at error reset\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisDisableAtErrorReset(3,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2469",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2490",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3324,7 +3444,7 @@
       "description": "Set brake close ahead time .\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisDrvBrakeCloseAheadTime(3,100)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2395",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2416",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3342,7 +3462,7 @@
       "description": "Set enable of brake.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisDrvBrakeEnable(3,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2378",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2399",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3360,7 +3480,7 @@
       "description": "Set brake open delay time .\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisDrvBrakeOpenDelayTime(3,100)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2385",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2406",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3378,7 +3498,7 @@
       "description": "Set enable of reduce torque functionality.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisDrvReduceTorqueEnable(3,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2415",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2436",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3396,7 +3516,7 @@
       "description": "Set drive output scale denominator.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisDrvScaleDenom(3,32000)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2363",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2384",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3414,7 +3534,7 @@
       "description": "Set drive output scale numerator.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisDrvScaleNum(3,10000)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2356",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2377",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3432,7 +3552,7 @@
       "description": "Set drive timeout .\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisDrvStateMachineTimeout(3,10.0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2405",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2426",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3450,7 +3570,7 @@
       "description": "Set drive type.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisDrvType(3,0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2425",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2446",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3468,7 +3588,7 @@
       "description": "Set drive raw velocity offset.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisDrvVelSetOffsetRaw(3,700)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2371",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2392",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3540,7 +3660,37 @@
       "description": "Set axis amplifier enable at ioc startup.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisEnableAtStartup(3,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2072",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2093",
+      "runtime_safe": false,
+      "runtime_class": "config_only",
+      "runtime_note": "Configuration command; typically intended before entering runtime mode."
+    },
+    {
+      "command": "Cfg.SetAxisEnableConstVel(<int>,<int>)",
+      "command_named": "Cfg.SetAxisEnableConstVel(<int>,<int>)",
+      "param_names": [],
+      "parser_command": "SetAxisEnableConstVel(<int>,<int>)",
+      "name": "SetAxisEnableConstVel",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2078",
+      "runtime_safe": false,
+      "runtime_class": "config_only",
+      "runtime_note": "Configuration command; typically intended before entering runtime mode."
+    },
+    {
+      "command": "Cfg.SetAxisEnableHome(<int>,<int>)",
+      "command_named": "Cfg.SetAxisEnableHome(<int>,<int>)",
+      "param_names": [],
+      "parser_command": "SetAxisEnableHome(<int>,<int>)",
+      "name": "SetAxisEnableHome",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2085",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3561,6 +3711,21 @@
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.setAxisEnableMotionFunctions(3,1,0,0)",
       "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2063",
+      "runtime_safe": false,
+      "runtime_class": "config_only",
+      "runtime_note": "Configuration command; typically intended before entering runtime mode."
+    },
+    {
+      "command": "Cfg.SetAxisEnablePos(<int>,<int>)",
+      "command_named": "Cfg.SetAxisEnablePos(<int>,<int>)",
+      "param_names": [],
+      "parser_command": "SetAxisEnablePos(<int>,<int>)",
+      "name": "SetAxisEnablePos",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2071",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3632,7 +3797,7 @@
       "description": "Set allow over/under flow of encoder raw counter",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisEncHomeLatchCountOffset(10,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2532",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2563",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3706,7 +3871,7 @@
       "description": "Set latch control word to arm latch\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.setAxisEncHomeLatchArmControlWord(4,21,5)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2566",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2597",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3724,7 +3889,7 @@
       "description": "Set allow over/under flow of encoder raw counter",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisEncHomeLatchCountOffset(10,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2556",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2587",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3742,7 +3907,7 @@
       "description": "Invert Encoder Ready bit.",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisEncInvHwReady(3,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2576",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2607",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3850,7 +4015,7 @@
       "description": "Enables/disables encoder position filter.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisEncPosFilterEnable(7,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2782",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2813",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3868,7 +4033,7 @@
       "description": "Set size of encoder position filter.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisEncPosFilterSize(7,10)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2772",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2803",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -3994,7 +4159,7 @@
       "description": "Enables/disables encoder velocity filter.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisEncVelFilterEnable(7,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2762",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2793",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4012,7 +4177,7 @@
       "description": "Set size of encoder velocity filter.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisEncVelFilterSize(7,10)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2752",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2783",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4030,7 +4195,7 @@
       "description": "Set axis error code.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisErrorId(10,111)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2586",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2617",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4048,7 +4213,7 @@
       "description": "Set homing acceleration for current encoder beeing configured.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisHomeAcc(2,15)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2992",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3023",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4066,7 +4231,7 @@
       "description": "Set homing deceleration for current encoder beeing configured.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisHomeDec(2,15)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2999",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3030",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4081,7 +4246,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2542",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2573",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4096,7 +4261,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2510",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2541",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4114,7 +4279,7 @@
       "description": "Set homing post movement enable",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisHomePostMoveEnable(2,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3014",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3045",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4132,7 +4297,7 @@
       "description": "Set homing post movement target position",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisHomePostMoveTargetPosition(2,100)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3021",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3052",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4150,7 +4315,7 @@
       "description": "Set homing sequence id for current encoder beeing configured.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisHomeSeqId(2,15)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3006",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3037",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4168,7 +4333,7 @@
       "description": "Enable use of home sensor",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisHomeSwitchEnable(7,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2349",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2370",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4186,7 +4351,7 @@
       "description": "Override home switch with PLC code\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisHomeSwitchPLCOverride(7,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2342",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2363",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4204,7 +4369,7 @@
       "description": "Set off cam referencing/homing velocity setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "getAxisHomeVelTowardsCam()",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2525",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2556",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4222,7 +4387,7 @@
       "description": "Set Towards cam referencing/homing velocity setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "getAxisHomeVelTowardsCam()",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2518",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2549",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4240,7 +4405,7 @@
       "description": "Set axis maximum jerk setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisJerk(3,23.2)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2640",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2671",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4276,7 +4441,7 @@
       "description": "Override bwd limit switch with PLC code\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisLimitSwitchBwdPLCOverride(7,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2328",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2349",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4294,7 +4459,7 @@
       "description": "Override fwd limit switch with PLC code\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisLimitSwitchFwdPLCOverride(7,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2335",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2356",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4312,7 +4477,7 @@
       "description": "Set axis modulo range.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisModRange(3,360)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2455",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2476",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4330,7 +4495,7 @@
       "description": "Set axis modulo motion type.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisModType(3,2)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2462",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2483",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4348,7 +4513,7 @@
       "description": "Set polarity of motion axis interlock from EtherCAT entry.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonAnalogInterlockPolarity(7,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2217",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2238",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4366,7 +4531,7 @@
       "description": "Set analog interlock raw value limit .\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonAnalogInterlockRawLimit(7,3200)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2227",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2248",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4384,7 +4549,7 @@
       "description": "Set \"at target\" monitoring time (cycles).\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonAtTargetTime(7,10)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2094",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2115",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4402,7 +4567,7 @@
       "description": "Set \"at target\" monitoring tolerance.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonAtTargetTol(7,0.1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2087",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2108",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4420,7 +4585,7 @@
       "description": "Set monitoring controller output high limit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonCntrlOutHL(3,2000)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2314",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2335",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4438,7 +4603,7 @@
       "description": "Enable motion axis interlock from analog EtherCAT entry.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonEnableAnalogInterlock(7,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2207",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2228",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4456,7 +4621,7 @@
       "description": "Enable \"at target\" monitoring.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonEnableAtTargetMon(7,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2101",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2122",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4474,7 +4639,7 @@
       "description": "Enable controller output high limit monitoring.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonEnableCntrlOutHLMon(2,0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2267",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2288",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4492,7 +4657,7 @@
       "description": "Enable monitoring diff of act. vel. vs set. vel.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonEnableEncsDiff(7,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2080",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2101",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4510,7 +4675,7 @@
       "description": "Enable motion axis interlock from EtherCAT entry.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonEnableExtHWInterlock(7,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2187",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2208",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4528,7 +4693,7 @@
       "description": "Enable position lag monitoring.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonEnableLagMon(2,0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2146",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2167",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4546,7 +4711,7 @@
       "description": "Enable maximum velocity monitoring (over speed).\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonEnableMaxVel(3,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2160",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2181",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4564,7 +4729,7 @@
       "description": "Enable stall monitoring.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonStallMinTimeOut()",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2111",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2132",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4582,7 +4747,7 @@
       "description": "Enable monitoring of velocity difference.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonEnableVelocityDiff(2,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2277",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2298",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4600,7 +4765,7 @@
       "description": "Set polarity of motion axis interlock from EtherCAT entry.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonExtHWInterlockPolarity(7,0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2197",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2218",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4618,7 +4783,7 @@
       "description": "Set polarity of home switch.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonHomeSwitchPolarity(7,0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2257",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2278",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4636,7 +4801,7 @@
       "description": "Set latch limit settings.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonLatchLimit(4,0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2321",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2342",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4654,7 +4819,7 @@
       "description": "Set polarity of hard low limit switch.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonLimitBwdPolarity(7,0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2237",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2258",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4672,7 +4837,7 @@
       "description": "Set polarity of hard high limit switch.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonLimitFwdPolarity(7,0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2247",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2268",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4690,7 +4855,7 @@
       "description": "Set maximum allowed velocity.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonMaxVel(3,20)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2153",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2174",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4708,7 +4873,7 @@
       "description": "Set velocity monitoring interlock delay for drive.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonMaxVelDriveILDelay(4,10)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2167",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2188",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4726,7 +4891,7 @@
       "description": "Set velocity monitoring interlock delay for trajectory.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonMaxVelTrajILDelay(4,10)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2177",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2198",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4744,7 +4909,7 @@
       "description": "Set position lag monitoring time (cycles).\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonPosLagTime(7,10)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2139",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2160",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4762,7 +4927,7 @@
       "description": "Set position lag maximum monitoring tolerance.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonPosLagTol(7,0.2)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2132",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2153",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4780,7 +4945,7 @@
       "description": "Enable stall monitoring.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonStallMinTimeOut()",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2125",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2146",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4798,7 +4963,7 @@
       "description": "Set stall monitong time factor.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonStallTimeFactor(7,100)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2118",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2139",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4816,7 +4981,7 @@
       "description": "Set drive interlock filter time in cycles for velocity",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonVelDiffDriveILDelay(2,500)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2297",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2318",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4834,7 +4999,7 @@
       "description": "Set maximum allowed difference between setpoint speed and",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonVelDiffTol(2,0.5)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2307",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2328",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4852,7 +5017,7 @@
       "description": "Set trajectory interlock filter time in cycles for velocity",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonVelDiffTrajILDelay(2,100)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2287",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2308",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4870,7 +5035,7 @@
       "description": "Enable axis sync PLC expression.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisPLCEnable(5,0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2940",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2971",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4888,7 +5053,7 @@
       "description": "Enables/disables velocity filter of external actual value.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisPLCEncVelFilterEnable(5,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2732",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2763",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4906,7 +5071,7 @@
       "description": "Set size of external encoder velocity filter.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisPLCEncVelFilterSize(7,10)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2742",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2773",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4924,7 +5089,7 @@
       "description": "Enables/disables velocity filter of external setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2712",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2743",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4942,7 +5107,7 @@
       "description": "Set size of external trajectory velocity filter.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisPLCTrajVelFilterSize(7,10)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2722",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2753",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -4960,7 +5125,7 @@
       "description": "Set sequence timeout time in seconds.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisSeqTimeout(2,60)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2985",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3016",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5002,6 +5167,21 @@
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
     },
     {
+      "command": "Cfg.SetAxisSrcChgEn(<int>,<int>)",
+      "command_named": "Cfg.SetAxisSrcChgEn(<int>,<int>)",
+      "param_names": [],
+      "parser_command": "SetAxisSrcChgEn(<int>,<int>)",
+      "name": "SetAxisSrcChgEn",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2510",
+      "runtime_safe": false,
+      "runtime_class": "config_only",
+      "runtime_note": "Configuration command; typically intended before entering runtime mode."
+    },
+    {
       "command": "Cfg.SetAxisTrajSourceType(<int>,<int>)",
       "command_named": "Cfg.SetAxisTrajSourceType(<axisIndex>,<value>)",
       "param_names": [
@@ -5032,7 +5212,7 @@
       "description": "Set axis trajectory start position. NOTE: NOT USED!!.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisTrajStartPos(3,100)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2633",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2664",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5050,7 +5230,7 @@
       "description": "Set axis tweak distance.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisTweakDist(3,5)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2668",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2699",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5068,7 +5248,7 @@
       "description": "Set axis target velocity setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisVel(3,55)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2661",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2692",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5086,7 +5266,7 @@
       "description": "Set axis target velocity setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisVel(3,55)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2680",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2711",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5104,7 +5284,7 @@
       "description": "Set current data index of storage buffer.\\n",
       "header_source": "devEcmcSup/misc/ecmcMisc.h",
       "header_example": "Cfg.SetDataStorageCurrentDataIndex(0,10)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3057",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3088",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5121,7 +5301,7 @@
       "description": "Enable detailed motion diagnostics printouts.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetDiagAxisEnable(1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2503",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2534",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5138,7 +5318,7 @@
       "description": "Set axis frequency of detailed motion diagnostics printouts.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetDiagAxisFreq(10)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2496",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2527",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5155,7 +5335,7 @@
       "description": "Set axis index for detailed motion diagnostics.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetDiagAxisIndex(3)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2489",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2520",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5189,7 +5369,7 @@
       "description": "Enable printouts of which functions in hw_motor.cpp are being",
       "header_source": "devEcmcSup/main/ecmcGeneral.h",
       "header_example": "Cfg.SetEnableFuncCallDiag(1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2596",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2627",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5206,7 +5386,7 @@
       "description": "Enable printouts of timing information related to the realtime",
       "header_source": "devEcmcSup/main/ecmcGeneral.h",
       "header_example": "Cfg.SetEnableTimeDiag(1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2619",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2650",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5242,7 +5422,7 @@
       "description": "Set PLC expression.\\n",
       "header_source": "devEcmcSup/plc/ecmcPLC.h",
       "header_example": "Cfg.SetPLCExpr(5)=ec0.s1.OUTPIN_1.0=ec0.s2.INPIN_3.0|",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2817",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2848",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5260,7 +5440,7 @@
       "description": "Set PLC expression.\\n",
       "header_source": "devEcmcSup/plc/ecmcPLC.h",
       "header_example": "Cfg.SetPLCExpr(5)=ec0.s1.OUTPIN_1.0=ec0.s2.INPIN_3.0|",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2816",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2847",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5329,7 +5509,7 @@
       "description": "Enable diagnostic printouts from data storage object.\\n",
       "header_source": "devEcmcSup/misc/ecmcMisc.h",
       "header_example": "Cfg.SetStorageEnablePrintouts(3,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3043",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3074",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5344,7 +5524,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2603",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2634",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5359,7 +5539,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2611",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2642",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5377,7 +5557,7 @@
       "description": "Stop axis.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "StopMotion(2,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4158",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4257",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Motion execution command intended for runtime operation."
@@ -5395,7 +5575,7 @@
       "description": "Stop axis.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "StopMotion(2,1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4151",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4250",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Motion execution command intended for runtime operation."
@@ -5429,7 +5609,7 @@
       "description": "Writes data to storage buffer.\\n",
       "header_source": "devEcmcSup/misc/ecmcMisc.h",
       "header_example": "WriteDataStorage(3)=0,0,0,0,0,0....",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4207",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4306",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Storage buffer operation; allowed at runtime in parser."
@@ -5447,7 +5627,7 @@
       "description": "Writes a value to an EtherCAT entry addressed by an ethercat path",
       "header_source": "devEcmcSup/ethercat/ecmcEthercat.h",
       "header_example": "WriteECEntry()",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3583",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3614",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Direct write command generally usable during runtime."
@@ -5503,7 +5683,7 @@
       "description": "Write to PLC variable.\\n",
       "header_source": "devEcmcSup/plc/ecmcPLC.h",
       "header_example": "WritePLCVar(5,static.test,100.0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3590",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3621",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Direct write command generally usable during runtime."
@@ -5521,7 +5701,7 @@
       "description": "Get axis busy bit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.bBusy?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3312",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3343",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5539,7 +5719,7 @@
       "description": "Get axis done bit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.bDone?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3376",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3407",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5554,7 +5734,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3134",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3165",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5572,7 +5752,7 @@
       "description": "Get axis amplifier command bit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.bEnable?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3331",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3362",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5590,7 +5770,7 @@
       "description": "Get axis amplifier state bit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.bEnabled?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3336",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3367",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5607,7 +5787,7 @@
       "description": "Get axis error state.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.bError?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3317",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3348",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5625,7 +5805,7 @@
       "description": "Set axis execute bit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.bExecute=1",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3141",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3172",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5643,7 +5823,7 @@
       "description": "Get axis execute bit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.bExecute?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3342",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3373",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5658,7 +5838,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3353",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3384",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5676,7 +5856,7 @@
       "description": "Get encoder homed bit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.bHomed?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3370",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3401",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5694,7 +5874,7 @@
       "description": "Get state of backward hard limit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.bLimitBwd?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3358",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3389",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5712,7 +5892,7 @@
       "description": "Get state of forward hard limit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.bLimitFwd?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3364",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3395",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5730,7 +5910,7 @@
       "description": "Set axis reset bit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.bReset=1",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3148",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3179",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5748,7 +5928,7 @@
       "description": "Get axis reset bit.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.bReset?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3348",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3379",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5766,7 +5946,7 @@
       "description": "Set axis acceleration setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.fAcceleration=500",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3169",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3200",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5784,7 +5964,7 @@
       "description": "Get axis acceleration setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.fAcceleration?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3424",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3455",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5802,7 +5982,7 @@
       "description": "Get actual encoder position.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.fActPosition?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3382",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3413",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5820,7 +6000,7 @@
       "description": "Get actual encoder velocity.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.fActVelocity?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3388",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3419",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5838,7 +6018,7 @@
       "description": "Set axis deceleration setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.fDeceleration=500",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3176",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3207",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5856,7 +6036,7 @@
       "description": "Get axis deceleration setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.fDeceleration?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3430",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3461",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5874,7 +6054,7 @@
       "description": "Set axis home reference position setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.fHomePosition=111",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3183",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3214",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5892,7 +6072,7 @@
       "description": "Set axis target position setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.fPosition=111",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3155",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3186",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5910,7 +6090,7 @@
       "description": "Get axis target position setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.fPosition?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3400",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3431",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5928,7 +6108,7 @@
       "description": "Set axis target velocity setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisVel(3,55)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3162",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3193",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5946,7 +6126,7 @@
       "description": "Get axis target velocity setpoint.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.fVelocity?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3394",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3425",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5964,7 +6144,7 @@
       "description": "Set axis command data word.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.nCommand=10",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3127",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3158",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -5982,7 +6162,7 @@
       "description": "Get axis command data word.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.nCmdData?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3413",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3444",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -6000,7 +6180,7 @@
       "description": "Set axis command word.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M4.nCommand=3",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3120",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3151",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -6018,7 +6198,7 @@
       "description": "Get axis command word.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.nCommand?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3407",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3438",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -6035,7 +6215,7 @@
       "description": "Get axis error code.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.nErrorId?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3324",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3355",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -6053,7 +6233,7 @@
       "description": "Get axis index.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.nMotionAxisID?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3419",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3450",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -6070,7 +6250,7 @@
       "description": "Get axis error code in string format.\\n",
       "header_source": "devEcmcSup/main/ecmcGeneral.h",
       "header_example": "Main.M3.sErrorMessage?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3113",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3144",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
@@ -6088,7 +6268,7 @@
       "description": "Get state of reference/home switch.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Main.M3.stAxisStatus?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3189",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:3220",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."

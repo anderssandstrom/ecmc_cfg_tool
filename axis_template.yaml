@@ -1,0 +1,230 @@
+axis:
+  id: block                                               # Axis id
+  type: block                                         # this is for future selection of axis type
+  mode: block                                           # supported mode, CSV and CSP, defaults CSV
+  parameters: block                              # additional parameters      
+  #                                                       "powerAutoOnOff=<value>;"  //2: What you want, 1:do not use, 0 to disable
+  #                                                       "powerOffDelay=<value>:"
+  #                                                       "powerOnDelay=<value>;"
+  healthOutput: block                               # Ethercat entry for health output
+  feedSwitchesOutput: block                         # Ethercat entry for fed switches
+  feedSwitchesValue: block                               # Value to write to axis.feedSwitchesOutput. Defaults to 1
+  group: block                                    # Add axis to group (group will be created if not exists), 
+  #                                                     group id will be stored in GRP<axis.group>_ID for later use.
+  autoMode:  block                                        # Switch drive modes automaticaly for normal motion and homing (smaract for instance)
+    modeSet: block                                   # Ethercat entry drive mode write (set CSV,CSP,homing)
+    modeAct: block                                   # Ethercat entry drive mode reading (set CSV,CSP,homing)
+    modeCmdMotion: block                                  # Drive mode value for normal motion (written to axis.drvMode.modeSet when normal motion)
+    modeCmdHome: block                                   # Drive mode value for when homing (written to axis.drvMode.modeSet when homing)
+  features:
+    blockCom: block                                   # Block communication to axis
+    allowSrcChangeWhenEnabled: false                  # Allow traj/enc source change when axis is enabled                      
+    allowedFunctions:
+      homing: true                                    # Allow homing
+      constantVelocity: true                          # Allow constant velocity
+      positioning: true                               # Allow positioning
+  autoEnable:                                         # ecmc auto enable of axis (Please use this instead of motor record version..)
+    enableTimeout: 5.0                                # If defined, ecmc tries to auto-enable for a maximum enableTimeout seconds.
+    disableTimeout:   5.0                             # If defined, ecmc disables axis after idle (non busy) in disableTime seconds
+    atStartup: block                                   # Auto enable axis at ioc start, default False
+  tweakDist: 2.0                                      # Tweak value (both ecmc interface and motor record tweak value)
+
+#epics:
+#  name: block                                            # Axis name
+#  precision: block                                        # Decimal count
+#  description: vblock            # Axis description
+#  unit: block                                            # Unit
+#  motorRecord: block
+#    enable: block
+#    description: block
+#    fieldInit: block            # Extra config for Motor record
+#    syncSoftLimits: block                             # Optional: Sync softlimits between motor and ecmc (default false)
+
+drive:
+  numerator: 360                                      # Fastest speed in engineering units
+  denominator: 4096                                   # I/O range for ECMC_EC_ALIAS_DRV_VELO_SET
+  type: block                                             # Stepper: 0. DS402: 1 (DS402 = servos and advanced stepper drives)
+  control: block           # Control word ethercat entry
+  enable: block                                           # Enable bit index in control word (not used if DS402)
+  enabled: block                                          # Enabled bit index in status word (not used if DS402)
+  status: block            # Status word ethercat entry
+  setpoint: eblock      # Velocity setpoint if CSV. Position setpoint if CSP
+  reduceTorque: block                                     # Reduce torque bit in drive control word
+  reduceTorqueEnable: True                            # Enable reduce torque functionality
+  useAsCSPDrvEnc: block                                # Use this encoder as CSP drive encoder (ecmc controller enabled in CSP)
+  brake:
+    enable: false
+    output: block                                  # Ethercat link to brake output
+    openDelay: 0                                      # Brake timing parameter in cycles (default 1kHz)
+    closeAhead: 0                                     # Brake timing parameter in cycles (default 1kHz)
+  reset: block                                            # Reset   (if no drive reset bit then leave empty)
+  warning: block                                          # Warning (if no drive warning bit then leave empty)
+#  error:                                              # max 3
+#    - block                                               # Error 0 (if no drive error bit then leave empty)
+#    - block                                               # Error 1 (if no drive error bit then leave empty)
+#    - block                                              # Error 2 (if no drive error bit then leave empty)
+
+encoder:
+  numerator: 360                                      # Scaling numerator example 360 deg/rev
+  denominator: 4096                                   # Scaling denominator example 4096 ticks per 360 degree
+  type: block                                             # Type: 0=Incremental, 1=Absolute
+  bits: 16                                            # Total bit count of encoder raw data
+  absBits: 0                                          # Absolute bit count (for absolute encoders) always least significant part of 'bits'
+  absOffset: 0                                        # Encoder offset in eng units (for absolute encoders)
+  mask: '0xFFF00'                                     # Mask applied to raw encoder value
+  position: block        # Ethercat entry for actual position input (encoder)
+  control: block         # mandatory only if 'reset' is used
+  status: block          # mandatory only if 'warning' or 'error' are used
+  ready: block                                           # Bit in encoder status word for encoder ready
+  source: 0                                           # 0 = Encoder value from etehrcat hardware, 1 = Encoder value from PLC
+  reset: block                                            # Reset   (optional)
+  warning: block                                          # Warning (optional)
+#  error:                                              # max 3 (optional)
+#    - block                                               # Error 0
+#    - block                                               # Error 1
+#    - block                                             # Error 2
+  filter:
+    velocity:
+      size: 100                                       # Filter size for velocity
+      enable: true                                    # enable velocity filter
+    position:
+      size: 100                                       # Filter size for encoder value
+      enable: true                                    # enable encoder value filter
+#  latch:
+#    position: block                                    # Link to latched value. Used for some homing seqs
+#    control: block                                       # Bit in encoder control word to arm latch. Used for some homing seqs
+#    status: block                                         # Bit in encoder status word for latch triggered status. Used for some homing seqs
+#    armCmd: block                                          # Value in dec to arm latch/touch probe to write to encoder.control 
+#    armBits:  block                                        # Bit size of encoder.latch.armCmd
+  primary: True                                       # Use this encoder as primary (for control)
+  homing:
+    type: 3                                           # Homing sequence type
+    position: -30                                     # Position to reference encoder to
+    velocity:
+      to: 10                                          # Velocity to cam/sensor (used for some homing seqs)
+      from: 5                                         # Velocity from cam/sensor (used for some homing seqs)
+    acceleration: 20                                  # Acceleration during homing
+    deceleration: 100                                 # Deceleration during homing
+    refToEncIDAtStartup: 1                            # At startup then set the start value of this encoder to actpos of this encoder id
+    refAtHome: 1                                      # If homing is executed then set position of this encoder
+    tolToPrim: 0                                      # If set then this is the max allowed tolerance between prim encoder and this encoder
+    postMoveEnable: yes                               # Enable move after successfull homing
+    postMovePosition: 10                              # Position to move to after successfull homing
+    trigg: block                                      # Ethercat entry for triggering drive internal homing seq (seq id 26)
+    ready: block                                     # Ethercat entry for readinf drive internal homing seq ready (seq id 26)
+    latchCount: block                                     # latch number to ref on (1=ref on first latch)
+  delayComp:                                          # Delay compensation for time between application of setpoint to reading of encoder (normally atleast 1 cycle)
+    time: 1.5                                         # Delay time between set and act [cycles]
+    enable: true                                     # enable (defaults to 1 if not set)
+  lookuptable:
+    filename: block                         # Load correction lockuptable file (default enabled if loaded)
+    enable: 1                                        # Enable correction table
+    mask: '0x3FF'                                    # Encoder raw mask to apply correction (example single turn bits or period bits of EL5021)
+
+controller:
+  Kp: 15                                              # Kp proportional gain
+  Ki: 0.02                                            # Ki integral gain
+  Kd: 0                                               # Kd derivative gain
+  Kff: 1                                              # Feed forward gain
+  deadband:
+    tol: 0.01                                         # Stop control if within this distance from target for the below time
+    time: 100
+  limits:
+    minOutput: -100                                   # Minimum controller output
+    maxOutput: 100                                    # Maximum controller output
+    minIntegral: -100                                 # Minimum integral output
+    maxIntegral: 100                                  # Maximum integral output
+  inner:
+    Kp: 0.1                                           # Kp for when close to target
+    Ki: 0.1                                           # Ki for when close to target
+    Kd: 0.1                                           # Kd for when close to target
+    tol: 0.1                                          # Distance from target for when inner PID params will be used, defaults to atTarget tol
+
+trajectory:
+  type: block                                             # Default 0 = trapetz, 1 = S-curve (ruckig)
+  source: 0                                           # 0 = take trajectory setpoint from axis traj object, 1 = trajectory setpoint from plc
+  axis:
+    velocity: 10                                      # Default velo for axis
+    acceleration: 0.1                                 # Default acc for axis
+    deceleration: 0.1                                 # Default dec for axis
+    emergencyDeceleration: 0.05                       # Deceleration when axis in error state
+    jerk: 10                                          # Default jerk for axis
+  jog:
+    velocity: 5                                       # Default velo fro JOG (motor record)
+  modulo:
+    range: 360                                        # Modulo range 0..360
+    type: 0                                           # Modulo type
+
+#  Limits can be overridden with plc-code by setting input.limit.forward or input.limit.backward to 'plcOverride', then 'ax<id>.mon.lowlim' and or 'ax<id>.mon.highlim' needs to be written to in plc code (1 means linit OK).
+
+#input:
+#  limit:
+#    forward: block                 # Ethercat entry for low limit switch input,
+#    forwardPolarity: block                               # Polarity of forward limit switch
+#    backward: block                          # Ethercat entry for high limit switch input
+#    backwardPolarity: block                              # Polarity of forward limit switch
+  home: block               # Ethercat entry for home switch
+  homePolarity: block                                     # Polarity of home switch
+  interlock: block                # Ethercat entry for interlock switch input
+  interlockPolarity: block                                # Polarity of interlock switch
+#  analog:
+#    interlock: block              # Ethercat entry for analog interlock
+#    interlockPolarity: 1                              # 0: High value is bad, 1 = Low value is bad
+#    rawLimit: 2000                                    # Analog raw limit
+#    enable: true                                      # Enable analog interlock default true if analog.interlock is set
+
+softlimits:
+  enable: block                                       # Enable soft limits
+  forward: 100                                        # Soft limit position fwd
+  forwardEnable: false                                # Soft limit position fwd enable
+  backward: -100                                      # Soft limit position bwd
+  backwardEnable: false                               # Soft limit position bwd enable
+
+monitoring:
+  lag:
+    enable: false                                     # Enable position lag monitoring (following error)
+    tolerance: 0.5                                    # Allowed tolerance
+    time: 10                                          # Allowed time outside tolerance
+  target:
+    enable: true                                      # Enable at target monitoring (needs to be enabled if using motor record)
+    tolerance: 0.5                                    # Allowed tolerance
+    time: 10                                          # Filter time inside tolerance to be at target
+  velocity:
+    enable: false                                     # Enable velocity monitoring
+    max: 100                                          # Allowed max velocity
+    time:
+      trajectory: 100                                 # Time allowed outside max velo before system init halt
+      drive: 200                                      # Time allowed outside max velo before system disables drive
+  velocityDifference:
+    enable: true                                      # Enable velocity diff monitoring (velo set vs velo act)
+    max: 100                                          # Allowed max difference
+    time:
+      trajectory: 100                                 # Time allowed outside max diff velo before system init halt
+      drive: 200                                      # Time allowed outside max diff velo before system disables drive
+  stall:
+    enable: True                                      # Enable stall monitoring. Attarget must be enabled for this functionallity
+    time:
+      timeout: 10000                                  # If not attarget after "timeout" cycles after trajectory generator is ready then drive will disable
+      factor: 5.0                                     # Measures duration of last motion command (busy high edge to busy low edge). The new timeout will be defined as this duration multiplied by this factor. The timeout finaly used for stall detection will be the longest (of time.timeout and calculated from time.factor).
+
+plc:
+  enable: true                                        # Enable axis plc
+  externalCommands: true                              # Allow axis to inputs from PLC
+  file: block                                 # File with plc code
+  code:                                               # Sync code (appended after code in plc.file)
+    - block # Enable axis if one of master axes is enabled
+    - block # calculate set pos for physical axis
+  velocity_filter:                                    # Filter used to smother velocity feedforward
+    encoder:                                          # Filter plc enc velo
+      enable: false                                   # Filter enable
+      size: 100                                       # Filter size
+    trajectory:                                       # Filter plc traj velo
+      enable: false                                   # Filter enable
+      size: 100                                       # Filter size
+#  filter:                                            # Use "velocity_filter" instead since this naming is missleading and should be phased out
+#    velocity:                                        # Filter plc enc velo
+#      enable: false
+#      size: 100
+#    trajectory:                                      # Filter plc traj velo
+#      enable: false
+#      size: 100
