@@ -227,7 +227,7 @@
       "description": "",
       "header_source": "",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4210",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4322",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -245,7 +245,7 @@
       "description": "Get drive output scale numerator.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4202",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4314",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -263,7 +263,7 @@
       "description": "Get the denominator part of the encoder scale.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "ADSPORT=501/.ADR.16#5008,16#24,8,5?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4028",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4140",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."
@@ -281,7 +281,7 @@
       "description": "Get the numerator part of the encoder scale.\\n",
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "ADSPORT=501/.ADR.16#5003,16#23,8,5?",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4020",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4132",
       "runtime_safe": true,
       "runtime_class": "runtime",
       "runtime_note": "Read/query command usable during runtime."

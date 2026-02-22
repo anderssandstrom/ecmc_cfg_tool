@@ -211,9 +211,9 @@ plc:
   enable: true                                        # Enable axis plc
   externalCommands: true                              # Allow axis to inputs from PLC
   file: block                                 # File with plc code
-  code:                                               # Sync code (appended after code in plc.file)
-    - block # Enable axis if one of master axes is enabled
-    - block # calculate set pos for physical axis
+#  code:                                               # Sync code (appended after code in plc.file)
+#    - block # Enable axis if one of master axes is enabled
+#    - block # calculate set pos for physical axis
   velocity_filter:                                    # Filter used to smother velocity feedforward
     encoder:                                          # Filter plc enc velo
       enable: false                                   # Filter enable

@@ -24,38 +24,53 @@ class YNode:
     key: str
     path: str
     value: str = ""
+    comment: str = ""
     children: list = field(default_factory=list)
 
 
-def _strip_yaml_comment(line):
+def _split_yaml_comment(line):
     out = []
     in_s = False
     in_d = False
+    comment = ""
     for i, ch in enumerate(line):
         if ch == "'" and not in_d:
             in_s = not in_s
         elif ch == '"' and not in_s:
             in_d = not in_d
         elif ch == "#" and not in_s and not in_d:
+            comment = line[i + 1 :].strip()
             break
         out.append(ch)
-    return "".join(out).rstrip()
+    return "".join(out).rstrip(), comment
+
+
+def _strip_yaml_comment(line):
+    code, _comment = _split_yaml_comment(line)
+    return code
 
 
 def parse_simple_yaml_tree(path):
     root = YNode("(root)", "")
     stack = [(-1, root)]
     list_counters = {}
-    pending_container = None
+    pending_comment_lines = []
 
     for raw in Path(path).read_text().splitlines():
-        if not raw.strip() or raw.lstrip().startswith("#"):
+        if not raw.strip():
             continue
-        line = _strip_yaml_comment(raw)
+        if raw.lstrip().startswith("#"):
+            txt = raw.lstrip()[1:].strip()
+            if txt:
+                pending_comment_lines.append(txt)
+            continue
+        line, comment = _split_yaml_comment(raw)
         if not line.strip():
             continue
         indent = len(line) - len(line.lstrip(" "))
         text = line.lstrip(" ")
+        merged_comment = "\n".join(pending_comment_lines + ([comment] if comment else []))
+        pending_comment_lines = []
 
         while len(stack) > 1 and indent <= stack[-1][0]:
             stack.pop()
@@ -68,7 +83,7 @@ def parse_simple_yaml_tree(path):
             list_counters[id(parent)] = idx + 1
             key = f"[{idx}]"
             path_key = f"{parent.path}.{key}" if parent.path else key
-            node = YNode(key=key, path=path_key, value=value)
+            node = YNode(key=key, path=path_key, value=value, comment=merged_comment)
             parent.children.append(node)
             continue
 
@@ -78,7 +93,7 @@ def parse_simple_yaml_tree(path):
         key = key.strip()
         value = rest.strip()
         path_key = f"{parent.path}.{key}" if parent.path else key
-        node = YNode(key=key, path=path_key, value=value)
+        node = YNode(key=key, path=path_key, value=value, comment=merged_comment)
         parent.children.append(node)
         if value == "":
             stack.append((indent, node))
@@ -279,6 +294,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.resize(1400, 900)
         self.client = EpicsClient(timeout=timeout)
         self.catalog = self._load_catalog(catalog_path)
+        self.catalog_desc_by_named = self._build_catalog_description_index(self.catalog)
         self.command_pairs = build_axis_command_pairs(self.catalog)
         self.yaml_path = Path(yaml_path)
         self.mapping_path = Path(mapping_path) if mapping_path else Path(yaml_path).with_suffix(".command_map.csv")
@@ -297,6 +313,17 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             return json.loads(p.read_text())
         except Exception:
             return {"commands": []}
+
+    def _build_catalog_description_index(self, catalog):
+        out = {}
+        for c in catalog.get("commands", []):
+            named = str(c.get("command_named", "") or c.get("command", "")).strip()
+            if not named:
+                continue
+            desc = str(c.get("description", "") or "").strip()
+            if desc:
+                out[named] = " ".join(desc.split())
+        return out
 
     def _build_ui(self, default_cmd_pv, default_qry_pv, timeout):
         root = QtWidgets.QWidget()
@@ -401,7 +428,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
 
         for child in root.children:
             self._add_tree_node(None, child)
-        self.tree.expandToDepth(1)
+        # Start collapsed: only top-level rows are visible.
+        self.tree.collapseAll()
 
     def _load_yaml_command_map(self):
         p = self.mapping_path
@@ -424,6 +452,34 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             self._log(f"Failed to load command map {p.name}: {ex}")
         return out
 
+    def _build_tooltip(self, node, pair, status_txt):
+        lines = []
+        if node.path:
+            lines.append(f"Key: {node.path}")
+        if node.comment:
+            lines.append(f"Description: {node.comment}")
+        if node.value:
+            lines.append(f"Template: {node.value}")
+        if pair:
+            get_cmd = str(pair.get("get", "") or "").strip()
+            set_cmd = str(pair.get("set", "") or "").strip()
+            lines.append(f"Getter: {get_cmd or '-'}")
+            if get_cmd:
+                gd = self.catalog_desc_by_named.get(get_cmd, "")
+                if gd:
+                    lines.append(f"Getter desc: {gd}")
+            lines.append(f"Setter: {set_cmd or '-'}")
+            if set_cmd:
+                sd = self.catalog_desc_by_named.get(set_cmd, "")
+                if sd:
+                    lines.append(f"Setter desc: {sd}")
+        else:
+            lines.append("Getter: -")
+            lines.append("Setter: -")
+        if status_txt:
+            lines.append(f"Status: {status_txt}")
+        return "\n".join(lines)
+
     def _add_tree_node(self, parent_item, node):
         item = QtWidgets.QTreeWidgetItem([node.key])
         if parent_item is None:
@@ -432,6 +488,9 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             parent_item.addChild(item)
 
         if node.children:
+            group_tip = self._build_tooltip(node, None, "group")
+            for col in range(self.tree.columnCount()):
+                item.setToolTip(col, group_tip)
             for ch in node.children:
                 self._add_tree_node(item, ch)
             return
@@ -479,6 +538,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             else:
                 status_txt = "unmatched"
         status = QtWidgets.QLabel(status_txt)
+        tooltip = self._build_tooltip(node, pair, status_txt)
+        for col in range(self.tree.columnCount()):
+            item.setToolTip(col, tooltip)
+        for w in (set_edit, read_edit, cmd_label, status):
+            w.setToolTip(tooltip)
 
         self.tree.setItemWidget(item, 1, set_edit)
         self.tree.setItemWidget(item, 2, read_edit)
@@ -507,6 +571,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
                 b.setMaximumWidth(32)
             w_btn.setEnabled(bool(pair.get("set")))
             r_btn.setEnabled(bool(pair.get("get")))
+            w_btn.setToolTip(tooltip)
+            r_btn.setToolTip(tooltip)
             w_btn.clicked.connect(lambda _=False, rr=row: self._write_row(rr))
             r_btn.clicked.connect(lambda _=False, rr=row: self._read_row(rr))
             self.tree.setItemWidget(item, 4, w_btn)
