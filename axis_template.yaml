@@ -1,23 +1,23 @@
 axis:
-  id: block                                               # Axis id
-  type: block                                         # this is for future selection of axis type
-  mode: block                                           # supported mode, CSV and CSP, defaults CSV
-  parameters: block                              # additional parameters      
+  # id: block                                               # Axis id
+  # type: block                                         # this is for future selection of axis type
+  # mode: block                                           # supported mode, CSV and CSP, defaults CSV
+  # parameters: block                              # additional parameters      
   #                                                       "powerAutoOnOff=<value>;"  //2: What you want, 1:do not use, 0 to disable
   #                                                       "powerOffDelay=<value>:"
   #                                                       "powerOnDelay=<value>;"
-  healthOutput: block                               # Ethercat entry for health output
-  feedSwitchesOutput: block                         # Ethercat entry for fed switches
-  feedSwitchesValue: block                               # Value to write to axis.feedSwitchesOutput. Defaults to 1
-  group: block                                    # Add axis to group (group will be created if not exists), 
+  # healthOutput: block                               # Ethercat entry for health output
+  # feedSwitchesOutput: block                         # Ethercat entry for fed switches
+  # feedSwitchesValue: block                               # Value to write to axis.feedSwitchesOutput. Defaults to 1
+  # group: block                                    # Add axis to group (group will be created if not exists), 
   #                                                     group id will be stored in GRP<axis.group>_ID for later use.
-  autoMode:  block                                        # Switch drive modes automaticaly for normal motion and homing (smaract for instance)
-    modeSet: block                                   # Ethercat entry drive mode write (set CSV,CSP,homing)
-    modeAct: block                                   # Ethercat entry drive mode reading (set CSV,CSP,homing)
-    modeCmdMotion: block                                  # Drive mode value for normal motion (written to axis.drvMode.modeSet when normal motion)
-    modeCmdHome: block                                   # Drive mode value for when homing (written to axis.drvMode.modeSet when homing)
+  # autoMode:  block                                        # Switch drive modes automaticaly for normal motion and homing (smaract for instance)
+    # modeSet: block                                   # Ethercat entry drive mode write (set CSV,CSP,homing)
+    # modeAct: block                                   # Ethercat entry drive mode reading (set CSV,CSP,homing)
+    # modeCmdMotion: block                                  # Drive mode value for normal motion (written to axis.drvMode.modeSet when normal motion)
+    # modeCmdHome: block                                   # Drive mode value for when homing (written to axis.drvMode.modeSet when homing)
   features:
-    blockCom: block                                   # Block communication to axis
+    # blockCom: block                                   # Block communication to axis
     allowSrcChangeWhenEnabled: false                  # Allow traj/enc source change when axis is enabled                      
     allowedFunctions:
       homing: true                                    # Allow homing
@@ -26,7 +26,7 @@ axis:
   autoEnable:                                         # ecmc auto enable of axis (Please use this instead of motor record version..)
     enableTimeout: 5.0                                # If defined, ecmc tries to auto-enable for a maximum enableTimeout seconds.
     disableTimeout:   5.0                             # If defined, ecmc disables axis after idle (non busy) in disableTime seconds
-    atStartup: block                                   # Auto enable axis at ioc start, default False
+    # atStartup: block                                   # Auto enable axis at ioc start, default False
   tweakDist: 2.0                                      # Tweak value (both ecmc interface and motor record tweak value)
 
 #epics:
@@ -43,22 +43,22 @@ axis:
 drive:
   numerator: 360                                      # Fastest speed in engineering units
   denominator: 4096                                   # I/O range for ECMC_EC_ALIAS_DRV_VELO_SET
-  type: block                                             # Stepper: 0. DS402: 1 (DS402 = servos and advanced stepper drives)
-  control: block           # Control word ethercat entry
-  enable: block                                           # Enable bit index in control word (not used if DS402)
-  enabled: block                                          # Enabled bit index in status word (not used if DS402)
-  status: block            # Status word ethercat entry
-  setpoint: eblock      # Velocity setpoint if CSV. Position setpoint if CSP
-  reduceTorque: block                                     # Reduce torque bit in drive control word
+  # type: block                                             # Stepper: 0. DS402: 1 (DS402 = servos and advanced stepper drives)
+  # control: block           # Control word ethercat entry
+  # enable: block                                           # Enable bit index in control word (not used if DS402)
+  # enabled: block                                          # Enabled bit index in status word (not used if DS402)
+  # status: block            # Status word ethercat entry
+  # setpoint: eblock      # Velocity setpoint if CSV. Position setpoint if CSP
+  # reduceTorque: block                                     # Reduce torque bit in drive control word
   reduceTorqueEnable: True                            # Enable reduce torque functionality
-  useAsCSPDrvEnc: block                                # Use this encoder as CSP drive encoder (ecmc controller enabled in CSP)
+  # useAsCSPDrvEnc: block                                # Use this encoder as CSP drive encoder (ecmc controller enabled in CSP)
   brake:
     enable: false
-    output: block                                  # Ethercat link to brake output
+    # output: block                                  # Ethercat link to brake output
     openDelay: 0                                      # Brake timing parameter in cycles (default 1kHz)
     closeAhead: 0                                     # Brake timing parameter in cycles (default 1kHz)
-  reset: block                                            # Reset   (if no drive reset bit then leave empty)
-  warning: block                                          # Warning (if no drive warning bit then leave empty)
+  # reset: block                                            # Reset   (if no drive reset bit then leave empty)
+  # warning: block                                          # Warning (if no drive warning bit then leave empty)
 #  error:                                              # max 3
 #    - block                                               # Error 0 (if no drive error bit then leave empty)
 #    - block                                               # Error 1 (if no drive error bit then leave empty)
@@ -67,18 +67,18 @@ drive:
 encoder:
   numerator: 360                                      # Scaling numerator example 360 deg/rev
   denominator: 4096                                   # Scaling denominator example 4096 ticks per 360 degree
-  type: block                                             # Type: 0=Incremental, 1=Absolute
+  # type: block                                             # Type: 0=Incremental, 1=Absolute
   bits: 16                                            # Total bit count of encoder raw data
   absBits: 0                                          # Absolute bit count (for absolute encoders) always least significant part of 'bits'
   absOffset: 0                                        # Encoder offset in eng units (for absolute encoders)
   mask: '0xFFF00'                                     # Mask applied to raw encoder value
-  position: block        # Ethercat entry for actual position input (encoder)
-  control: block         # mandatory only if 'reset' is used
-  status: block          # mandatory only if 'warning' or 'error' are used
-  ready: block                                           # Bit in encoder status word for encoder ready
+  # position: block        # Ethercat entry for actual position input (encoder)
+  # control: block         # mandatory only if 'reset' is used
+  # status: block          # mandatory only if 'warning' or 'error' are used
+  # ready: block                                           # Bit in encoder status word for encoder ready
   source: 0                                           # 0 = Encoder value from etehrcat hardware, 1 = Encoder value from PLC
-  reset: block                                            # Reset   (optional)
-  warning: block                                          # Warning (optional)
+  # reset: block                                            # Reset   (optional)
+  # warning: block                                          # Warning (optional)
 #  error:                                              # max 3 (optional)
 #    - block                                               # Error 0
 #    - block                                               # Error 1
@@ -110,14 +110,14 @@ encoder:
 #    tolToPrim: 0                                      # If set then this is the max allowed tolerance between prim encoder and this encoder
     postMoveEnable: yes                               # Enable move after successfull homing
     postMovePosition: 10                              # Position to move to after successfull homing
-    trigg: block                                      # Ethercat entry for triggering drive internal homing seq (seq id 26)
-    ready: block                                     # Ethercat entry for readinf drive internal homing seq ready (seq id 26)
-    latchCount: block                                     # latch number to ref on (1=ref on first latch)
+    # trigg: block                                      # Ethercat entry for triggering drive internal homing seq (seq id 26)
+    # ready: block                                     # Ethercat entry for readinf drive internal homing seq ready (seq id 26)
+    # latchCount: block                                     # latch number to ref on (1=ref on first latch)
   delayComp:                                          # Delay compensation for time between application of setpoint to reading of encoder (normally atleast 1 cycle)
     time: 1.5                                         # Delay time between set and act [cycles]
     enable: true                                     # enable (defaults to 1 if not set)
   lookuptable:
-    filename: block                         # Load correction lockuptable file (default enabled if loaded)
+    # filename: block                         # Load correction lockuptable file (default enabled if loaded)
     enable: 1                                        # Enable correction table
     mask: '0x3FF'                                    # Encoder raw mask to apply correction (example single turn bits or period bits of EL5021)
 
@@ -141,7 +141,7 @@ controller:
     tol: 0.1                                          # Distance from target for when inner PID params will be used, defaults to atTarget tol
 
 trajectory:
-  type: block                                             # Default 0 = trapetz, 1 = S-curve (ruckig)
+  # type: block                                             # Default 0 = trapetz, 1 = S-curve (ruckig)
   source: 0                                           # 0 = take trajectory setpoint from axis traj object, 1 = trajectory setpoint from plc
   axis:
     velocity: 10                                      # Default velo for axis
@@ -174,7 +174,7 @@ trajectory:
 #    enable: true                                      # Enable analog interlock default true if analog.interlock is set
 
 softlimits:
-  enable: block                                       # Enable soft limits
+  # enable: block                                       # Enable soft limits
   forward: 100                                        # Soft limit position fwd
   forwardEnable: false                                # Soft limit position fwd enable
   backward: -100                                      # Soft limit position bwd
@@ -210,7 +210,7 @@ monitoring:
 plc:
   enable: true                                        # Enable axis plc
   externalCommands: true                              # Allow axis to inputs from PLC
-  file: block                                 # File with plc code
+  # file: block                                 # File with plc code
 #  code:                                               # Sync code (appended after code in plc.file)
 #    - block # Enable axis if one of master axes is enabled
 #    - block # calculate set pos for physical axis

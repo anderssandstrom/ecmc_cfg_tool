@@ -251,7 +251,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         super().__init__()
         p = str(title_prefix or '').strip()
         self.setWindowTitle(f'ecmc PID/Controller Tuning [{p}]' if p else 'ecmc PID/Controller Tuning')
-        self.resize(1320, 860)
+        self.resize(920, 620)
         self.client = EpicsClient(timeout=timeout)
         self.catalog = self._load_catalog(catalog_path)
         self.rows = _build_pairs(self.catalog.get('commands', []), include_set_only=False)
@@ -259,6 +259,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._rows_all_by_name = {r['name']: r for r in self.rows_all}
         self._diagram_read_rows = []
         self._diagram_value_pairs = []
+        self._changes_by_axis = {}
+        self._current_values_by_axis = {}
         self.default_axis_id = str(default_axis_id).strip() or '1'
         self.sketch_image_path = str(sketch_image_path or '').strip()
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
@@ -348,6 +350,18 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.log_toggle_btn.setDefault(False)
         self.log_toggle_btn.toggled.connect(self._toggle_log_visible)
         top_row.addWidget(self.log_toggle_btn)
+        self.changes_toggle_btn = QtWidgets.QPushButton('Show Changes')
+        self.changes_toggle_btn.setCheckable(True)
+        self.changes_toggle_btn.setChecked(False)
+        self.changes_toggle_btn.setAutoDefault(False)
+        self.changes_toggle_btn.setDefault(False)
+        self.changes_toggle_btn.toggled.connect(self._toggle_changes_log_visible)
+        top_row.addWidget(self.changes_toggle_btn)
+        self.changed_yaml_btn = QtWidgets.QPushButton('Show Changed YAML')
+        self.changed_yaml_btn.setAutoDefault(False)
+        self.changed_yaml_btn.setDefault(False)
+        self.changed_yaml_btn.clicked.connect(self._show_changed_yaml_window)
+        top_row.addWidget(self.changed_yaml_btn)
         top_row.addStretch(1)
         layout.addLayout(top_row)
         layout.addWidget(cfg_panel)
@@ -419,10 +433,164 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.log.setReadOnly(True)
         self.log.setVisible(False)
         layout.addWidget(self.log, stretch=0)
+        self.changes_log = QtWidgets.QPlainTextEdit()
+        self.changes_log.setReadOnly(True)
+        self.changes_log.setVisible(False)
+        self.changes_log.setPlaceholderText('Successful writes are tracked here for this session...')
+        layout.addWidget(self.changes_log, stretch=0)
 
     def _log(self, msg):
         t = datetime.now().strftime('%H:%M:%S')
         self.log.appendPlainText(f'[{t}] {msg}')
+
+    def _log_change(self, msg):
+        t = datetime.now().strftime('%H:%M:%S')
+        self.changes_log.appendPlainText(f'[{t}] {msg}')
+
+    def _record_change(self, axis_id, key, value):
+        axis = str(axis_id).strip() or self.default_axis_id
+        if not key:
+            return
+        self._changes_by_axis.setdefault(axis, {})[str(key)] = str(value)
+
+    def _record_current_value(self, axis_id, key, value):
+        axis = str(axis_id).strip() or self.default_axis_id
+        if not key:
+            return
+        self._current_values_by_axis.setdefault(axis, {})[str(key)] = str(value)
+
+    def _yaml_scalar_text(self, value):
+        s = str(value)
+        low = s.lower()
+        if low in {'true', 'false', 'null'}:
+            return low
+        try:
+            float(s)
+            return s
+        except Exception:
+            pass
+        if re.fullmatch(r'0x[0-9a-fA-F]+', s):
+            return f"'{s}'"
+        if s == '' or ' ' in s or any(ch in s for ch in [':', '#', '[', ']', '{', '}', ',']) or s.strip() != s:
+            return "'" + s.replace("'", "''") + "'"
+        return s
+
+    def _controller_yaml_key(self, cmd_name):
+        m = {
+            'AxisCntrlKp': 'controller.Kp',
+            'AxisCntrlKi': 'controller.Ki',
+            'AxisCntrlKd': 'controller.Kd',
+            'AxisCntrlKff': 'controller.Kff',
+            'AxisCntrlDeadband': 'controller.deadband.tol',
+            'AxisCntrlDeadbandTime': 'controller.deadband.time',
+            'AxisCntrlOutLL': 'controller.limits.minOutput',
+            'AxisCntrlOutHL': 'controller.limits.maxOutput',
+            'AxisCntrlIPartLL': 'controller.limits.minIntegral',
+            'AxisCntrlIPartHL': 'controller.limits.maxIntegral',
+            'AxisCntrlInnerKp': 'controller.inner.Kp',
+            'AxisCntrlInnerKi': 'controller.inner.Ki',
+            'AxisCntrlInnerKd': 'controller.inner.Kd',
+            'AxisCntrlInnerTol': 'controller.inner.tol',
+            'AxisDrvScaleNum': 'drive.numerator',
+            'AxisDrvScaleDenom': 'drive.denominator',
+            'AxisEncScaleNum': 'encoder.numerator',
+            'AxisEncScaleDenom': 'encoder.denominator',
+            'AxisMonAtTargetTol': 'monitoring.target.tolerance',
+            'AxisMonAtTargetTime': 'monitoring.target.time',
+        }
+        return m.get(cmd_name, f'commands.{cmd_name}')
+
+    def _build_yaml_text_from_flat(self, axis_id, flat, title, changed_paths=None):
+        flat = dict(flat or {})
+        changed_paths = set(changed_paths or [])
+        if not flat:
+            return f'# No values available for axis {axis_id}\n'
+        tree = {}
+        for name, value in sorted(flat.items()):
+            path = self._controller_yaml_key(name)
+            cur = tree
+            parts = [p for p in path.split('.') if p]
+            for part in parts[:-1]:
+                cur = cur.setdefault(part, {})
+            cur[parts[-1]] = value
+        lines = [f'# {title} for axis {axis_id}', f'axisId: {self._yaml_scalar_text(axis_id)}']
+
+        def emit(node, indent=0, prefix=''):
+            pad = ' ' * indent
+            for k, v in node.items():
+                path = f'{prefix}.{k}' if prefix else k
+                if isinstance(v, dict):
+                    lines.append(f'{pad}{k}:')
+                    emit(v, indent + 2, path)
+                else:
+                    line = f'{pad}{k}: {self._yaml_scalar_text(v)}'
+                    if path in changed_paths:
+                        line += '  # CHANGED'
+                    lines.append(line)
+
+        emit(tree, 0, '')
+        return '\n'.join(lines) + '\n'
+
+    def _build_changed_yaml_text(self, axis_id):
+        return self._build_yaml_text_from_flat(axis_id, self._changes_by_axis.get(str(axis_id).strip(), {}), 'Changed controller values')
+
+    def _build_all_current_yaml_text(self, axis_id):
+        axis = str(axis_id).strip()
+        current = dict(self._current_values_by_axis.get(axis, {}))
+        for k, v in self._changes_by_axis.get(axis, {}).items():
+            current.setdefault(k, v)
+        for row_def in self.rows_all:
+            name = str(row_def.get('name', '')).strip()
+            if name:
+                current.setdefault(name, 'null')
+        changed_paths = {self._controller_yaml_key(k) for k in self._changes_by_axis.get(axis, {}).keys()}
+        return self._build_yaml_text_from_flat(
+            axis_id,
+            current,
+            'Current controller values (session-known)',
+            changed_paths=changed_paths,
+        )
+
+    def _show_changed_yaml_window(self):
+        axis_id = self.axis_all_edit.text().strip() or self.default_axis_id
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(f'Changed YAML (Axis {axis_id})')
+        dlg.resize(800, 700)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lay.addWidget(QtWidgets.QLabel(f'Session controller writes for axis: {axis_id}'))
+        mode_row = QtWidgets.QHBoxLayout()
+        mode_row.addWidget(QtWidgets.QLabel('View'))
+        mode_combo = QtWidgets.QComboBox()
+        mode_combo.addItems(['Changed fields', 'All fields (current)'])
+        mode_row.addWidget(mode_combo)
+        mode_row.addStretch(1)
+        lay.addLayout(mode_row)
+        txt = QtWidgets.QPlainTextEdit()
+        txt.setReadOnly(True)
+        lay.addWidget(txt, 1)
+
+        def refresh_text():
+            if mode_combo.currentIndex() == 0:
+                txt.setPlainText(self._build_changed_yaml_text(axis_id))
+            else:
+                txt.setPlainText(self._build_all_current_yaml_text(axis_id))
+
+        mode_combo.currentIndexChanged.connect(lambda _=0: refresh_text())
+        refresh_text()
+        btn_row = QtWidgets.QHBoxLayout()
+        copy_btn = QtWidgets.QPushButton('Copy')
+        copy_btn.setAutoDefault(False)
+        copy_btn.setDefault(False)
+        copy_btn.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(txt.toPlainText()))
+        close_btn = QtWidgets.QPushButton('Close')
+        close_btn.setAutoDefault(False)
+        close_btn.setDefault(False)
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(copy_btn)
+        btn_row.addStretch(1)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+        dlg.exec_()
 
     def _filtered_rows(self):
         txt = self.search.text().strip().lower()
@@ -809,6 +977,10 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.log.setVisible(bool(checked))
         self.log_toggle_btn.setText('Hide Log' if checked else 'Show Log')
 
+    def _toggle_changes_log_visible(self, checked):
+        self.changes_log.setVisible(bool(checked))
+        self.changes_toggle_btn.setText('Hide Changes' if checked else 'Show Changes')
+
     def _update_sketch_image(self):
         self.sketch_image_path = self.sketch_image_edit.text().strip()
         if self.view_mode.currentText() == 'Controller Sketch':
@@ -1126,7 +1298,9 @@ class CntrlWindow(QtWidgets.QMainWindow):
             return
         ok, msg = self.read_raw_command(cmd)
         if ok and ': ' in msg:
-            read_edit.setText(msg.split(': ', 1)[1].strip())
+            val = msg.split(': ', 1)[1].strip()
+            read_edit.setText(val)
+            self._record_current_value(axis_edit.text().strip() or self.default_axis_id, row_def.get('name', ''), val)
         else:
             read_edit.setText(msg)
 
@@ -1139,6 +1313,13 @@ class CntrlWindow(QtWidgets.QMainWindow):
         if not ok:
             read_edit.setText(msg)
             return
+        axis_id = axis_edit.text().strip() or self.default_axis_id
+        self._record_change(axis_id, row_def.get('name', ''), set_edit.text().strip())
+        if not row_def.get('get'):
+            self._record_current_value(axis_id, row_def.get('name', ''), set_edit.text().strip())
+        self._log_change(
+            f"WRITE axis={axis_id} cmd={row_def.get('name','')} value={set_edit.text().strip()} | {cmd}"
+        )
         # Auto-read after write so the displayed value reflects what is now active.
         if row_def.get('get'):
             self._read_row(row_def, axis_edit, read_edit)

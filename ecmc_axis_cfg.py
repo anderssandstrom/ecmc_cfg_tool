@@ -3,6 +3,7 @@ import argparse
 import csv
 import json
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -291,7 +292,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
     def __init__(self, catalog_path, yaml_path, mapping_path, default_cmd_pv, default_qry_pv, timeout, axis_id="1", title_prefix=""):
         super().__init__()
         self.setWindowTitle(f"ecmc Axis YAML Config [{title_prefix}]" if title_prefix else "ecmc Axis YAML Config")
-        self.resize(1400, 900)
+        self.resize(920, 620)
         self.client = EpicsClient(timeout=timeout)
         self.catalog = self._load_catalog(catalog_path)
         self.catalog_desc_by_named = self._build_catalog_description_index(self.catalog)
@@ -300,7 +301,10 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.mapping_path = Path(mapping_path) if mapping_path else Path(yaml_path).with_suffix(".command_map.csv")
         self.yaml_cmd_map = {}
         self.axis_id_default = str(axis_id).strip() or "1"
+        self.title_prefix = str(title_prefix or "").strip()
         self._leaf_rows = []
+        self._changes_by_axis = {}
+        self._current_values_by_axis = {}
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._load_yaml_tree()
         self._log(f"Connected via backend: {self.client.backend}")
@@ -330,12 +334,54 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(root)
         layout = QtWidgets.QVBoxLayout(root)
 
-        cfg_group = QtWidgets.QGroupBox("Configuration")
-        cfg = QtWidgets.QGridLayout(cfg_group)
+        top_row = QtWidgets.QHBoxLayout()
+        self.cfg_toggle_btn = QtWidgets.QPushButton("Show Config")
+        self.cfg_toggle_btn.setAutoDefault(False)
+        self.cfg_toggle_btn.setDefault(False)
+        self.cfg_toggle_btn.clicked.connect(self._toggle_config_panel)
+        self.log_toggle_btn = QtWidgets.QPushButton("Show Log")
+        self.log_toggle_btn.setAutoDefault(False)
+        self.log_toggle_btn.setDefault(False)
+        self.log_toggle_btn.clicked.connect(self._toggle_log_panel)
+        self.changes_toggle_btn = QtWidgets.QPushButton("Show Changes")
+        self.changes_toggle_btn.setAutoDefault(False)
+        self.changes_toggle_btn.setDefault(False)
+        self.changes_toggle_btn.clicked.connect(self._toggle_changes_panel)
+        self.changed_yaml_btn = QtWidgets.QPushButton("Show Changed YAML")
+        self.changed_yaml_btn.setAutoDefault(False)
+        self.changed_yaml_btn.setDefault(False)
+        self.changed_yaml_btn.clicked.connect(self._show_changed_yaml_window)
+        self.open_cntrl_btn = QtWidgets.QPushButton("Open Controller")
+        self.open_cntrl_btn.setAutoDefault(False)
+        self.open_cntrl_btn.setDefault(False)
+        self.open_cntrl_btn.clicked.connect(self._open_controller_window)
+        top_row.addWidget(self.cfg_toggle_btn)
+        top_row.addWidget(self.log_toggle_btn)
+        top_row.addWidget(self.changes_toggle_btn)
+        top_row.addWidget(self.changed_yaml_btn)
+        top_row.addWidget(self.open_cntrl_btn)
+        top_row.addStretch(1)
+        layout.addLayout(top_row)
+
+        search_row = QtWidgets.QHBoxLayout()
+        self.search = QtWidgets.QLineEdit()
+        self.search.setPlaceholderText("Filter keys...")
+        self.search.textChanged.connect(self._apply_tree_filter)
+        self.axis_top_edit = QtWidgets.QLineEdit(self.axis_id_default)
+        self.axis_top_edit.setMaximumWidth(80)
+        self.axis_top_edit.editingFinished.connect(lambda: self.axis_edit.setText(self.axis_top_edit.text()))
+        search_row.addWidget(self.search, 1)
+        search_row.addWidget(QtWidgets.QLabel("Axis"))
+        search_row.addWidget(self.axis_top_edit)
+        layout.addLayout(search_row)
+
+        self.cfg_group = QtWidgets.QGroupBox("Configuration")
+        cfg = QtWidgets.QGridLayout(self.cfg_group)
         self.cmd_pv = QtWidgets.QLineEdit(default_cmd_pv)
         self.qry_pv = QtWidgets.QLineEdit(default_qry_pv)
         self.axis_edit = QtWidgets.QLineEdit(self.axis_id_default)
         self.axis_edit.setMaximumWidth(80)
+        self.axis_edit.editingFinished.connect(lambda: self.axis_top_edit.setText(self.axis_edit.text()))
         self.timeout_edit = QtWidgets.QDoubleSpinBox()
         self.timeout_edit.setRange(0.1, 60.0)
         self.timeout_edit.setDecimals(1)
@@ -347,12 +393,6 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         reload_btn.setAutoDefault(False)
         reload_btn.setDefault(False)
         reload_btn.clicked.connect(self._reload_yaml_from_edit)
-        self.show_unmatched = QtWidgets.QCheckBox("Show unmatched")
-        self.show_unmatched.setChecked(True)
-        self.show_unmatched.toggled.connect(self._load_yaml_tree)
-        self.show_blocked = QtWidgets.QCheckBox('Show "block" fields')
-        self.show_blocked.setChecked(False)
-        self.show_blocked.toggled.connect(self._load_yaml_tree)
 
         cfg.addWidget(QtWidgets.QLabel("Command PV"), 0, 0)
         cfg.addWidget(self.cmd_pv, 0, 1)
@@ -365,13 +405,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         cfg.addWidget(QtWidgets.QLabel("YAML Template"), 2, 0)
         cfg.addWidget(self.yaml_edit, 2, 1, 1, 3)
         cfg.addWidget(reload_btn, 2, 4)
-        cfg.addWidget(self.show_unmatched, 0, 4)
-        cfg.addWidget(self.show_blocked, 1, 4)
-        layout.addWidget(cfg_group)
+        layout.addWidget(self.cfg_group)
 
         self.tree = QtWidgets.QTreeWidget()
-        self.tree.setColumnCount(7)
-        self.tree.setHeaderLabels(["Field", "Set Value", "Readback", "Command", "W", "R", "Status"])
+        self.tree.setColumnCount(8)
+        self.tree.setHeaderLabels(["Field", "Set Value", "", "Readback", "W", "R", "Command", "Status"])
         self.tree.setAlternatingRowColors(True)
         self.tree.setUniformRowHeights(False)
         self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
@@ -381,33 +419,227 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.tree.header().setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)
         self.tree.header().setSectionResizeMode(5, QtWidgets.QHeaderView.ResizeToContents)
         self.tree.header().setSectionResizeMode(6, QtWidgets.QHeaderView.Stretch)
+        self.tree.header().setSectionResizeMode(7, QtWidgets.QHeaderView.ResizeToContents)
         layout.addWidget(self.tree, stretch=1)
 
         action_row = QtWidgets.QHBoxLayout()
-        read_all = QtWidgets.QPushButton("Read Matched")
-        read_all.setAutoDefault(False)
-        read_all.setDefault(False)
-        read_all.clicked.connect(self._read_all_matched)
-        write_all = QtWidgets.QPushButton("Write Filled")
-        write_all.setAutoDefault(False)
-        write_all.setDefault(False)
-        write_all.clicked.connect(self._write_filled_matched)
-        copy_btn = QtWidgets.QPushButton("Copy Read->Set")
-        copy_btn.setAutoDefault(False)
-        copy_btn.setDefault(False)
-        copy_btn.clicked.connect(self._copy_read_to_set)
-        action_row.addWidget(read_all)
-        action_row.addWidget(write_all)
-        action_row.addWidget(copy_btn)
+        self.read_all_btn = QtWidgets.QPushButton("Read All")
+        self.read_all_btn.setAutoDefault(False)
+        self.read_all_btn.setDefault(False)
+        self.read_all_btn.clicked.connect(self._read_all_matched)
+        self.write_all_btn = QtWidgets.QPushButton("Write Filled")
+        self.write_all_btn.setAutoDefault(False)
+        self.write_all_btn.setDefault(False)
+        self.write_all_btn.clicked.connect(self._write_filled_matched)
+        self.copy_btn = QtWidgets.QPushButton("Copy Read->Set")
+        self.copy_btn.setAutoDefault(False)
+        self.copy_btn.setDefault(False)
+        self.copy_btn.clicked.connect(self._copy_read_to_set)
+        action_row.addWidget(self.read_all_btn)
+        action_row.addWidget(self.write_all_btn)
+        action_row.addWidget(self.copy_btn)
         action_row.addStretch(1)
-        layout.addLayout(action_row)
+        search_row.addLayout(action_row)
 
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
         layout.addWidget(self.log, stretch=0)
+        self.changes_log = QtWidgets.QPlainTextEdit()
+        self.changes_log.setReadOnly(True)
+        self.changes_log.setPlaceholderText("Successful writes are tracked here for this session...")
+        layout.addWidget(self.changes_log, stretch=0)
+        self.cfg_group.setVisible(False)
+        self.log.setVisible(False)
+        self.changes_log.setVisible(False)
+
+    def _toggle_config_panel(self):
+        visible = not self.cfg_group.isVisible()
+        self.cfg_group.setVisible(visible)
+        self.cfg_toggle_btn.setText("Hide Config" if visible else "Show Config")
+
+    def _toggle_log_panel(self):
+        visible = not self.log.isVisible()
+        self.log.setVisible(visible)
+        self.log_toggle_btn.setText("Hide Log" if visible else "Show Log")
+
+    def _toggle_changes_panel(self):
+        visible = not self.changes_log.isVisible()
+        self.changes_log.setVisible(visible)
+        self.changes_toggle_btn.setText("Hide Changes" if visible else "Show Changes")
+
+    def _open_controller_window(self):
+        script = Path(__file__).with_name("start_cntrl.sh")
+        if not script.exists():
+            self._log(f"Launcher not found: {script.name}")
+            return
+        axis_id = self._axis_id()
+        prefix = self.title_prefix or ""
+        if not prefix:
+            cmd_pv = self.cmd_pv.text().strip()
+            m = re.match(r"^(.*):MCU-Cmd\\.AOUT$", cmd_pv)
+            prefix = m.group(1) if m else "IOC:ECMC"
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix), str(axis_id)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started controller window for axis {axis_id} (prefix {prefix})")
+        except Exception as ex:
+            self._log(f"Failed to start controller window: {ex}")
+
+    def _apply_tree_filter(self):
+        needle = self.search.text().strip().lower() if hasattr(self, "search") else ""
+        root = self.tree.invisibleRootItem()
+
+        def visit(item):
+            item_path = str(item.data(0, QtCore.Qt.UserRole) or "").lower()
+            item_key = item.text(0).lower()
+            self_match = (not needle) or (needle in item_key) or (needle in item_path)
+            child_visible = False
+            for i in range(item.childCount()):
+                if visit(item.child(i)):
+                    child_visible = True
+            visible = self_match or child_visible
+            item.setHidden(not visible)
+            return visible
+
+        for i in range(root.childCount()):
+            visit(root.child(i))
 
     def _log(self, msg):
         self.log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
+    def _log_change(self, msg):
+        self.changes_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
+    def _record_change(self, axis_id, yaml_key, value):
+        axis_key = str(axis_id).strip() or self.axis_id_default
+        if not yaml_key:
+            return
+        axis_changes = self._changes_by_axis.setdefault(axis_key, {})
+        axis_changes[str(yaml_key)] = str(value)
+
+    def _record_current_value(self, axis_id, yaml_key, value):
+        axis_key = str(axis_id).strip() or self.axis_id_default
+        if not yaml_key:
+            return
+        axis_vals = self._current_values_by_axis.setdefault(axis_key, {})
+        axis_vals[str(yaml_key)] = str(value)
+
+    def _yaml_scalar_text(self, value):
+        s = str(value)
+        low = s.lower()
+        if low in {"true", "false", "null"}:
+            return low
+        try:
+            float(s)
+            return s
+        except Exception:
+            pass
+        if re.fullmatch(r"0x[0-9a-fA-F]+", s):
+            return f"'{s}'"
+        if s == "" or any(ch in s for ch in [":", "#", "{", "}", "[", "]", ","]) or s.strip() != s or " " in s:
+            return "'" + s.replace("'", "''") + "'"
+        return s
+
+    def _build_yaml_text_from_flat(self, axis_id, flat, title, changed_paths=None):
+        flat = dict(flat or {})
+        changed_paths = set(changed_paths or [])
+        if not flat:
+            return f"# No values available for axis {axis_id}\n"
+
+        tree = {}
+        for path, value in sorted(flat.items()):
+            cur = tree
+            parts = [p for p in str(path).split(".") if p]
+            for part in parts[:-1]:
+                nxt = cur.get(part)
+                if not isinstance(nxt, dict):
+                    nxt = {}
+                    cur[part] = nxt
+                cur = nxt
+            if parts:
+                cur[parts[-1]] = value
+
+        lines = [f"# {title} for axis {axis_id}", "axisId: " + self._yaml_scalar_text(axis_id)]
+
+        def emit(node, indent=0, prefix=""):
+            pad = " " * indent
+            for k, v in node.items():
+                path = f"{prefix}.{k}" if prefix else k
+                if isinstance(v, dict):
+                    lines.append(f"{pad}{k}:")
+                    emit(v, indent + 2, path)
+                else:
+                    line = f"{pad}{k}: {self._yaml_scalar_text(v)}"
+                    if path in changed_paths:
+                        line += "  # CHANGED"
+                    lines.append(line)
+
+        emit(tree, 0, "")
+        return "\n".join(lines) + "\n"
+
+    def _build_changed_yaml_text(self, axis_id):
+        return self._build_yaml_text_from_flat(axis_id, self._changes_by_axis.get(str(axis_id).strip(), {}), "Changed values")
+
+    def _build_all_current_yaml_text(self, axis_id):
+        axis_key = str(axis_id).strip()
+        current = dict(self._current_values_by_axis.get(axis_key, {}))
+        changed = self._changes_by_axis.get(axis_key, {})
+        # Fill write-only rows from session changes if no readback exists.
+        for k, v in (changed or {}).items():
+            current.setdefault(k, v)
+        # Include all known leaf keys with null if never read/written this session.
+        for row in self._leaf_rows:
+            path = str(row.get("path", "") or "")
+            if path:
+                current.setdefault(path, "null")
+        changed_paths = set((changed or {}).keys())
+        return self._build_yaml_text_from_flat(axis_id, current, "Current values (session-known)", changed_paths=changed_paths)
+
+    def _show_changed_yaml_window(self):
+        axis_id = self._axis_id()
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(f"Changed YAML (Axis {axis_id})")
+        dlg.resize(800, 700)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        info = QtWidgets.QLabel(f"Session changes for selected axis: {axis_id}")
+        lay.addWidget(info)
+        mode_row = QtWidgets.QHBoxLayout()
+        mode_row.addWidget(QtWidgets.QLabel("View"))
+        mode_combo = QtWidgets.QComboBox()
+        mode_combo.addItems(["Changed fields", "All fields (current)"])
+        mode_row.addWidget(mode_combo)
+        mode_row.addStretch(1)
+        lay.addLayout(mode_row)
+        edit = QtWidgets.QPlainTextEdit()
+        edit.setReadOnly(True)
+        lay.addWidget(edit, 1)
+
+        def refresh_text():
+            if mode_combo.currentIndex() == 0:
+                edit.setPlainText(self._build_changed_yaml_text(axis_id))
+            else:
+                edit.setPlainText(self._build_all_current_yaml_text(axis_id))
+
+        mode_combo.currentIndexChanged.connect(lambda _=0: refresh_text())
+        refresh_text()
+        btns = QtWidgets.QHBoxLayout()
+        copy_btn = QtWidgets.QPushButton("Copy")
+        copy_btn.setAutoDefault(False)
+        copy_btn.setDefault(False)
+        copy_btn.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(edit.toPlainText()))
+        close_btn = QtWidgets.QPushButton("Close")
+        close_btn.setAutoDefault(False)
+        close_btn.setDefault(False)
+        close_btn.clicked.connect(dlg.accept)
+        btns.addWidget(copy_btn)
+        btns.addStretch(1)
+        btns.addWidget(close_btn)
+        lay.addLayout(btns)
+        dlg.exec_()
 
     def _reload_yaml_from_edit(self):
         self.yaml_path = Path(self.yaml_edit.text().strip())
@@ -430,6 +662,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             self._add_tree_node(None, child)
         # Start collapsed: only top-level rows are visible.
         self.tree.collapseAll()
+        self._apply_tree_filter()
 
     def _load_yaml_command_map(self):
         p = self.mapping_path
@@ -482,6 +715,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
 
     def _add_tree_node(self, parent_item, node):
         item = QtWidgets.QTreeWidgetItem([node.key])
+        item.setData(0, QtCore.Qt.UserRole, node.path)
         if parent_item is None:
             self.tree.addTopLevelItem(item)
         else:
@@ -497,7 +731,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
 
         val = scalar_text(node.value)
         blocked = is_block_marked(val)
-        if blocked and not self.show_blocked.isChecked():
+        if blocked:
             item.setHidden(True)
             return
 
@@ -512,10 +746,6 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             pair = self.command_pairs.get(base) if base else None
             matched = bool(pair)
 
-        if not matched and not self.show_unmatched.isChecked():
-            item.setHidden(True)
-            return
-
         set_edit = QtWidgets.QLineEdit("")
         set_edit.setPlaceholderText(val if val else "value")
         read_edit = QtWidgets.QLineEdit("")
@@ -523,31 +753,39 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         cmd_label = QtWidgets.QLineEdit(pair["set"] if pair else "")
         cmd_label.setReadOnly(True)
         if blocked:
-            status_txt = "blocked"
+            meta_status_txt = "blocked"
         elif not matched:
-            status_txt = "unmatched"
+            meta_status_txt = "unmatched"
         else:
             has_set = bool(pair.get("set"))
             has_get = bool(pair.get("get"))
             if has_set and has_get:
-                status_txt = "matched"
+                meta_status_txt = "matched"
             elif has_set:
-                status_txt = "missing getter"
+                meta_status_txt = "missing getter"
             elif has_get:
-                status_txt = "missing setter"
+                meta_status_txt = "missing setter"
             else:
-                status_txt = "unmatched"
-        status = QtWidgets.QLabel(status_txt)
-        tooltip = self._build_tooltip(node, pair, status_txt)
+                meta_status_txt = "unmatched"
+        status = QtWidgets.QLabel("")
+        tooltip = self._build_tooltip(node, pair, meta_status_txt)
         for col in range(self.tree.columnCount()):
             item.setToolTip(col, tooltip)
         for w in (set_edit, read_edit, cmd_label, status):
             w.setToolTip(tooltip)
 
+        copy_one_btn = QtWidgets.QPushButton("<-")
+        copy_one_btn.setAutoDefault(False)
+        copy_one_btn.setDefault(False)
+        copy_one_btn.setMaximumWidth(36)
+        copy_one_btn.setToolTip(tooltip)
+        copy_one_btn.clicked.connect(lambda _=False, se=set_edit, re=read_edit: se.setText(re.text()))
+
         self.tree.setItemWidget(item, 1, set_edit)
-        self.tree.setItemWidget(item, 2, read_edit)
-        self.tree.setItemWidget(item, 3, cmd_label)
-        self.tree.setItemWidget(item, 6, status)
+        self.tree.setItemWidget(item, 2, copy_one_btn)
+        self.tree.setItemWidget(item, 3, read_edit)
+        self.tree.setItemWidget(item, 6, cmd_label)
+        self.tree.setItemWidget(item, 7, status)
 
         row = {
             "item": item,
@@ -568,7 +806,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             for b in (w_btn, r_btn):
                 b.setAutoDefault(False)
                 b.setDefault(False)
-                b.setMaximumWidth(32)
+                b.setMaximumWidth(40)
             w_btn.setEnabled(bool(pair.get("set")))
             r_btn.setEnabled(bool(pair.get("get")))
             w_btn.setToolTip(tooltip)
@@ -634,6 +872,12 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         ok, msg = self.send_raw_command(cmd)
         row["status"].setText("OK" if ok else "ERR")
         if ok:
+            axis_id = self._axis_id()
+            self._record_change(axis_id, row.get("path", ""), value)
+            # If getter is missing, write is the best current value we have.
+            if not pair.get("get"):
+                self._record_current_value(axis_id, row.get("path", ""), value)
+            self._log_change(f'WRITE axis={self._axis_id()} key={row.get("path","")} value={value} | {cmd}')
             self._read_row(row)
         else:
             row["read_edit"].setText(msg)
@@ -647,7 +891,9 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         ok, msg = self.read_raw_command(cmd)
         row["status"].setText("OK" if ok else "ERR")
         if ok and ": " in msg:
-            row["read_edit"].setText(msg.split(": ", 1)[1].strip())
+            val = msg.split(": ", 1)[1].strip()
+            row["read_edit"].setText(val)
+            self._record_current_value(self._axis_id(), row.get("path", ""), val)
         else:
             row["read_edit"].setText(msg)
 
