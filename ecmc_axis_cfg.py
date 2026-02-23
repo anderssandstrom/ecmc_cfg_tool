@@ -603,7 +603,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         axis_id = self._axis_id()
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(f"Changed YAML (Axis {axis_id})")
-        dlg.resize(800, 700)
+        dlg.resize(640, 520)
         lay = QtWidgets.QVBoxLayout(dlg)
         info = QtWidgets.QLabel(f"Session changes for selected axis: {axis_id}")
         lay.addWidget(info)
@@ -752,6 +752,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         read_edit.setReadOnly(True)
         cmd_label = QtWidgets.QLineEdit(pair["set"] if pair else "")
         cmd_label.setReadOnly(True)
+        cmd_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+        cmd_label.setCursorPosition(0)
         if blocked:
             meta_status_txt = "blocked"
         elif not matched:

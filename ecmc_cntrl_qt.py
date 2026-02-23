@@ -555,7 +555,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         axis_id = self.axis_all_edit.text().strip() or self.default_axis_id
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle(f'Changed YAML (Axis {axis_id})')
-        dlg.resize(800, 700)
+        dlg.resize(640, 520)
         lay = QtWidgets.QVBoxLayout(dlg)
         lay.addWidget(QtWidgets.QLabel(f'Session controller writes for axis: {axis_id}'))
         mode_row = QtWidgets.QHBoxLayout()
