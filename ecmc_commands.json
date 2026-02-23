@@ -2121,6 +2121,36 @@
       "runtime_note": "Read/query command usable during runtime."
     },
     {
+      "command": "GetAxisEncLookupTableRange(<int>)",
+      "command_named": "GetAxisEncLookupTableRange(<int>)",
+      "param_names": [],
+      "parser_command": "GetAxisEncLookupTableRange(<int>)",
+      "name": "GetAxisEncLookupTableRange",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4234",
+      "runtime_safe": true,
+      "runtime_class": "runtime",
+      "runtime_note": "Read/query command usable during runtime."
+    },
+    {
+      "command": "GetAxisEncLookupTableScale(<int>)",
+      "command_named": "GetAxisEncLookupTableScale(<int>)",
+      "param_names": [],
+      "parser_command": "GetAxisEncLookupTableScale(<int>)",
+      "name": "GetAxisEncLookupTableScale",
+      "category": "Motion",
+      "description": "",
+      "header_source": "",
+      "header_example": "",
+      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:4242",
+      "runtime_safe": true,
+      "runtime_class": "runtime",
+      "runtime_note": "Read/query command usable during runtime."
+    },
+    {
       "command": "GetAxisEncOffset(<int>)",
       "command_named": "GetAxisEncOffset(<int>)",
       "param_names": [],

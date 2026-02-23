@@ -96,7 +96,7 @@ encoder:
 #    status: block                                         # Bit in encoder status word for latch triggered status. Used for some homing seqs
 #    armCmd: block                                          # Value in dec to arm latch/touch probe to write to encoder.control 
 #    armBits:  block                                        # Bit size of encoder.latch.armCmd
-  primary: True                                       # Use this encoder as primary (for control)
+#  primary: True                                       # Use this encoder as primary (for control)
   homing:
     type: 3                                           # Homing sequence type
     position: -30                                     # Position to reference encoder to
@@ -119,7 +119,8 @@ encoder:
   lookuptable:
     # filename: block                         # Load correction lockuptable file (default enabled if loaded)
     enable: 1                                        # Enable correction table
-    mask: '0x3FF'                                    # Encoder raw mask to apply correction (example single turn bits or period bits of EL5021)
+    range: 0                                    # Modulo range
+    scale: 1                                    # scale
 
 controller:
   Kp: 15                                              # Kp proportional gain

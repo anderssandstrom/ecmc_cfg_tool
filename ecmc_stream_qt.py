@@ -16,6 +16,7 @@ except Exception:
 
 PLACEHOLDER_RE = re.compile(r'<([^>]+)>')
 FLOAT_LITERAL_RE = re.compile(r'(?<![A-Za-z0-9_])([+-]?(?:(?:\d+\.\d*)|(?:\.\d+))(?:[eE][+-]?\d+)?)(?![A-Za-z0-9_])')
+FLOAT_DISPLAY_RE = re.compile(r'^[+-]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+(?:\.\d*)?[eE][+-]?\d+)|(?:\.\d+[eE][+-]?\d+))$')
 
 
 class EpicsClient:
@@ -148,6 +149,47 @@ def normalize_float_literals(cmd):
     return FLOAT_LITERAL_RE.sub(lambda m: _trim_float_literal_zeros(m.group(1)), s)
 
 
+def compact_float_text(value, sig_digits=15):
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+
+    if isinstance(value, float):
+        v = float(value)
+    else:
+        s = str(value or '').strip()
+        if not s:
+            return s
+        if not FLOAT_DISPLAY_RE.match(s):
+            return str(value)
+        # Preserve plain integer strings exactly as entered/read.
+        if '.' not in s and 'e' not in s.lower():
+            return s
+        try:
+            v = float(s)
+        except Exception:
+            return str(value)
+
+    out = f'{v:.{int(sig_digits)}g}'
+    if out in {'-0', '+0'}:
+        return '0'
+    return out
+
+
+def compact_query_message_value(msg):
+    s = str(msg or '')
+    if not s.startswith('QRY <- ') or ': ' not in s:
+        return s
+    head, val = s.rsplit(': ', 1)
+    return f'{head}: {compact_float_text(val)}'
+
+
+class CompactDoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    def textFromValue(self, value):
+        return compact_float_text(value)
+
+
 class SpinBoxWithButtons(QtWidgets.QWidget):
     def __init__(self, float_mode=False):
         super().__init__()
@@ -160,7 +202,7 @@ class SpinBoxWithButtons(QtWidgets.QWidget):
         layout.setSpacing(0)
 
         if self.float_mode:
-            self.spin = QtWidgets.QDoubleSpinBox()
+            self.spin = CompactDoubleSpinBox()
             self.spin.setDecimals(4)
             self.spin.setSingleStep(0.1)
         else:
@@ -268,7 +310,7 @@ class ParamInputWidget(QtWidgets.QWidget):
             self.slider.valueChanged.connect(self._slider_to_spin)
             self.edit.editingFinished.connect(self._text_to_spin)
         elif self.ptype in {'float', 'double'}:
-            self.spin = QtWidgets.QDoubleSpinBox()
+            self.spin = CompactDoubleSpinBox()
             self.spin.setRange(-1e6, 1e6)
             self.spin.setDecimals(4)
             self.spin.setSingleStep(0.1)
@@ -302,7 +344,7 @@ class ParamInputWidget(QtWidgets.QWidget):
         self._updating = True
         try:
             if isinstance(self.spin, QtWidgets.QDoubleSpinBox):
-                self.edit.setText(f'{float(val):g}')
+                self.edit.setText(compact_float_text(val))
                 if self.slider is not None:
                     self.slider.setValue(int(round(float(val) * 10.0)))
             else:
@@ -339,7 +381,10 @@ class ParamInputWidget(QtWidgets.QWidget):
         return self.edit.text()
 
     def set_text(self, value):
-        self.edit.setText(str(value))
+        if isinstance(self.spin, QtWidgets.QDoubleSpinBox):
+            self.edit.setText(compact_float_text(value))
+        else:
+            self.edit.setText(str(value))
         self._text_to_spin()
 
 
@@ -456,7 +501,7 @@ class CommandEditorRow(QtWidgets.QGroupBox):
     def _read_command(self):
         cmd = self.command_text().strip()
         ok, msg = self.parent_window.read_raw_command(cmd)
-        self.result.setText(msg)
+        self.result.setText(compact_query_message_value(msg))
 
 
 class MultiCommandDialog(QtWidgets.QDialog):
@@ -645,10 +690,10 @@ class MultiCommandDialog(QtWidgets.QDialog):
     def _widget_value(self, w):
         if isinstance(w, SpinBoxWithButtons):
             if isinstance(w.spin, QtWidgets.QDoubleSpinBox):
-                return f'{float(w.value()):g}'
+                return compact_float_text(w.value())
             return str(int(w.value()))
         if isinstance(w, QtWidgets.QDoubleSpinBox):
-            return f'{float(w.value()):g}'
+            return compact_float_text(w.value())
         if isinstance(w, QtWidgets.QSpinBox):
             return str(int(w.value()))
         return w.text().strip()
@@ -753,7 +798,7 @@ class MultiCommandDialog(QtWidgets.QDialog):
     def _read_row(self, row_idx):
         cmd = self._build_command(row_idx).strip()
         ok, msg = self.parent_window.read_raw_command(cmd)
-        self.rows[row_idx]['result'].setText(msg)
+        self.rows[row_idx]['result'].setText(compact_query_message_value(msg))
 
     def _copy_row(self, row_idx):
         cmd = self._build_command(row_idx).strip()
@@ -813,7 +858,7 @@ class MainWindow(QtWidgets.QMainWindow):
         cfg = QtWidgets.QGridLayout(cfg_group)
         self.cmd_pv = QtWidgets.QLineEdit(default_cmd_pv)
         self.qry_pv = QtWidgets.QLineEdit(default_qry_pv)
-        self.timeout_edit = QtWidgets.QDoubleSpinBox()
+        self.timeout_edit = CompactDoubleSpinBox()
         self.timeout_edit.setRange(0.1, 60.0)
         self.timeout_edit.setDecimals(1)
         self.timeout_edit.setValue(timeout)
@@ -1132,7 +1177,7 @@ class MainWindow(QtWidgets.QMainWindow):
             proc_pv = _proc_pv_for_readback(qp)
             self.client.put(proc_pv, 1, wait=True)
             val = self.client.get(qp, as_string=True)
-            msg = f'QRY <- {qp}: {val}'
+            msg = compact_query_message_value(f'QRY <- {qp}: {val}')
             self._log(msg)
             return True, msg
         except Exception as ex:
@@ -1152,7 +1197,7 @@ class MainWindow(QtWidgets.QMainWindow):
             proc_pv = _proc_pv_for_readback(qp)
             self.client.put(proc_pv, 1, wait=True)
             val = self.client.get(qp, as_string=True)
-            self._log(f'QRY <- {qp}: {val}')
+            self._log(compact_query_message_value(f'QRY <- {qp}: {val}'))
         except Exception as ex:
             self._log(f'ERROR query read: {ex}')
 
@@ -1163,7 +1208,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         try:
             val = self.client.get(qp, as_string=True)
-            self._log(f'QRY <- {qp}: {val}')
+            self._log(compact_query_message_value(f'QRY <- {qp}: {val}'))
         except Exception as ex:
             self._log(f'ERROR query read: {ex}')
 

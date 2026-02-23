@@ -2,6 +2,7 @@
 import argparse
 import json
 import re
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ from ecmc_stream_qt import (
     EpicsClient,
     _join_prefix_pv,
     _proc_pv_for_readback,
+    compact_float_text,
     normalize_float_literals,
 )
 
@@ -262,10 +264,13 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._changes_by_axis = {}
         self._current_values_by_axis = {}
         self.default_axis_id = str(default_axis_id).strip() or '1'
+        self.title_prefix = p
         self.sketch_image_path = str(sketch_image_path or '').strip()
+        self._did_initial_read_all = False
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._populate_table()
         self._log(f'Connected via backend: {self.client.backend}')
+        QtCore.QTimer.singleShot(0, self._initial_read_all)
 
     def _load_catalog(self, path):
         p = Path(path)
@@ -362,6 +367,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.changed_yaml_btn.setDefault(False)
         self.changed_yaml_btn.clicked.connect(self._show_changed_yaml_window)
         top_row.addWidget(self.changed_yaml_btn)
+        self.open_motion_btn = QtWidgets.QPushButton('Open Motion')
+        self.open_motion_btn.setAutoDefault(False)
+        self.open_motion_btn.setDefault(False)
+        self.open_motion_btn.clicked.connect(self._open_motion_window)
+        top_row.addWidget(self.open_motion_btn)
         top_row.addStretch(1)
         layout.addLayout(top_row)
         layout.addWidget(cfg_panel)
@@ -447,6 +457,38 @@ class CntrlWindow(QtWidgets.QMainWindow):
         t = datetime.now().strftime('%H:%M:%S')
         self.changes_log.appendPlainText(f'[{t}] {msg}')
 
+    def _initial_read_all(self):
+        if self._did_initial_read_all:
+            return
+        self._did_initial_read_all = True
+        try:
+            self._read_all_rows()
+            self._copy_all_read_to_set()
+        except Exception as ex:
+            self._log(f'Initial Read All failed: {ex}')
+
+    def _open_motion_window(self):
+        script = Path(__file__).with_name('start_mtn.sh')
+        if not script.exists():
+            self._log(f'Launcher not found: {script.name}')
+            return
+        axis_id = self.axis_all_edit.text().strip() or self.default_axis_id
+        prefix = self.title_prefix or ''
+        if not prefix:
+            cmd_pv = self.cmd_pv.text().strip()
+            m = re.match(r'^(.*):MCU-Cmd\.AOUT$', cmd_pv)
+            prefix = m.group(1) if m else 'IOC:ECMC'
+        try:
+            subprocess.Popen(
+                ['bash', str(script), str(prefix), str(axis_id)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f'Started motion window for axis {axis_id} (prefix {prefix})')
+        except Exception as ex:
+            self._log(f'Failed to start motion window: {ex}')
+
     def _record_change(self, axis_id, key, value):
         axis = str(axis_id).strip() or self.default_axis_id
         if not key:
@@ -458,6 +500,35 @@ class CntrlWindow(QtWidgets.QMainWindow):
         if not key:
             return
         self._current_values_by_axis.setdefault(axis, {})[str(key)] = str(value)
+
+    def _cached_current_value(self, axis_id, key):
+        axis = str(axis_id).strip() or self.default_axis_id
+        if not key:
+            return ''
+        return str(self._current_values_by_axis.get(axis, {}).get(str(key), '') or '')
+
+    def _seed_value_widgets_from_cache(self, row_def, axis_text, set_edit, read_edit):
+        if not row_def:
+            return
+        name = str(row_def.get('name', '') or '')
+        if not name:
+            return
+        cached = self._cached_current_value(axis_text, name)
+        if not cached:
+            return
+        # Fill readback if empty.
+        if read_edit is not None and hasattr(read_edit, 'text') and not read_edit.text().strip():
+            read_edit.setText(cached)
+        # Fill set field if empty.
+        if set_edit is not None and hasattr(set_edit, 'text') and not set_edit.text().strip():
+            set_edit.setText(cached)
+        # Sketch view uses same widget for set/read and needs a target marker for green match.
+        if set_edit is read_edit and read_edit is not None and bool(read_edit.property('sketchValue')):
+            read_edit.setProperty('lastReadbackText', compact_float_text(cached))
+            read_edit.setProperty('lastWriteTargetText', compact_float_text(cached))
+            self._update_value_match_visual(read_edit, read_edit)
+        else:
+            self._update_value_match_visual(set_edit, read_edit)
 
     def _yaml_scalar_text(self, value):
         s = str(value)
@@ -665,7 +736,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         else:
             edit.setFixedSize(96, 34)
         edit.setAlignment(QtCore.Qt.AlignCenter)
-        edit.setStyleSheet(
+        base_style = (
             'QLineEdit {'
             ' border: 2px solid #0f3345;'
             ' background: #efefef;'
@@ -673,6 +744,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
             f' font-size: {"11px" if overlay else "13px"};'
             '}'
         )
+        edit.setStyleSheet(base_style)
+        edit.setProperty('sketchValue', True)
+        edit.setProperty('sketchOverlay', bool(overlay))
+        edit.setProperty('sketchBaseStyle', base_style)
+        edit.textChanged.connect(lambda _txt='', e=edit: self._on_sketch_value_text_changed(e))
 
         rb = QtWidgets.QPushButton('R')
         wb = QtWidgets.QPushButton('W')
@@ -701,9 +777,12 @@ class CntrlWindow(QtWidgets.QMainWindow):
             wb.setEnabled(bool(row_def.get('set')))
             rb.clicked.connect(lambda _=False, rd=row_def, e=edit: self._read_row(rd, self.axis_all_edit, e))
             wb.clicked.connect(lambda _=False, rd=row_def, e=edit: self._write_row(rd, self.axis_all_edit, e, e))
+            if row_def.get('set'):
+                edit.returnPressed.connect(lambda rd=row_def, e=edit: self._write_row(rd, self.axis_all_edit, e, e))
             if row_def.get('get'):
                 self._diagram_read_rows.append((row_def, edit))
             self._diagram_value_pairs.append((edit, edit))
+            self._seed_value_widgets_from_cache(row_def, self.axis_all_edit.text(), edit, edit)
 
         cl.addWidget(edit)
         btn_col = QtWidgets.QVBoxLayout()
@@ -1124,6 +1203,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
             if row_def.get('get'):
                 self._diagram_read_rows.append((row_def, read_edit))
             self._diagram_value_pairs.append((set_edit, read_edit))
+            self._seed_value_widgets_from_cache(row_def, self.axis_all_edit.text(), set_edit, read_edit)
 
             lay.addWidget(label, r, 0)
             lay.addWidget(set_edit, r, 1)
@@ -1179,6 +1259,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
 
         read_btn.clicked.connect(lambda _=False, rd=row_def, ax=axis, rv=read_val: self._read_row(rd, ax, rv))
         write_btn.clicked.connect(lambda _=False, rd=row_def, ax=axis, sv=set_val, rv=read_val: self._write_row(rd, ax, sv, rv))
+        self._seed_value_widgets_from_cache(row_def, axis.text(), set_val, read_val)
 
     def _apply_axis_all(self):
         axis_value = self.axis_all_edit.text().strip()
@@ -1228,6 +1309,9 @@ class CntrlWindow(QtWidgets.QMainWindow):
                 if not val:
                     continue
                 set_edit.setText(val)
+                if set_edit is read_edit and bool(read_edit.property('sketchValue')):
+                    read_edit.setProperty('lastWriteTargetText', compact_float_text(val))
+                self._update_value_match_visual(set_edit, read_edit)
                 copied += 1
             self._log(f'Copied readback to set fields ({copied} rows)')
             return
@@ -1241,6 +1325,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
             if not val:
                 continue
             set_edit.setText(val)
+            self._update_value_match_visual(set_edit, read_edit)
             copied += 1
         self._log(f'Copied readback to set fields ({copied} rows)')
 
@@ -1254,6 +1339,78 @@ class CntrlWindow(QtWidgets.QMainWindow):
         if err:
             return '', f'{err} for template {template}'
         return normalize_float_literals(cmd.strip()), ''
+
+    def _values_match_text(self, a, b):
+        sa = str(a or '').strip()
+        sb = str(b or '').strip()
+        if not sa or not sb:
+            return False
+        if sa == sb:
+            return True
+        try:
+            return float(sa) == float(sb)
+        except Exception:
+            return False
+
+    def _set_sketch_value_style(self, widget, matched):
+        if widget is None or not bool(widget.property('sketchValue')):
+            return
+        base = widget.property('sketchBaseStyle')
+        if not base:
+            return
+        if matched:
+            overlay = bool(widget.property('sketchOverlay'))
+            font_sz = '11px' if overlay else '13px'
+            widget.setStyleSheet(
+                'QLineEdit {'
+                ' border: 2px solid #9fbe95;'
+                ' background: #d8ead2;'
+                ' color: #173b17;'
+                f' font-size: {font_sz};'
+                ' font-weight: 700;'
+                '}'
+            )
+        else:
+            widget.setStyleSheet(str(base))
+
+    def _set_sketch_pending_style(self, widget):
+        if widget is None or not bool(widget.property('sketchValue')):
+            return
+        overlay = bool(widget.property('sketchOverlay'))
+        font_sz = '11px' if overlay else '13px'
+        widget.setStyleSheet(
+            'QLineEdit {'
+            ' border: 2px solid #d3a6a6;'
+            ' background: #f6d6d6;'
+            ' color: #4a1212;'
+            f' font-size: {font_sz};'
+            ' font-weight: 700;'
+            '}'
+        )
+
+    def _on_sketch_value_text_changed(self, widget):
+        if widget is None or not bool(widget.property('sketchValue')):
+            return
+        txt = widget.text().strip()
+        last_read = str(widget.property('lastReadbackText') or '').strip()
+        if last_read and txt and not self._values_match_text(txt, last_read):
+            self._set_sketch_pending_style(widget)
+            return
+        # Fall back to green/base state based on confirmed match state.
+        self._update_value_match_visual(widget, widget)
+
+    def _update_value_match_visual(self, set_edit, read_edit):
+        # Table/diagram rows compare set vs read. Sketch cells use a single widget,
+        # so compare readback against the last value attempted to write.
+        if read_edit is None:
+            return
+        if set_edit is read_edit and bool(read_edit.property('sketchValue')):
+            target = str(read_edit.property('lastWriteTargetText') or '').strip()
+            matched = self._values_match_text(target, read_edit.text())
+            self._set_sketch_value_style(read_edit, matched)
+            return
+        matched = self._values_match_text(getattr(set_edit, 'text', lambda: '')(), getattr(read_edit, 'text', lambda: '')())
+        self._set_sketch_value_style(read_edit, matched)
 
     def send_raw_command(self, cmd):
         pv = self.cmd_pv.text().strip()
@@ -1295,31 +1452,45 @@ class CntrlWindow(QtWidgets.QMainWindow):
         cmd, err = self._cmd_from_template(row_def.get('get', ''), axis_edit.text(), '')
         if err:
             read_edit.setText(err)
+            self._set_sketch_value_style(read_edit, False)
             return
         ok, msg = self.read_raw_command(cmd)
         if ok and ': ' in msg:
             val = msg.split(': ', 1)[1].strip()
-            read_edit.setText(val)
-            self._record_current_value(axis_edit.text().strip() or self.default_axis_id, row_def.get('name', ''), val)
+            disp_val = compact_float_text(val)
+            if bool(read_edit.property('sketchValue')):
+                read_edit.setProperty('lastReadbackText', disp_val)
+            read_edit.setText(disp_val)
+            self._record_current_value(axis_edit.text().strip() or self.default_axis_id, row_def.get('name', ''), disp_val)
+            if bool(read_edit.property('sketchValue')):
+                self._update_value_match_visual(read_edit, read_edit)
         else:
             read_edit.setText(msg)
+            self._set_sketch_value_style(read_edit, False)
 
     def _write_row(self, row_def, axis_edit, set_edit, read_edit):
+        set_txt = set_edit.text().strip()
         cmd, err = self._cmd_from_template(row_def.get('set', ''), axis_edit.text(), set_edit.text())
         if err:
             read_edit.setText(err)
+            self._set_sketch_value_style(read_edit, False)
             return
         ok, msg = self.send_raw_command(cmd)
         if not ok:
             read_edit.setText(msg)
+            self._set_sketch_value_style(read_edit, False)
             return
         axis_id = axis_edit.text().strip() or self.default_axis_id
-        self._record_change(axis_id, row_def.get('name', ''), set_edit.text().strip())
+        self._record_change(axis_id, row_def.get('name', ''), set_txt)
         if not row_def.get('get'):
-            self._record_current_value(axis_id, row_def.get('name', ''), set_edit.text().strip())
+            self._record_current_value(axis_id, row_def.get('name', ''), set_txt)
         self._log_change(
-            f"WRITE axis={axis_id} cmd={row_def.get('name','')} value={set_edit.text().strip()} | {cmd}"
+            f"WRITE axis={axis_id} cmd={row_def.get('name','')} value={set_txt} | {cmd}"
         )
+        if bool(read_edit.property('sketchValue')):
+            read_edit.setProperty('lastWriteTargetText', compact_float_text(set_txt))
+        else:
+            self._update_value_match_visual(set_edit, read_edit)
         # Auto-read after write so the displayed value reflects what is now active.
         if row_def.get('get'):
             self._read_row(row_def, axis_edit, read_edit)

@@ -5,7 +5,6 @@ import json
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -14,19 +13,26 @@ try:
 except Exception:
     from PySide6 import QtCore, QtWidgets  # type: ignore
 
-from ecmc_stream_qt import EpicsClient, _join_prefix_pv, _proc_pv_for_readback, normalize_float_literals
+from ecmc_stream_qt import (
+    CompactDoubleSpinBox,
+    EpicsClient,
+    _join_prefix_pv,
+    _proc_pv_for_readback,
+    compact_float_text,
+    normalize_float_literals,
+)
 
 
 PLACEHOLDER_RE = re.compile(r"<([^>]+)>")
 
 
-@dataclass
 class YNode:
-    key: str
-    path: str
-    value: str = ""
-    comment: str = ""
-    children: list = field(default_factory=list)
+    def __init__(self, key, path, value="", comment="", children=None):
+        self.key = key
+        self.path = path
+        self.value = value
+        self.comment = comment
+        self.children = [] if children is None else children
 
 
 def _split_yaml_comment(line):
@@ -222,6 +228,8 @@ EXPLICIT_PATH_TO_BASE = {
     "encoder.absOffset": "AxisEncOffset",
     "encoder.source": "AxisEncSourceType",
     "encoder.lookuptable.enable": "AxisEncLookupTableEnable",
+    "encoder.lookuptable.range": "AxisEncLookupTableRange",
+    "encoder.lookuptable.scale": "AxisEncLookupTableScale",
     "encoder.homing.type": "AxisHomeSeqId",
     "encoder.homing.position": "AxisHomePosition",
     "encoder.homing.velocity.to": "AxisHomeVelTowardsCam",
@@ -305,6 +313,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._leaf_rows = []
         self._changes_by_axis = {}
         self._current_values_by_axis = {}
+        self._original_values_by_axis = {}
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._load_yaml_tree()
         self._log(f"Connected via backend: {self.client.backend}")
@@ -355,11 +364,16 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.open_cntrl_btn.setAutoDefault(False)
         self.open_cntrl_btn.setDefault(False)
         self.open_cntrl_btn.clicked.connect(self._open_controller_window)
+        self.open_mtn_btn = QtWidgets.QPushButton("Open Motion")
+        self.open_mtn_btn.setAutoDefault(False)
+        self.open_mtn_btn.setDefault(False)
+        self.open_mtn_btn.clicked.connect(self._open_motion_window)
         top_row.addWidget(self.cfg_toggle_btn)
         top_row.addWidget(self.log_toggle_btn)
         top_row.addWidget(self.changes_toggle_btn)
         top_row.addWidget(self.changed_yaml_btn)
         top_row.addWidget(self.open_cntrl_btn)
+        top_row.addWidget(self.open_mtn_btn)
         top_row.addStretch(1)
         layout.addLayout(top_row)
 
@@ -382,7 +396,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.axis_edit = QtWidgets.QLineEdit(self.axis_id_default)
         self.axis_edit.setMaximumWidth(80)
         self.axis_edit.editingFinished.connect(lambda: self.axis_top_edit.setText(self.axis_edit.text()))
-        self.timeout_edit = QtWidgets.QDoubleSpinBox()
+        self.timeout_edit = CompactDoubleSpinBox()
         self.timeout_edit.setRange(0.1, 60.0)
         self.timeout_edit.setDecimals(1)
         self.timeout_edit.setValue(timeout)
@@ -409,7 +423,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
 
         self.tree = QtWidgets.QTreeWidget()
         self.tree.setColumnCount(8)
-        self.tree.setHeaderLabels(["Field", "Set Value", "", "Readback", "W", "R", "Command", "Status"])
+        self.tree.setHeaderLabels(["Field", "Set Value", "W", "", "Readback", "R", "Command", "Status"])
         self.tree.setAlternatingRowColors(True)
         self.tree.setUniformRowHeights(False)
         self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
@@ -489,6 +503,28 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         except Exception as ex:
             self._log(f"Failed to start controller window: {ex}")
 
+    def _open_motion_window(self):
+        script = Path(__file__).with_name("start_mtn.sh")
+        if not script.exists():
+            self._log(f"Launcher not found: {script.name}")
+            return
+        axis_id = self._axis_id()
+        prefix = self.title_prefix or ""
+        if not prefix:
+            cmd_pv = self.cmd_pv.text().strip()
+            m = re.match(r"^(.*):MCU-Cmd\\.AOUT$", cmd_pv)
+            prefix = m.group(1) if m else "IOC:ECMC"
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix), str(axis_id)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started motion window for axis {axis_id} (prefix {prefix})")
+        except Exception as ex:
+            self._log(f"Failed to start motion window: {ex}")
+
     def _apply_tree_filter(self):
         needle = self.search.text().strip().lower() if hasattr(self, "search") else ""
         root = self.tree.invisibleRootItem()
@@ -518,8 +554,15 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         axis_key = str(axis_id).strip() or self.axis_id_default
         if not yaml_key:
             return
+        key = str(yaml_key)
+        new_val = str(value)
+        axis_vals = self._current_values_by_axis.get(axis_key, {})
+        prev_val = axis_vals.get(key)
+        if prev_val is not None and prev_val != new_val:
+            axis_orig = self._original_values_by_axis.setdefault(axis_key, {})
+            axis_orig.setdefault(key, str(prev_val))
         axis_changes = self._changes_by_axis.setdefault(axis_key, {})
-        axis_changes[str(yaml_key)] = str(value)
+        axis_changes[key] = new_val
 
     def _record_current_value(self, axis_id, yaml_key, value):
         axis_key = str(axis_id).strip() or self.axis_id_default
@@ -544,9 +587,10 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             return "'" + s.replace("'", "''") + "'"
         return s
 
-    def _build_yaml_text_from_flat(self, axis_id, flat, title, changed_paths=None):
+    def _build_yaml_text_from_flat(self, axis_id, flat, title, changed_paths=None, original_values=None):
         flat = dict(flat or {})
         changed_paths = set(changed_paths or [])
+        original_values = dict(original_values or {})
         if not flat:
             return f"# No values available for axis {axis_id}\n"
 
@@ -576,13 +620,23 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
                     line = f"{pad}{k}: {self._yaml_scalar_text(v)}"
                     if path in changed_paths:
                         line += "  # CHANGED"
+                        if path in original_values:
+                            orig_txt = str(original_values.get(path, "")).replace("\n", "\\n")
+                            line += f", was {self._yaml_scalar_text(orig_txt)}"
                     lines.append(line)
 
         emit(tree, 0, "")
         return "\n".join(lines) + "\n"
 
     def _build_changed_yaml_text(self, axis_id):
-        return self._build_yaml_text_from_flat(axis_id, self._changes_by_axis.get(str(axis_id).strip(), {}), "Changed values")
+        axis_key = str(axis_id).strip()
+        return self._build_yaml_text_from_flat(
+            axis_id,
+            self._changes_by_axis.get(axis_key, {}),
+            "Changed values",
+            changed_paths=set(self._changes_by_axis.get(axis_key, {}).keys()),
+            original_values=self._original_values_by_axis.get(axis_key, {}),
+        )
 
     def _build_all_current_yaml_text(self, axis_id):
         axis_key = str(axis_id).strip()
@@ -597,7 +651,13 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             if path:
                 current.setdefault(path, "null")
         changed_paths = set((changed or {}).keys())
-        return self._build_yaml_text_from_flat(axis_id, current, "Current values (session-known)", changed_paths=changed_paths)
+        return self._build_yaml_text_from_flat(
+            axis_id,
+            current,
+            "Current values (session-known)",
+            changed_paths=changed_paths,
+            original_values=self._original_values_by_axis.get(axis_key, {}),
+        )
 
     def _show_changed_yaml_window(self):
         axis_id = self._axis_id()
@@ -784,8 +844,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         copy_one_btn.clicked.connect(lambda _=False, se=set_edit, re=read_edit: se.setText(re.text()))
 
         self.tree.setItemWidget(item, 1, set_edit)
-        self.tree.setItemWidget(item, 2, copy_one_btn)
-        self.tree.setItemWidget(item, 3, read_edit)
+        self.tree.setItemWidget(item, 3, copy_one_btn)
+        self.tree.setItemWidget(item, 4, read_edit)
         self.tree.setItemWidget(item, 6, cmd_label)
         self.tree.setItemWidget(item, 7, status)
 
@@ -815,11 +875,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             r_btn.setToolTip(tooltip)
             w_btn.clicked.connect(lambda _=False, rr=row: self._write_row(rr))
             r_btn.clicked.connect(lambda _=False, rr=row: self._read_row(rr))
-            self.tree.setItemWidget(item, 4, w_btn)
+            self.tree.setItemWidget(item, 2, w_btn)
             self.tree.setItemWidget(item, 5, r_btn)
         else:
             placeholder = QtWidgets.QLabel("")
-            self.tree.setItemWidget(item, 4, placeholder)
+            self.tree.setItemWidget(item, 2, placeholder)
             self.tree.setItemWidget(item, 5, QtWidgets.QLabel(""))
 
     def _axis_id(self):
@@ -894,8 +954,9 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         row["status"].setText("OK" if ok else "ERR")
         if ok and ": " in msg:
             val = msg.split(": ", 1)[1].strip()
-            row["read_edit"].setText(val)
-            self._record_current_value(self._axis_id(), row.get("path", ""), val)
+            disp_val = compact_float_text(val)
+            row["read_edit"].setText(disp_val)
+            self._record_current_value(self._axis_id(), row.get("path", ""), disp_val)
         else:
             row["read_edit"].setText(msg)
 
