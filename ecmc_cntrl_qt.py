@@ -156,7 +156,9 @@ class ImageOverlayCanvas(QtWidgets.QWidget):
         tw = int(self._base_w * s)
         th = int(self._base_h * s)
         x = (self.width() - tw) // 2
-        y = (self.height() - th) // 2
+        # Top-align the image so extra vertical space stays below it and does
+        # not create a large grey band above the sketch.
+        y = 0
         return QtCore.QRect(x, y, tw, th)
 
     def _layout_items(self):
@@ -243,7 +245,6 @@ class ImageOverlayCanvas(QtWidgets.QWidget):
     def paintEvent(self, event):
         super().paintEvent(event)
         p = QtGui.QPainter(self)
-        p.fillRect(self.rect(), QtGui.QColor('#d9d9d9'))
         if not self._pixmap.isNull():
             p.drawPixmap(self._target_rect(), self._pixmap)
 
@@ -254,7 +255,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         p = str(title_prefix or '').strip()
         self._base_title = f'ecmc PID/Controller Tuning [{p}]' if p else 'ecmc PID/Controller Tuning'
         self.setWindowTitle(self._base_title)
-        self.resize(920, 620)
+        self.resize(920, 504)
         self.client = EpicsClient(timeout=timeout)
         self.catalog = self._load_catalog(catalog_path)
         self.rows = _build_pairs(self.catalog.get('commands', []), include_set_only=False)
@@ -287,9 +288,14 @@ class CntrlWindow(QtWidgets.QMainWindow):
         root = QtWidgets.QWidget()
         self.setCentralWidget(root)
         layout = QtWidgets.QVBoxLayout(root)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
 
         cfg_group = QtWidgets.QGroupBox('General Configuration')
         cfg = QtWidgets.QGridLayout(cfg_group)
+        cfg.setContentsMargins(6, 6, 6, 6)
+        cfg.setHorizontalSpacing(4)
+        cfg.setVerticalSpacing(3)
         self.cmd_pv = QtWidgets.QLineEdit(default_cmd_pv)
         self.cmd_pv.editingFinished.connect(self._update_window_title_with_motor)
         self.qry_pv = QtWidgets.QLineEdit(default_qry_pv)
@@ -298,6 +304,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.timeout_edit.setDecimals(1)
         self.timeout_edit.setValue(timeout)
         self.timeout_edit.valueChanged.connect(lambda v: setattr(self.client, 'timeout', float(v)))
+        for w in (self.cmd_pv, self.qry_pv, self.timeout_edit):
+            try:
+                w.setMaximumHeight(24)
+            except Exception:
+                pass
         cfg.addWidget(QtWidgets.QLabel('Command PV'), 0, 0)
         cfg.addWidget(self.cmd_pv, 0, 1)
         cfg.addWidget(QtWidgets.QLabel('Readback PV'), 1, 0)
@@ -307,14 +318,18 @@ class CntrlWindow(QtWidgets.QMainWindow):
 
         tools_group = QtWidgets.QGroupBox('Layout Tools')
         tools_layout = QtWidgets.QVBoxLayout(tools_group)
-        tools_layout.setContentsMargins(8, 8, 8, 8)
+        tools_layout.setContentsMargins(6, 6, 6, 6)
+        tools_layout.setSpacing(4)
         path_row = QtWidgets.QHBoxLayout()
+        path_row.setSpacing(4)
         self.sketch_image_edit = QtWidgets.QLineEdit(self.sketch_image_path)
         self.sketch_image_edit.editingFinished.connect(self._update_sketch_image)
+        self.sketch_image_edit.setMaximumHeight(24)
         path_row.addWidget(QtWidgets.QLabel('Sketch Image'))
         path_row.addWidget(self.sketch_image_edit, stretch=1)
         tools_layout.addLayout(path_row)
         cfg_tools = QtWidgets.QHBoxLayout()
+        cfg_tools.setSpacing(4)
         self.calibrate_btn = QtWidgets.QPushButton('Calibrate')
         self.calibrate_btn.setCheckable(True)
         self.calibrate_btn.setAutoDefault(False)
@@ -326,6 +341,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.save_layout_btn.setDefault(False)
         self.save_layout_btn.clicked.connect(self._save_current_layout)
         cfg_tools.addWidget(self.save_layout_btn)
+        for b in (self.calibrate_btn, self.save_layout_btn):
+            b.setMaximumHeight(24)
         cfg_tools.addStretch(1)
         tools_layout.addLayout(cfg_tools)
         tools_layout.addStretch(1)
@@ -333,12 +350,13 @@ class CntrlWindow(QtWidgets.QMainWindow):
         cfg_panel = QtWidgets.QWidget()
         cfg_panel_layout = QtWidgets.QHBoxLayout(cfg_panel)
         cfg_panel_layout.setContentsMargins(0, 0, 0, 0)
-        cfg_panel_layout.setSpacing(10)
+        cfg_panel_layout.setSpacing(6)
         cfg_panel_layout.addWidget(cfg_group, stretch=1)
         cfg_panel_layout.addWidget(tools_group, stretch=0)
         cfg_panel.setVisible(False)
 
         top_row = QtWidgets.QHBoxLayout()
+        top_row.setSpacing(4)
         self.pv_cfg_toggle = QtWidgets.QPushButton('Show Config')
         self.pv_cfg_toggle.setCheckable(True)
         self.pv_cfg_toggle.setChecked(False)
@@ -380,11 +398,21 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.open_axis_btn.setDefault(False)
         self.open_axis_btn.clicked.connect(self._open_axis_window)
         top_row.addWidget(self.open_axis_btn)
+        for w in (
+            self.pv_cfg_toggle,
+            self.log_toggle_btn,
+            self.changes_toggle_btn,
+            self.changed_yaml_btn,
+            self.open_motion_btn,
+            self.open_axis_btn,
+        ):
+            w.setMaximumHeight(24)
         top_row.addStretch(1)
         layout.addLayout(top_row)
         layout.addWidget(cfg_panel)
 
         search_row = QtWidgets.QHBoxLayout()
+        search_row.setSpacing(4)
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText('Filter commands...')
         self.search.textChanged.connect(self._populate_table)
@@ -416,6 +444,18 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.copy_read_to_set_btn.setDefault(False)
         self.copy_read_to_set_btn.clicked.connect(self._copy_all_read_to_set)
         search_row.addWidget(self.copy_read_to_set_btn)
+        for w in (
+            self.search,
+            self.view_mode,
+            self.axis_all_edit,
+            self.axis_all_btn,
+            self.read_all_btn,
+            self.copy_read_to_set_btn,
+        ):
+            try:
+                w.setMaximumHeight(24)
+            except Exception:
+                pass
         layout.addLayout(search_row)
 
         self.stack = QtWidgets.QStackedWidget()
@@ -451,11 +491,13 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setVisible(False)
+        self.log.setMaximumHeight(110)
         layout.addWidget(self.log, stretch=0)
         self.changes_log = QtWidgets.QPlainTextEdit()
         self.changes_log.setReadOnly(True)
         self.changes_log.setVisible(False)
         self.changes_log.setPlaceholderText('Successful writes are tracked here for this session...')
+        self.changes_log.setMaximumHeight(110)
         layout.addWidget(self.changes_log, stretch=0)
 
     def _log(self, msg):
