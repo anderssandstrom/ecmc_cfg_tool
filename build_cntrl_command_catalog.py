@@ -12,8 +12,16 @@ KEYWORDS = (
     re.compile(r'scale\s*denom|scaledenom', re.IGNORECASE),
 )
 
+EXCLUDED_NAMES = {
+    'SetAxisCntrlInnerParams',
+    'SetAxisMonCntrlOutHL',
+    'SetAxisMonEnableCntrlOutHLMon',
+}
+
 
 def _match_command(cmd):
+    if str(cmd.get('name', '')) in EXCLUDED_NAMES:
+        return False
     hay = ' | '.join(
         [
             str(cmd.get('command', '')),

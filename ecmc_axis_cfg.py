@@ -299,7 +299,8 @@ def fill_axis_command(template, axis_id, value):
 class AxisYamlConfigWindow(QtWidgets.QMainWindow):
     def __init__(self, catalog_path, yaml_path, mapping_path, default_cmd_pv, default_qry_pv, timeout, axis_id="1", title_prefix=""):
         super().__init__()
-        self.setWindowTitle(f"ecmc Axis YAML Config [{title_prefix}]" if title_prefix else "ecmc Axis YAML Config")
+        self._base_title = f"ecmc Axis YAML Config [{title_prefix}]" if title_prefix else "ecmc Axis YAML Config"
+        self.setWindowTitle(self._base_title)
         self.resize(920, 620)
         self.client = EpicsClient(timeout=timeout)
         self.catalog = self._load_catalog(catalog_path)
@@ -317,6 +318,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._load_yaml_tree()
         self._log(f"Connected via backend: {self.client.backend}")
+        QtCore.QTimer.singleShot(0, self._update_window_title_with_motor)
 
     def _load_catalog(self, path):
         p = Path(path)
@@ -384,6 +386,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.axis_top_edit = QtWidgets.QLineEdit(self.axis_id_default)
         self.axis_top_edit.setMaximumWidth(80)
         self.axis_top_edit.editingFinished.connect(lambda: self.axis_edit.setText(self.axis_top_edit.text()))
+        self.axis_top_edit.editingFinished.connect(self._update_window_title_with_motor)
         search_row.addWidget(self.search, 1)
         search_row.addWidget(QtWidgets.QLabel("Axis"))
         search_row.addWidget(self.axis_top_edit)
@@ -392,10 +395,12 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.cfg_group = QtWidgets.QGroupBox("Configuration")
         cfg = QtWidgets.QGridLayout(self.cfg_group)
         self.cmd_pv = QtWidgets.QLineEdit(default_cmd_pv)
+        self.cmd_pv.editingFinished.connect(self._update_window_title_with_motor)
         self.qry_pv = QtWidgets.QLineEdit(default_qry_pv)
         self.axis_edit = QtWidgets.QLineEdit(self.axis_id_default)
         self.axis_edit.setMaximumWidth(80)
         self.axis_edit.editingFinished.connect(lambda: self.axis_top_edit.setText(self.axis_edit.text()))
+        self.axis_edit.editingFinished.connect(self._update_window_title_with_motor)
         self.timeout_edit = CompactDoubleSpinBox()
         self.timeout_edit.setRange(0.1, 60.0)
         self.timeout_edit.setDecimals(1)
@@ -885,6 +890,46 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
     def _axis_id(self):
         a = self.axis_edit.text().strip()
         return a if a else self.axis_id_default
+
+    def _ioc_prefix_for_title(self):
+        if self.title_prefix:
+            return self.title_prefix
+        cmd_pv = self.cmd_pv.text().strip() if hasattr(self, "cmd_pv") else ""
+        m = re.match(r"^(.*):MCU-Cmd\.AOUT$", cmd_pv)
+        return m.group(1) if m else ""
+
+    def _combine_motor_record(self, axis_pfx, motor_name):
+        a = str(axis_pfx or "").strip()
+        m = str(motor_name or "").strip()
+        if a and m:
+            if m.startswith(a) or ":" in m:
+                return m
+            return f"{a}{m}" if a.endswith(":") else f"{a}:{m}"
+        return a or m
+
+    def _resolve_motor_record_name(self, axis_id):
+        prefix = self._ioc_prefix_for_title()
+        if not prefix:
+            return ""
+        a = str(axis_id or "").strip() or self.axis_id_default
+        axis_pfx = ""
+        motor_name = ""
+        try:
+            axis_pfx = str(self.client.get(_join_prefix_pv(prefix, f"MCU-Cfg-AX{a}-Pfx"), as_string=True)).strip().strip('"')
+        except Exception:
+            pass
+        try:
+            motor_name = str(self.client.get(_join_prefix_pv(prefix, f"MCU-Cfg-AX{a}-Nam"), as_string=True)).strip().strip('"')
+        except Exception:
+            pass
+        return self._combine_motor_record(axis_pfx, motor_name)
+
+    def _update_window_title_with_motor(self):
+        try:
+            motor = self._resolve_motor_record_name(self._axis_id())
+        except Exception:
+            motor = ""
+        self.setWindowTitle(f"{self._base_title} [{motor}]" if motor else self._base_title)
 
     def send_raw_command(self, cmd):
         pv = self.cmd_pv.text().strip()

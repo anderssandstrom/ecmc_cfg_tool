@@ -458,27 +458,6 @@
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
     },
     {
-      "command": "Cfg.SetAxisCntrlInnerParams(<int>,<float>,<float>,<float>,<float>)",
-      "command_named": "Cfg.SetAxisCntrlInnerParams(<axisIndex>,<kp>,<ki>,<kd>,<tol>)",
-      "param_names": [
-        "axisIndex",
-        "kp",
-        "ki",
-        "kd",
-        "tol"
-      ],
-      "parser_command": "SetAxisCntrlInnerParams(<int>,<float>,<float>,<float>,<float>)",
-      "name": "SetAxisCntrlInnerParams",
-      "category": "Motion",
-      "description": "Use a differnt set of pid parameters if within a certain distance of target",
-      "header_source": "devEcmcSup/motion/ecmcMotion.h",
-      "header_example": "Cfg.setAxisCntrlInnerParams(3,4.1,2,5,0.1)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:1973",
-      "runtime_safe": false,
-      "runtime_class": "config_only",
-      "runtime_note": "Configuration command; typically intended before entering runtime mode."
-    },
-    {
       "command": "Cfg.SetAxisCntrlInnerTol(<int>,<float>)",
       "command_named": "Cfg.SetAxisCntrlInnerTol(<int>,<float>)",
       "param_names": [],
@@ -710,24 +689,6 @@
       "runtime_note": "Configuration command; typically intended before entering runtime mode."
     },
     {
-      "command": "Cfg.SetAxisMonCntrlOutHL(<int>,<float>)",
-      "command_named": "Cfg.SetAxisMonCntrlOutHL(<axisIndex>,<value>)",
-      "param_names": [
-        "axisIndex",
-        "value"
-      ],
-      "parser_command": "SetAxisMonCntrlOutHL(<int>,<float>)",
-      "name": "SetAxisMonCntrlOutHL",
-      "category": "Motion",
-      "description": "Set monitoring controller output high limit.\\n",
-      "header_source": "devEcmcSup/motion/ecmcMotion.h",
-      "header_example": "Cfg.SetAxisMonCntrlOutHL(3,2000)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2385",
-      "runtime_safe": false,
-      "runtime_class": "config_only",
-      "runtime_note": "Configuration command; typically intended before entering runtime mode."
-    },
-    {
       "command": "Cfg.SetAxisMonEnableAtTargetMon(<int>,<int>)",
       "command_named": "Cfg.SetAxisMonEnableAtTargetMon(<axisIndex>,<value>)",
       "param_names": [
@@ -741,24 +702,6 @@
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonEnableAtTargetMon(7,1)",
       "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2142",
-      "runtime_safe": false,
-      "runtime_class": "config_only",
-      "runtime_note": "Configuration command; typically intended before entering runtime mode."
-    },
-    {
-      "command": "Cfg.SetAxisMonEnableCntrlOutHLMon(<int>,<int>)",
-      "command_named": "Cfg.SetAxisMonEnableCntrlOutHLMon(<axisIndex>,<value>)",
-      "param_names": [
-        "axisIndex",
-        "value"
-      ],
-      "parser_command": "SetAxisMonEnableCntrlOutHLMon(<int>,<int>)",
-      "name": "SetAxisMonEnableCntrlOutHLMon",
-      "category": "Motion",
-      "description": "Enable controller output high limit monitoring.\\n",
-      "header_source": "devEcmcSup/motion/ecmcMotion.h",
-      "header_example": "Cfg.SetAxisMonEnableCntrlOutHLMon(2,0)",
-      "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2338",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."

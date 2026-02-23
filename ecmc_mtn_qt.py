@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 import argparse
+import subprocess
 import sys
 import time
+from collections import deque
 from datetime import datetime
 
 try:
-    from PyQt5 import QtCore, QtWidgets
+    from PyQt5 import QtCore, QtGui, QtWidgets
 except Exception:
-    from PySide6 import QtCore, QtWidgets  # type: ignore
+    from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
 
 from ecmc_stream_qt import EpicsClient, _join_prefix_pv, compact_float_text
 
@@ -43,11 +45,141 @@ def _truthy_pv(v):
         return False
 
 
+class MiniTrendWidget(QtWidgets.QWidget):
+    def __init__(self, title, series_defs, max_points=40):
+        super().__init__()
+        self.title = str(title)
+        # series_defs: list[(name, color_hex)]
+        self.series_defs = [(str(n), QtGui.QColor(c)) for n, c in series_defs]
+        self.data = {name: deque(maxlen=max(2, int(max_points))) for name, _c in self.series_defs}
+        self.setMinimumHeight(74)
+        self.setMaximumHeight(92)
+
+    def _axis_label_text(self, v):
+        try:
+            x = float(v)
+        except Exception:
+            return str(v)
+        # Keep Y-axis labels short so they fit in the compact widget.
+        ax = abs(x)
+        if ax == 0:
+            return "0"
+        if ax < 1e-3 or ax >= 1e4:
+            return f"{x:.2g}"
+        if ax < 1:
+            return compact_float_text(x, sig_digits=3)
+        return compact_float_text(x, sig_digits=4)
+
+    def append_point(self, values_by_name):
+        for name, _c in self.series_defs:
+            v = values_by_name.get(name)
+            try:
+                self.data[name].append(float(v) if v is not None else None)
+            except Exception:
+                self.data[name].append(None)
+        self.update()
+
+    def clear(self):
+        for q in self.data.values():
+            q.clear()
+        self.update()
+
+    def paintEvent(self, _event):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        r = self.rect()
+        p.fillRect(r, QtGui.QColor("#f5f7fa"))
+        p.setPen(QtGui.QPen(QtGui.QColor("#c9d2dc"), 1))
+        p.drawRect(r.adjusted(0, 0, -1, -1))
+
+        # Reserve a small left margin for Y-axis labels.
+        label_w = 72
+        plot = r.adjusted(6 + label_w, 18, -6, -6)
+
+        if plot.width() < 20 or plot.height() < 20:
+            return
+
+        # Collect min/max from visible numeric points.
+        vals = []
+        for name, _c in self.series_defs:
+            vals.extend([v for v in self.data[name] if isinstance(v, (int, float))])
+        if not vals:
+            p.setPen(QtGui.QColor("#7a8794"))
+            p.drawText(plot, QtCore.Qt.AlignCenter, "no data")
+            return
+        vmin = min(vals)
+        vmax = max(vals)
+        if vmax == vmin:
+            pad = abs(vmax) * 0.05 or 1.0
+            vmin -= pad
+            vmax += pad
+        else:
+            pad = (vmax - vmin) * 0.05
+            vmin -= pad
+            vmax += pad
+
+        # Grid
+        p.setPen(QtGui.QPen(QtGui.QColor("#e0e6ec"), 1))
+        for frac in (0.25, 0.5, 0.75):
+            y = plot.top() + int(plot.height() * frac)
+            p.drawLine(plot.left(), y, plot.right(), y)
+
+        # Y-axis labels (min/max/current zero marker if visible)
+        p.setPen(QtGui.QColor("#5b6773"))
+        left_label_rect = QtCore.QRect(r.left() + 4, plot.top() - 6, label_w - 6, 14)
+        p.drawText(left_label_rect, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, self._axis_label_text(vmax))
+        left_label_rect.moveTop(plot.bottom() - 8)
+        p.drawText(left_label_rect, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, self._axis_label_text(vmin))
+        if vmin < 0 < vmax:
+            y0 = plot.bottom() - (plot.height() * (0.0 - vmin) / (vmax - vmin))
+            p.setPen(QtGui.QPen(QtGui.QColor("#c7cfd8"), 1, QtCore.Qt.DashLine))
+            p.drawLine(plot.left(), int(y0), plot.right(), int(y0))
+            zr = QtCore.QRect(r.left() + 4, int(y0) - 7, label_w - 6, 14)
+            p.setPen(QtGui.QColor("#5b6773"))
+            p.drawText(zr, QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter, "0")
+
+        # Plot each series
+        maxlen = max((len(self.data[name]) for name, _c in self.series_defs), default=0)
+        if maxlen <= 1:
+            maxlen = 2
+        for name, color in self.series_defs:
+            pts = list(self.data[name])
+            if not pts:
+                continue
+            path = QtGui.QPainterPath()
+            started = False
+            for i, v in enumerate(pts):
+                if v is None:
+                    started = False
+                    continue
+                x = plot.left() + (plot.width() * i / max(1, len(pts) - 1))
+                y = plot.bottom() - (plot.height() * (float(v) - vmin) / (vmax - vmin))
+                pt = QtCore.QPointF(x, y)
+                if not started:
+                    path.moveTo(pt)
+                    started = True
+                else:
+                    path.lineTo(pt)
+            p.setPen(QtGui.QPen(color, 1.8))
+            p.drawPath(path)
+
+        # Legend
+        x = plot.left()
+        y = plot.top() - 4
+        for name, color in self.series_defs:
+            p.setPen(QtGui.QPen(color, 2))
+            p.drawLine(x, y, x + 10, y)
+            p.setPen(QtGui.QColor("#2f3e4d"))
+            p.drawText(x + 13, y + 4, name)
+            x += 70
+
+
 class MotionWindow(QtWidgets.QMainWindow):
     def __init__(self, prefix, axis_id, timeout):
         super().__init__()
-        self.setWindowTitle("ecmc Motor Record Motion")
-        self.resize(680, 500)
+        self._base_title = "ecmc Motor Record Motion"
+        self.setWindowTitle(self._base_title)
+        self.resize(920, 400)
 
         self.client = EpicsClient(timeout=timeout)
         self.default_prefix = str(prefix or "").strip()
@@ -61,12 +193,17 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._seq_timer.setInterval(250)
         self._seq_timer.timeout.connect(self._sequence_tick)
         self._status_timer = QtCore.QTimer(self)
-        self._status_timer.setInterval(250)
+        self._status_timer.setInterval(200)
         self._status_timer.timeout.connect(self._periodic_status_tick)
         self._spinner_chars = ["|", "/", "-", "\\"]
         self._spinner_index = 0
         self._last_rbv_text = None
         self._positions_initialized = False
+        self._trend_monitor_values = {"PosAct": None, "PosSet": None, "PosErr": None}
+        self._trend_monitor_pvs = {}
+        self._trend_use_monitor = False
+        self._active_motion_mode = None
+        self._is_motor_moving = False
 
         self._build_ui(timeout)
         self._log(f"Connected via backend: {self.client.backend}")
@@ -77,10 +214,11 @@ class MotionWindow(QtWidgets.QMainWindow):
         root = QtWidgets.QWidget()
         self.setCentralWidget(root)
         layout = QtWidgets.QVBoxLayout(root)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(5)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
 
         top_row = QtWidgets.QHBoxLayout()
+        top_row.setSpacing(4)
         self.cfg_toggle_btn = QtWidgets.QPushButton("Show Config")
         self.cfg_toggle_btn.setAutoDefault(False)
         self.cfg_toggle_btn.setDefault(False)
@@ -89,6 +227,18 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.log_toggle_btn.setAutoDefault(False)
         self.log_toggle_btn.setDefault(False)
         self.log_toggle_btn.clicked.connect(self._toggle_log_panel)
+        self.graphs_toggle_btn = QtWidgets.QPushButton("Show Graphs")
+        self.graphs_toggle_btn.setAutoDefault(False)
+        self.graphs_toggle_btn.setDefault(False)
+        self.graphs_toggle_btn.clicked.connect(self._toggle_graphs_panel)
+        self.open_cntrl_btn = QtWidgets.QPushButton("Open Controller")
+        self.open_cntrl_btn.setAutoDefault(False)
+        self.open_cntrl_btn.setDefault(False)
+        self.open_cntrl_btn.clicked.connect(self._open_controller_window)
+        self.open_axis_btn = QtWidgets.QPushButton("Open Axis")
+        self.open_axis_btn.setAutoDefault(False)
+        self.open_axis_btn.setDefault(False)
+        self.open_axis_btn.clicked.connect(self._open_axis_window)
         self.axis_top_edit = QtWidgets.QLineEdit(self.default_axis_id)
         self.axis_top_edit.setMaximumWidth(80)
         self.axis_top_edit.editingFinished.connect(self._apply_axis_top)
@@ -96,8 +246,24 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.axis_top_btn.setAutoDefault(False)
         self.axis_top_btn.setDefault(False)
         self.axis_top_btn.clicked.connect(self._apply_axis_top)
+        for w in (
+            self.cfg_toggle_btn,
+            self.log_toggle_btn,
+            self.graphs_toggle_btn,
+            self.open_cntrl_btn,
+            self.open_axis_btn,
+            self.axis_top_edit,
+            self.axis_top_btn,
+        ):
+            try:
+                w.setMaximumHeight(24)
+            except Exception:
+                pass
         top_row.addWidget(self.cfg_toggle_btn)
         top_row.addWidget(self.log_toggle_btn)
+        top_row.addWidget(self.graphs_toggle_btn)
+        top_row.addWidget(self.open_cntrl_btn)
+        top_row.addWidget(self.open_axis_btn)
         top_row.addWidget(QtWidgets.QLabel("Axis"))
         top_row.addWidget(self.axis_top_edit)
         top_row.addWidget(self.axis_top_btn)
@@ -106,6 +272,9 @@ class MotionWindow(QtWidgets.QMainWindow):
 
         self.cfg_group = QtWidgets.QGroupBox("Axis / Motor Record")
         cfg = QtWidgets.QGridLayout(self.cfg_group)
+        cfg.setContentsMargins(6, 6, 6, 6)
+        cfg.setHorizontalSpacing(4)
+        cfg.setVerticalSpacing(3)
 
         self.prefix_edit = QtWidgets.QLineEdit(self.default_prefix)
         self.axis_edit = QtWidgets.QLineEdit(self.default_axis_id)
@@ -161,26 +330,51 @@ class MotionWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.cfg_group)
 
         self._build_motion_settings_group(layout)
-        self._build_move_group(layout)
-        self._build_sequence_group(layout)
-        self._build_jog_group(layout)
+        motion_row = QtWidgets.QHBoxLayout()
+        motion_row.setSpacing(6)
+        self.move_group = self._build_move_group()
+        self.jog_group = self._build_jog_group()
+        motion_row.addWidget(self.move_group, 1)
+        motion_row.addWidget(self.jog_group, 1)
+        layout.addLayout(motion_row)
+        self.seq_group = self._build_sequence_group(layout)
         self._build_status_group(layout)
+        self._build_trend_group(layout)
 
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
+        self.log.setMaximumHeight(110)
         layout.addWidget(self.log, stretch=1)
         self.cfg_group.setVisible(False)
+        self.trends_group.setVisible(False)
         self.log.setVisible(False)
 
     def _toggle_config_panel(self):
         visible = not self.cfg_group.isVisible()
         self.cfg_group.setVisible(visible)
         self.cfg_toggle_btn.setText("Hide Config" if visible else "Show Config")
+        self._resize_to_contents()
 
     def _toggle_log_panel(self):
         visible = not self.log.isVisible()
         self.log.setVisible(visible)
         self.log_toggle_btn.setText("Hide Log" if visible else "Show Log")
+        self._resize_to_contents()
+
+    def _toggle_graphs_panel(self):
+        visible = not self.trends_group.isVisible()
+        self.trends_group.setVisible(visible)
+        self.graphs_toggle_btn.setText("Hide Graphs" if visible else "Show Graphs")
+        self._resize_to_contents()
+
+    def _resize_to_contents(self):
+        # Recompute after Qt has applied visibility/layout changes.
+        def _do():
+            try:
+                self.adjustSize()
+            except Exception:
+                pass
+        QtCore.QTimer.singleShot(0, _do)
 
     def _apply_axis_top(self):
         axis_txt = self.axis_top_edit.text().strip() or self.default_axis_id
@@ -193,17 +387,28 @@ class MotionWindow(QtWidgets.QMainWindow):
     def _build_motion_settings_group(self, parent_layout):
         g = QtWidgets.QGroupBox("Shared Motion Settings")
         l = QtWidgets.QGridLayout(g)
+        l.setContentsMargins(6, 6, 6, 6)
+        l.setHorizontalSpacing(4)
+        l.setVerticalSpacing(3)
         self.motion_velo_edit = QtWidgets.QLineEdit("1")
         self.motion_acc_edit = QtWidgets.QLineEdit("1")
         self.motion_accs_edit = QtWidgets.QLineEdit("")
         self.motion_accs_edit.setPlaceholderText("optional")
+        for e in (self.motion_velo_edit, self.motion_acc_edit, self.motion_accs_edit):
+            e.setMaximumHeight(24)
+        self.motion_velo_edit.setMaximumWidth(90)
+        self.motion_acc_edit.setMaximumWidth(90)
+        self.motion_accs_edit.setMaximumWidth(90)
         self.drive_enable_btn = QtWidgets.QPushButton("Drive: ?")
+        reset_btn = QtWidgets.QPushButton("Reset")
         stop_btn = QtWidgets.QPushButton("STOP")
         kill_btn = QtWidgets.QPushButton("KILL (CNEN=0)")
-        for b in (self.drive_enable_btn, stop_btn, kill_btn):
+        for b in (self.drive_enable_btn, reset_btn, stop_btn, kill_btn):
             b.setAutoDefault(False)
             b.setDefault(False)
+            b.setMaximumHeight(24)
         self.drive_enable_btn.clicked.connect(self.toggle_drive_enable)
+        reset_btn.clicked.connect(self.reset_error)
         self._set_drive_enable_button_style(None)
         stop_btn.setStyleSheet(
             "QPushButton { background: #f39c12; color: #111; font-weight: 700; border: 1px solid #b86f00; padding: 4px 8px; }"
@@ -222,43 +427,65 @@ class MotionWindow(QtWidgets.QMainWindow):
         l.addWidget(QtWidgets.QLabel("ACCS"), 0, 4)
         l.addWidget(self.motion_accs_edit, 0, 5)
         l.addWidget(self.drive_enable_btn, 0, 6)
-        l.addWidget(stop_btn, 0, 7)
-        l.addWidget(kill_btn, 0, 8)
+        l.addWidget(reset_btn, 0, 7)
+        l.addWidget(stop_btn, 0, 8)
+        l.addWidget(kill_btn, 0, 9)
+        g.setMaximumHeight(62)
         parent_layout.addWidget(g)
 
-    def _build_move_group(self, parent_layout):
+    def _build_move_group(self, parent_layout=None):
         g = QtWidgets.QGroupBox("1. Move To Position")
         l = QtWidgets.QGridLayout(g)
+        l.setContentsMargins(6, 6, 6, 6)
+        l.setHorizontalSpacing(4)
+        l.setVerticalSpacing(3)
 
         self.move_pos_edit = QtWidgets.QLineEdit("0")
+        self.move_pos_edit.setMaximumHeight(24)
+        self.move_pos_edit.setMaximumWidth(110)
         self.move_relative_chk = QtWidgets.QCheckBox("Relative")
 
         move_btn = QtWidgets.QPushButton("Move")
         for b in (move_btn,):
             b.setAutoDefault(False)
             b.setDefault(False)
+            b.setMaximumHeight(24)
         move_btn.clicked.connect(self.move_to_position)
 
         l.addWidget(QtWidgets.QLabel("Position"), 0, 0)
         l.addWidget(self.move_pos_edit, 0, 1)
         l.addWidget(self.move_relative_chk, 0, 2)
         l.addWidget(move_btn, 0, 3)
+        g.setMaximumHeight(62)
 
-        parent_layout.addWidget(g)
+        if parent_layout is not None and hasattr(parent_layout, "addWidget"):
+            parent_layout.addWidget(g)
+        return g
 
     def _build_sequence_group(self, parent_layout):
-        g = QtWidgets.QGroupBox("2. Sequence (A <-> B)")
+        g = QtWidgets.QGroupBox("3. Sequence (A <-> B)")
         l = QtWidgets.QGridLayout(g)
+        l.setContentsMargins(6, 6, 6, 6)
+        l.setHorizontalSpacing(4)
+        l.setVerticalSpacing(3)
 
         self.seq_a_edit = QtWidgets.QLineEdit("0")
         self.seq_b_edit = QtWidgets.QLineEdit("10")
         self.seq_idle_edit = QtWidgets.QLineEdit("0.5")
+        for e in (self.seq_a_edit, self.seq_b_edit, self.seq_idle_edit):
+            e.setMaximumHeight(24)
+            e.setMaximumWidth(90)
         self.seq_state_label = QtWidgets.QLabel("Stopped")
+        self.seq_state_label.setMinimumHeight(20)
+        self.seq_state_label.setMinimumWidth(140)
+        self.seq_state_label.setMaximumWidth(140)
+        self.seq_state_label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
 
         start_btn = QtWidgets.QPushButton("Start Sequence")
         for b in (start_btn,):
             b.setAutoDefault(False)
             b.setDefault(False)
+            b.setMaximumHeight(24)
         start_btn.clicked.connect(self.start_sequence)
 
         l.addWidget(QtWidgets.QLabel("Pos A"), 0, 0)
@@ -269,34 +496,47 @@ class MotionWindow(QtWidgets.QMainWindow):
         l.addWidget(QtWidgets.QLabel("Idle [s]"), 0, 4)
         l.addWidget(self.seq_idle_edit, 0, 5)
         l.addWidget(start_btn, 0, 6)
-        l.addWidget(QtWidgets.QLabel("State"), 1, 0)
-        l.addWidget(self.seq_state_label, 1, 1, 1, 3)
+        l.addWidget(QtWidgets.QLabel("State"), 0, 7)
+        l.addWidget(self.seq_state_label, 0, 8)
+        g.setMaximumHeight(62)
 
         parent_layout.addWidget(g)
+        return g
 
-    def _build_jog_group(self, parent_layout):
-        g = QtWidgets.QGroupBox("3/4. Endless Motion (Jog)")
+    def _build_jog_group(self, parent_layout=None):
+        g = QtWidgets.QGroupBox("2. Endless Motion (Forward / Backward)")
         l = QtWidgets.QGridLayout(g)
+        l.setContentsMargins(6, 6, 6, 6)
+        l.setHorizontalSpacing(4)
+        l.setVerticalSpacing(3)
 
         fwd_btn = QtWidgets.QPushButton("Endless Forward")
         bwd_btn = QtWidgets.QPushButton("Endless Backward")
         for b in (fwd_btn, bwd_btn):
             b.setAutoDefault(False)
             b.setDefault(False)
+            b.setMaximumHeight(24)
         fwd_btn.clicked.connect(self.start_jog_forward)
         bwd_btn.clicked.connect(self.start_jog_backward)
 
-        l.addWidget(fwd_btn, 0, 0)
-        l.addWidget(bwd_btn, 0, 1)
+        l.addWidget(bwd_btn, 0, 0)
+        l.addWidget(fwd_btn, 0, 1)
+        g.setMaximumHeight(62)
 
-        parent_layout.addWidget(g)
+        if parent_layout is not None and hasattr(parent_layout, "addWidget"):
+            parent_layout.addWidget(g)
+        return g
 
     def _build_status_group(self, parent_layout):
         g = QtWidgets.QGroupBox("Motor Record Status")
         l = QtWidgets.QGridLayout(g)
+        l.setContentsMargins(6, 6, 6, 6)
+        l.setHorizontalSpacing(4)
+        l.setVerticalSpacing(3)
         self.status_fields = {}
         self.rbv_motion_label = QtWidgets.QLabel("idle")
         self.rbv_motion_label.setMinimumWidth(90)
+        self.rbv_motion_label.setMinimumHeight(22)
         self.rbv_motion_label.setStyleSheet(
             "QLabel { background: #d8ead2; color: #173b17; font-weight: 700; padding: 2px 6px; border: 1px solid #9fbe95; }"
         )
@@ -305,8 +545,12 @@ class MotionWindow(QtWidgets.QMainWindow):
             l.addWidget(QtWidgets.QLabel(name), r, c)
             e = QtWidgets.QLineEdit("")
             e.setReadOnly(True)
+            e.setMaximumHeight(24)
+            e.setMaximumWidth(110)
             if name == "RBV":
                 e.setMinimumWidth(120)
+                e.setMaximumWidth(140)
+                e.setMaximumHeight(28)
                 e.setStyleSheet(
                     "QLineEdit { font-size: 16px; font-weight: 700; background: #eef6ff; border: 2px solid #6f97c6; }"
                 )
@@ -314,7 +558,21 @@ class MotionWindow(QtWidgets.QMainWindow):
             self.status_fields[name] = e
         l.addWidget(QtWidgets.QLabel("Motion"), 2, 0)
         l.addWidget(self.rbv_motion_label, 2, 1)
+        g.setMaximumHeight(108)
         parent_layout.addWidget(g)
+
+    def _build_trend_group(self, parent_layout):
+        self.trends_group = QtWidgets.QGroupBox("")
+        l = QtWidgets.QGridLayout(self.trends_group)
+        l.setContentsMargins(4, 4, 4, 4)
+        l.setHorizontalSpacing(4)
+        l.setVerticalSpacing(3)
+        # Trend append runs at ~5 Hz (timer 200 ms), so 50 points ~= 10 s history.
+        self.trend_pos_widget = MiniTrendWidget("PosAct / PosSet", [("PosAct", "#1f77b4"), ("PosSet", "#ff7f0e")], max_points=50)
+        self.trend_err_widget = MiniTrendWidget("PosErr", [("PosErr", "#d62728")], max_points=50)
+        l.addWidget(self.trend_pos_widget, 0, 0)
+        l.addWidget(self.trend_err_widget, 1, 0)
+        parent_layout.addWidget(self.trends_group)
 
     def _set_timeout(self, value):
         self.client.timeout = float(value)
@@ -324,6 +582,76 @@ class MotionWindow(QtWidgets.QMainWindow):
 
     def _axis_id_text(self):
         return self.axis_edit.text().strip() or self.default_axis_id
+
+    def _set_active_motion_mode(self, mode):
+        self._active_motion_mode = mode
+        self._update_motion_group_enable_state()
+
+    def _clear_active_motion_mode(self):
+        self._active_motion_mode = None
+        self._update_motion_group_enable_state()
+
+    def _update_motion_group_enable_state(self):
+        groups = {
+            "move": getattr(self, "move_group", None),
+            "jog": getattr(self, "jog_group", None),
+            "sequence": getattr(self, "seq_group", None),
+        }
+        active = self._active_motion_mode
+        for name, grp in groups.items():
+            if grp is None:
+                continue
+            grp.setEnabled(active is None or active == name)
+
+    def _update_active_mode_from_status(self, _vals=None):
+        if self._seq_active:
+            self._set_active_motion_mode("sequence")
+            return
+        if self._active_motion_mode in {"move", "jog"} and not self._is_motor_moving:
+            self._clear_active_motion_mode()
+
+    def _open_controller_window(self):
+        script = QtCore.QFileInfo(__file__).dir().filePath("start_cntrl.sh")
+        if not QtCore.QFileInfo(script).exists():
+            self._log(f"Launcher not found: start_cntrl.sh")
+            return
+        axis_id = self._axis_id_text()
+        prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix), str(axis_id)],
+                cwd=str(QtCore.QFileInfo(script).absolutePath()),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started controller window for axis {axis_id} (prefix {prefix})")
+        except Exception as ex:
+            self._log(f"Failed to start controller window: {ex}")
+
+    def _open_axis_window(self):
+        script = QtCore.QFileInfo(__file__).dir().filePath("start_axis.sh")
+        if not QtCore.QFileInfo(script).exists():
+            self._log(f"Launcher not found: start_axis.sh")
+            return
+        axis_id = self._axis_id_text()
+        prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix), str(axis_id)],
+                cwd=str(QtCore.QFileInfo(script).absolutePath()),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started axis window for axis {axis_id} (prefix {prefix})")
+        except Exception as ex:
+            self._log(f"Failed to start axis window: {ex}")
+
+    def _update_window_title(self):
+        motor = self.motor_record_edit.text().strip() if hasattr(self, "motor_record_edit") else ""
+        if motor:
+            self.setWindowTitle(f"{self._base_title} [{motor}]")
+        else:
+            self.setWindowTitle(self._base_title)
 
     def _update_cfg_pv_edits(self):
         prefix = self.prefix_edit.text().strip()
@@ -341,6 +669,21 @@ class MotionWindow(QtWidgets.QMainWindow):
         if not base:
             raise RuntimeError("Motor record is not resolved")
         return f"{base}.{field}"
+
+    def _motor_base(self):
+        base = self.motor_record_edit.text().strip()
+        if not base:
+            raise RuntimeError("Motor record is not resolved")
+        return base
+
+    def _motor_suffix_pv(self, suffix):
+        base = self._motor_base()
+        s = str(suffix or "").strip()
+        if not s:
+            raise RuntimeError("Empty motor suffix")
+        if s.startswith((".", "-", ":")):
+            return f"{base}{s}"
+        return f"{base}{s}"
 
     def _put(self, field, value, quiet=False, wait=False):
         pv = self._pv(field)
@@ -388,10 +731,18 @@ class MotionWindow(QtWidgets.QMainWindow):
 
             resolved = self._combine_motor_record(axis_pfx, motor_name)
             self.motor_record_edit.setText(resolved)
+            self._update_window_title()
+            if hasattr(self, "trend_pos_widget"):
+                self.trend_pos_widget.clear()
+            if hasattr(self, "trend_err_widget"):
+                self.trend_err_widget.clear()
+            self._setup_trend_monitors()
             self._log(f"Resolved motor record: {resolved} (axis_pfx='{axis_pfx}', motor='{motor_name}')")
             vals = self.refresh_status()
+            self._init_shared_motion_settings_from_pv()
             self._init_positions_from_rbv(vals, force=True)
         except Exception as ex:
+            self._update_window_title()
             self._log(f"Resolve failed: {ex}")
 
     def _candidate_motor_name_pvs(self):
@@ -448,6 +799,27 @@ class MotionWindow(QtWidgets.QMainWindow):
         accs = _to_float(accs_txt, "ACCS") if accs_txt else None
         return velo, accl, accs
 
+    def _init_shared_motion_settings_from_pv(self):
+        if not self.motor_record_edit.text().strip():
+            return
+        try:
+            v = self.client.get(self._pv("VELO"), as_string=True)
+            self.motion_velo_edit.setText(compact_float_text(v))
+        except Exception as ex:
+            self._log(f"Init VELO from PV failed: {ex}")
+        try:
+            a = self.client.get(self._pv("ACCL"), as_string=True)
+            self.motion_acc_edit.setText(compact_float_text(a))
+        except Exception as ex:
+            self._log(f"Init ACCL from PV failed: {ex}")
+        # ACCS is optional on some motor records.
+        try:
+            s = self.client.get(self._pv("ACCS"), as_string=True)
+            self.motion_accs_edit.setText(compact_float_text(s))
+        except Exception:
+            if hasattr(self, "motion_accs_edit"):
+                self.motion_accs_edit.setText("")
+
     def _refresh_status_if_enabled(self):
         if self.auto_refresh_status.isChecked():
             self.refresh_status()
@@ -467,6 +839,7 @@ class MotionWindow(QtWidgets.QMainWindow):
                 vals[f] = None
         self._update_motion_indicator(vals)
         self._update_drive_enable_button_from_status(vals)
+        self._update_active_mode_from_status(vals)
         return vals
 
     def _set_drive_enable_button_style(self, enabled):
@@ -522,6 +895,15 @@ class MotionWindow(QtWidgets.QMainWindow):
         except Exception as ex:
             self._log(f"Drive toggle failed: {ex}")
 
+    def reset_error(self):
+        try:
+            pv = f"{self._motor_base()}-ErrRst"
+            self.client.put(pv, 1, wait=False)
+            self._log(f"PUT [nowait] {pv} = 1")
+            self._refresh_status_if_enabled()
+        except Exception as ex:
+            self._log(f"Reset failed: {ex}")
+
     def _init_positions_from_rbv(self, vals=None, force=False):
         vals = dict(vals or {})
         rbv_raw = vals.get("RBV")
@@ -549,6 +931,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         dmov = _truthy_pv(vals.get("DMOV")) if vals.get("DMOV") is not None else True
         rbv_changed = (rbv_now is not None and self._last_rbv_text is not None and rbv_now != self._last_rbv_text)
         moving = bool(movn or (not dmov) or rbv_changed)
+        self._is_motor_moving = moving
         self._last_rbv_text = rbv_now if rbv_now is not None else self._last_rbv_text
 
         rbv_field = self.status_fields.get("RBV")
@@ -578,11 +961,83 @@ class MotionWindow(QtWidgets.QMainWindow):
     def _periodic_status_tick(self):
         try:
             self.refresh_status()
+            if hasattr(self, "trends_group") and self.trends_group.isVisible():
+                if self._trend_use_monitor:
+                    self._append_trend_from_cached_monitors()
+                else:
+                    self._poll_trend_signals()
         except Exception:
             pass
 
+    def _setup_trend_monitors(self):
+        self._trend_use_monitor = False
+        self._trend_monitor_values = {"PosAct": None, "PosSet": None, "PosErr": None}
+        # Best effort cleanup of previous PV monitor objects.
+        for _name, pv in list(self._trend_monitor_pvs.items()):
+            try:
+                if hasattr(pv, "clear_callbacks"):
+                    pv.clear_callbacks()
+            except Exception:
+                pass
+            try:
+                if hasattr(pv, "disconnect"):
+                    pv.disconnect()
+            except Exception:
+                pass
+        self._trend_monitor_pvs = {}
+
+        if getattr(self.client, "backend", None) != "pyepics" or getattr(self.client, "_epics", None) is None:
+            return
+        if not self.motor_record_edit.text().strip():
+            return
+        ep = self.client._epics
+
+        def _cb_factory(sig_name):
+            def _cb(pvname=None, value=None, char_value=None, **_kws):
+                v = value if value is not None else char_value
+                self._trend_monitor_values[sig_name] = v
+            return _cb
+
+        try:
+            mapping = {"PosAct": "-PosAct", "PosSet": "-PosSet", "PosErr": "-PosErr"}
+            for sig_name, suffix in mapping.items():
+                pvname = self._motor_suffix_pv(suffix)
+                pv = ep.PV(pvname, auto_monitor=True, callback=_cb_factory(sig_name))
+                self._trend_monitor_pvs[sig_name] = pv
+            self._trend_use_monitor = True
+            self._log("Trend graphs using pyepics monitors (UI throttled)")
+        except Exception as ex:
+            self._trend_use_monitor = False
+            self._log(f"Trend monitor setup failed, using polling ({ex})")
+
+    def _append_trend_from_cached_monitors(self):
+        vals = dict(self._trend_monitor_values)
+        if all(vals.get(k) is None for k in ("PosAct", "PosSet", "PosErr")):
+            # No monitor samples yet, fallback once.
+            self._poll_trend_signals()
+            return
+        if hasattr(self, "trend_pos_widget"):
+            self.trend_pos_widget.append_point({"PosAct": vals.get("PosAct"), "PosSet": vals.get("PosSet")})
+        if hasattr(self, "trend_err_widget"):
+            self.trend_err_widget.append_point({"PosErr": vals.get("PosErr")})
+
+    def _poll_trend_signals(self):
+        if not self.motor_record_edit.text().strip():
+            return
+        vals = {}
+        for key, suffix in (("PosAct", "-PosAct"), ("PosSet", "-PosSet"), ("PosErr", "-PosErr")):
+            try:
+                vals[key] = float(self.client.get(self._motor_suffix_pv(suffix), as_string=True))
+            except Exception:
+                vals[key] = None
+        if hasattr(self, "trend_pos_widget"):
+            self.trend_pos_widget.append_point({"PosAct": vals.get("PosAct"), "PosSet": vals.get("PosSet")})
+        if hasattr(self, "trend_err_widget"):
+            self.trend_err_widget.append_point({"PosErr": vals.get("PosErr")})
+
     def move_to_position(self):
         try:
+            self._set_active_motion_mode("move")
             pos = _to_float(self.move_pos_edit.text(), "Position")
             velo, accl, accs = self._shared_motion_params()
             self._set_move_params(velo, accl, accs=accs)
@@ -592,10 +1047,12 @@ class MotionWindow(QtWidgets.QMainWindow):
                 self._put("VAL", pos)
             self._refresh_status_if_enabled()
         except Exception as ex:
+            self._clear_active_motion_mode()
             self._log(f"Move failed: {ex}")
 
     def start_sequence(self):
         try:
+            self._set_active_motion_mode("sequence")
             a = _to_float(self.seq_a_edit.text(), "Pos A")
             b = _to_float(self.seq_b_edit.text(), "Pos B")
             velo, accl, accs = self._shared_motion_params()
@@ -611,6 +1068,7 @@ class MotionWindow(QtWidgets.QMainWindow):
             self._sequence_move_to(a)
             self._seq_timer.start()
         except Exception as ex:
+            self._clear_active_motion_mode()
             self._log(f"Sequence start failed: {ex}")
             self.seq_state_label.setText("Error")
 
@@ -656,6 +1114,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._seq_idle_until = None
         self._seq_timer.stop()
         self.seq_state_label.setText("Stopped")
+        self._clear_active_motion_mode()
 
     def start_jog_forward(self):
         self._start_jog(direction="F")
@@ -665,6 +1124,18 @@ class MotionWindow(QtWidgets.QMainWindow):
 
     def _start_jog(self, direction):
         try:
+            label = "forward" if direction == "F" else "backward"
+            ans = QtWidgets.QMessageBox.question(
+                self,
+                "Confirm Endless Motion",
+                f"Execute endless {label} motion for axis {self._axis_id_text()}?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No,
+            )
+            if ans != QtWidgets.QMessageBox.Yes:
+                self._log(f"Endless {label} motion cancelled")
+                return
+            self._set_active_motion_mode("jog")
             velo, accl, accs = self._shared_motion_params()
             self._set_jog_params(velo, accl, accs=accs)
             if direction == "F":
@@ -683,6 +1154,7 @@ class MotionWindow(QtWidgets.QMainWindow):
                 self._log("Endless backward motion started")
             self._refresh_status_if_enabled()
         except Exception as ex:
+            self._clear_active_motion_mode()
             self._log(f"Jog start failed: {ex}")
 
     def stop_motion(self):
@@ -691,6 +1163,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._seq_idle_until = None
         self._seq_timer.stop()
         self.seq_state_label.setText("Stopped")
+        self._clear_active_motion_mode()
         try:
             try:
                 self._put("JOGF", 0, quiet=True)
@@ -726,6 +1199,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._seq_idle_until = None
         self._seq_timer.stop()
         self.seq_state_label.setText("Stopped")
+        self._clear_active_motion_mode()
         try:
             try:
                 self._put("JOGF", 0, quiet=True)

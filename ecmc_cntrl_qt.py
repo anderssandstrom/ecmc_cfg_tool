@@ -252,7 +252,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
     def __init__(self, catalog_path, default_cmd_pv, default_qry_pv, timeout, default_axis_id='1', title_prefix='', sketch_image_path=''):
         super().__init__()
         p = str(title_prefix or '').strip()
-        self.setWindowTitle(f'ecmc PID/Controller Tuning [{p}]' if p else 'ecmc PID/Controller Tuning')
+        self._base_title = f'ecmc PID/Controller Tuning [{p}]' if p else 'ecmc PID/Controller Tuning'
+        self.setWindowTitle(self._base_title)
         self.resize(920, 620)
         self.client = EpicsClient(timeout=timeout)
         self.catalog = self._load_catalog(catalog_path)
@@ -270,6 +271,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._populate_table()
         self._log(f'Connected via backend: {self.client.backend}')
+        QtCore.QTimer.singleShot(0, self._update_window_title_with_motor)
         QtCore.QTimer.singleShot(0, self._initial_read_all)
 
     def _load_catalog(self, path):
@@ -289,6 +291,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         cfg_group = QtWidgets.QGroupBox('General Configuration')
         cfg = QtWidgets.QGridLayout(cfg_group)
         self.cmd_pv = QtWidgets.QLineEdit(default_cmd_pv)
+        self.cmd_pv.editingFinished.connect(self._update_window_title_with_motor)
         self.qry_pv = QtWidgets.QLineEdit(default_qry_pv)
         self.timeout_edit = QtWidgets.QDoubleSpinBox()
         self.timeout_edit.setRange(0.1, 60.0)
@@ -372,6 +375,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.open_motion_btn.setDefault(False)
         self.open_motion_btn.clicked.connect(self._open_motion_window)
         top_row.addWidget(self.open_motion_btn)
+        self.open_axis_btn = QtWidgets.QPushButton('Open Axis')
+        self.open_axis_btn.setAutoDefault(False)
+        self.open_axis_btn.setDefault(False)
+        self.open_axis_btn.clicked.connect(self._open_axis_window)
+        top_row.addWidget(self.open_axis_btn)
         top_row.addStretch(1)
         layout.addLayout(top_row)
         layout.addWidget(cfg_panel)
@@ -391,6 +399,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.axis_all_edit = QtWidgets.QLineEdit(self.default_axis_id)
         self.axis_all_edit.setMaximumWidth(70)
         self.axis_all_edit.returnPressed.connect(self._apply_axis_all)
+        self.axis_all_edit.editingFinished.connect(self._update_window_title_with_motor)
         search_row.addWidget(self.axis_all_edit)
         self.axis_all_btn = QtWidgets.QPushButton('Apply Axis')
         self.axis_all_btn.setAutoDefault(False)
@@ -457,6 +466,47 @@ class CntrlWindow(QtWidgets.QMainWindow):
         t = datetime.now().strftime('%H:%M:%S')
         self.changes_log.appendPlainText(f'[{t}] {msg}')
 
+    def _ioc_prefix_for_title(self):
+        if self.title_prefix:
+            return self.title_prefix
+        cmd_pv = self.cmd_pv.text().strip() if hasattr(self, 'cmd_pv') else ''
+        m = re.match(r'^(.*):MCU-Cmd\.AOUT$', cmd_pv)
+        return m.group(1) if m else ''
+
+    def _combine_motor_record(self, axis_pfx, motor_name):
+        a = str(axis_pfx or '').strip()
+        m = str(motor_name or '').strip()
+        if a and m:
+            if m.startswith(a) or ':' in m:
+                return m
+            return f'{a}{m}' if a.endswith(':') else f'{a}:{m}'
+        return a or m
+
+    def _resolve_motor_record_name(self, axis_id):
+        prefix = self._ioc_prefix_for_title()
+        if not prefix:
+            return ''
+        a = str(axis_id or '').strip() or self.default_axis_id
+        axis_pfx = ''
+        motor_name = ''
+        try:
+            axis_pfx = str(self.client.get(_join_prefix_pv(prefix, f'MCU-Cfg-AX{a}-Pfx'), as_string=True)).strip().strip('"')
+        except Exception:
+            pass
+        try:
+            motor_name = str(self.client.get(_join_prefix_pv(prefix, f'MCU-Cfg-AX{a}-Nam'), as_string=True)).strip().strip('"')
+        except Exception:
+            pass
+        return self._combine_motor_record(axis_pfx, motor_name)
+
+    def _update_window_title_with_motor(self):
+        axis_id = self.axis_all_edit.text().strip() if hasattr(self, 'axis_all_edit') else self.default_axis_id
+        try:
+            motor = self._resolve_motor_record_name(axis_id)
+        except Exception:
+            motor = ''
+        self.setWindowTitle(f'{self._base_title} [{motor}]' if motor else self._base_title)
+
     def _initial_read_all(self):
         if self._did_initial_read_all:
             return
@@ -488,6 +538,28 @@ class CntrlWindow(QtWidgets.QMainWindow):
             self._log(f'Started motion window for axis {axis_id} (prefix {prefix})')
         except Exception as ex:
             self._log(f'Failed to start motion window: {ex}')
+
+    def _open_axis_window(self):
+        script = Path(__file__).with_name('start_axis.sh')
+        if not script.exists():
+            self._log(f'Launcher not found: {script.name}')
+            return
+        axis_id = self.axis_all_edit.text().strip() or self.default_axis_id
+        prefix = self.title_prefix or ''
+        if not prefix:
+            cmd_pv = self.cmd_pv.text().strip()
+            m = re.match(r'^(.*):MCU-Cmd\.AOUT$', cmd_pv)
+            prefix = m.group(1) if m else 'IOC:ECMC'
+        try:
+            subprocess.Popen(
+                ['bash', str(script), str(prefix), str(axis_id)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f'Started axis window for axis {axis_id} (prefix {prefix})')
+        except Exception as ex:
+            self._log(f'Failed to start axis window: {ex}')
 
     def _record_change(self, axis_id, key, value):
         axis = str(axis_id).strip() or self.default_axis_id
@@ -1104,7 +1176,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
                     'AxisCntrlKp', 'AxisCntrlKi', 'AxisCntrlKd', 'AxisCntrlKff',
                     'AxisCntrlDeadband', 'AxisCntrlDeadbandTime',
                     'AxisCntrlInnerKp', 'AxisCntrlInnerKi', 'AxisCntrlInnerKd',
-                    'AxisCntrlInnerTol', 'AxisCntrlInnerParams',
+                    'AxisCntrlInnerTol',
                 ],
                 used,
             ),
@@ -1116,7 +1188,6 @@ class CntrlWindow(QtWidgets.QMainWindow):
                 [
                     'AxisCntrlOutHL', 'AxisCntrlOutLL',
                     'AxisCntrlIPartHL', 'AxisCntrlIPartLL',
-                    'AxisMonCntrlOutHL', 'AxisMonEnableCntrlOutHLMon',
                 ],
                 used,
             ),
@@ -1274,6 +1345,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
             axis_edit.setText(axis_value)
             updated += 1
         self._log(f'Applied axis {axis_value} to {updated} rows')
+        self._update_window_title_with_motor()
 
     def _read_all_rows(self):
         if self.view_mode.currentText() in {'Diagram', 'Controller Sketch'}:
