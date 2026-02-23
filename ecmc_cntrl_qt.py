@@ -554,7 +554,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
             return
         self._did_initial_read_all = True
         try:
-            self._read_all_rows()
+            if not self._read_all_rows():
+                return
             self._copy_all_read_to_set()
         except Exception as ex:
             self._log(f'Initial Read All failed: {ex}')
@@ -778,6 +779,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
         dlg.exec_()
 
     def _filtered_rows(self):
+        if self.view_mode.currentText() in {'Diagram', 'Controller Sketch'}:
+            return self.rows
         txt = self.search.text().strip().lower()
         if not txt:
             return self.rows
@@ -785,6 +788,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
 
     def _populate_table(self):
         mode = self.view_mode.currentText()
+        if hasattr(self, 'search'):
+            self.search.setVisible(mode not in {'Diagram', 'Controller Sketch'})
         if mode == 'Diagram':
             self.stack.setCurrentIndex(1)
             self._populate_diagram()
@@ -1393,10 +1398,12 @@ class CntrlWindow(QtWidgets.QMainWindow):
         if self.view_mode.currentText() in {'Diagram', 'Controller Sketch'}:
             count = 0
             for row_def, read_edit in self._diagram_read_rows:
-                self._read_row(row_def, self.axis_all_edit, read_edit)
+                if not self._read_row(row_def, self.axis_all_edit, read_edit):
+                    self._log(f'Read All aborted after {count} rows (read failed: {row_def.get("name", "?")})')
+                    return False
                 count += 1
             self._log(f'Read All completed ({count} rows)')
-            return
+            return True
 
         count = 0
         for r in range(self.table.rowCount()):
@@ -1409,9 +1416,12 @@ class CntrlWindow(QtWidgets.QMainWindow):
             row_def = next((x for x in self.rows if x.get('name') == name), None)
             if not row_def or not row_def.get('get'):
                 continue
-            self._read_row(row_def, axis_edit, read_edit)
+            if not self._read_row(row_def, axis_edit, read_edit):
+                self._log(f'Read All aborted after {count} rows (read failed: {name})')
+                return False
             count += 1
         self._log(f'Read All completed ({count} rows)')
+        return True
 
     def _copy_all_read_to_set(self):
         copied = 0
@@ -1567,7 +1577,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         if err:
             read_edit.setText(err)
             self._set_sketch_value_style(read_edit, False)
-            return
+            return False
         ok, msg = self.read_raw_command(cmd)
         if ok and ': ' in msg:
             val = msg.split(': ', 1)[1].strip()
@@ -1578,9 +1588,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
             self._record_current_value(axis_edit.text().strip() or self.default_axis_id, row_def.get('name', ''), disp_val)
             if bool(read_edit.property('sketchValue')):
                 self._update_value_match_visual(read_edit, read_edit)
+            return True
         else:
             read_edit.setText(msg)
             self._set_sketch_value_style(read_edit, False)
+            return False
 
     def _write_row(self, row_def, axis_edit, set_edit, read_edit):
         set_txt = set_edit.text().strip()
