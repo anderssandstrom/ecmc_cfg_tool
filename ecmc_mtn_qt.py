@@ -204,6 +204,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._trend_use_monitor = False
         self._active_motion_mode = None
         self._is_motor_moving = False
+        self._jog_stop_dialog = None
 
         self._build_ui(timeout)
         self._log(f"Connected via backend: {self.client.backend}")
@@ -590,6 +591,7 @@ class MotionWindow(QtWidgets.QMainWindow):
     def _clear_active_motion_mode(self):
         self._active_motion_mode = None
         self._update_motion_group_enable_state()
+        self._close_jog_stop_dialog()
 
     def _update_motion_group_enable_state(self):
         groups = {
@@ -609,6 +611,54 @@ class MotionWindow(QtWidgets.QMainWindow):
             return
         if self._active_motion_mode in {"move", "jog"} and not self._is_motor_moving:
             self._clear_active_motion_mode()
+
+    def _close_jog_stop_dialog(self):
+        dlg = getattr(self, "_jog_stop_dialog", None)
+        if dlg is None:
+            return
+        try:
+            dlg.close()
+        except Exception:
+            pass
+        self._jog_stop_dialog = None
+
+    def _show_jog_stop_dialog(self, activity_label):
+        self._close_jog_stop_dialog()
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Motion Active")
+        dlg.setModal(False)
+        dlg.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint, True)
+        v = QtWidgets.QVBoxLayout(dlg)
+        v.setContentsMargins(10, 10, 10, 10)
+        v.setSpacing(8)
+        msg = QtWidgets.QLabel(f"{activity_label} is active")
+        msg.setStyleSheet("QLabel { font-weight: 600; }")
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setSpacing(8)
+        stop_btn = QtWidgets.QPushButton("STOP")
+        stop_btn.setMinimumSize(180, 64)
+        stop_btn.setStyleSheet(
+            "QPushButton { background: #f39c12; color: #111; font-weight: 700; font-size: 22px; border: 2px solid #b86f00; padding: 8px 14px; }"
+            "QPushButton:pressed { background: #d98500; }"
+        )
+        stop_btn.clicked.connect(self.stop_motion)
+        stop_btn.clicked.connect(dlg.close)
+        kill_btn = QtWidgets.QPushButton("KILL")
+        kill_btn.setMinimumSize(180, 64)
+        kill_btn.setStyleSheet(
+            "QPushButton { background: #8b1e1e; color: #fff; font-weight: 700; font-size: 22px; border: 2px solid #5e1111; padding: 8px 14px; }"
+            "QPushButton:pressed { background: #6f1717; }"
+        )
+        kill_btn.clicked.connect(self.kill_motion)
+        kill_btn.clicked.connect(dlg.close)
+        btn_row.addWidget(stop_btn)
+        btn_row.addWidget(kill_btn)
+        v.addWidget(msg)
+        v.addLayout(btn_row)
+        dlg.finished.connect(lambda _=0: setattr(self, "_jog_stop_dialog", None))
+        self._jog_stop_dialog = dlg
+        dlg.adjustSize()
+        dlg.show()
 
     def _open_controller_window(self):
         script = QtCore.QFileInfo(__file__).dir().filePath("start_cntrl.sh")
@@ -1045,6 +1095,7 @@ class MotionWindow(QtWidgets.QMainWindow):
                 self._put("RLV", pos)
             else:
                 self._put("VAL", pos)
+            self._show_jog_stop_dialog("Move to position")
             self._refresh_status_if_enabled()
         except Exception as ex:
             self._clear_active_motion_mode()
@@ -1066,6 +1117,7 @@ class MotionWindow(QtWidgets.QMainWindow):
             self._seq_active = True
             self.seq_state_label.setText("Moving to A")
             self._sequence_move_to(a)
+            self._show_jog_stop_dialog("Sequence (A <-> B)")
             self._seq_timer.start()
         except Exception as ex:
             self._clear_active_motion_mode()
@@ -1145,6 +1197,7 @@ class MotionWindow(QtWidgets.QMainWindow):
                     pass
                 self._put("JOGF", 1)
                 self._log("Endless forward motion started")
+                self._show_jog_stop_dialog("Endless forward motion")
             else:
                 try:
                     self._put("JOGF", 0, quiet=True)
@@ -1152,6 +1205,7 @@ class MotionWindow(QtWidgets.QMainWindow):
                     pass
                 self._put("JOGR", 1)
                 self._log("Endless backward motion started")
+                self._show_jog_stop_dialog("Endless backward motion")
             self._refresh_status_if_enabled()
         except Exception as ex:
             self._clear_active_motion_mode()
@@ -1164,6 +1218,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._seq_timer.stop()
         self.seq_state_label.setText("Stopped")
         self._clear_active_motion_mode()
+        self._close_jog_stop_dialog()
         try:
             try:
                 self._put("JOGF", 0, quiet=True)
@@ -1200,6 +1255,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._seq_timer.stop()
         self.seq_state_label.setText("Stopped")
         self._clear_active_motion_mode()
+        self._close_jog_stop_dialog()
         try:
             try:
                 self._put("JOGF", 0, quiet=True)
@@ -1218,6 +1274,22 @@ class MotionWindow(QtWidgets.QMainWindow):
             self._refresh_status_if_enabled()
         except Exception as ex:
             self._log(f"KILL failed: {ex}")
+
+    def closeEvent(self, event):
+        # Safety: if any motion mode is active, request stop before closing.
+        try:
+            if self._seq_active or self._active_motion_mode in {"move", "jog", "sequence"} or self._is_motor_moving:
+                self._log("Window closing: stop requested for active motion")
+                try:
+                    self.stop_motion()
+                except Exception as ex:
+                    self._log(f"Stop on close failed: {ex}")
+        finally:
+            try:
+                self._close_jog_stop_dialog()
+            except Exception:
+                pass
+            super().closeEvent(event)
 
 
 def main():

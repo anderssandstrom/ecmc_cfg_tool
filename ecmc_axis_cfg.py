@@ -315,10 +315,12 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._changes_by_axis = {}
         self._current_values_by_axis = {}
         self._original_values_by_axis = {}
+        self._did_initial_read_copy = False
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._load_yaml_tree()
         self._log(f"Connected via backend: {self.client.backend}")
         QtCore.QTimer.singleShot(0, self._update_window_title_with_motor)
+        QtCore.QTimer.singleShot(0, self._initial_read_all_and_copy)
 
     def _load_catalog(self, path):
         p = Path(path)
@@ -993,7 +995,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         pair = row.get("pair")
         if not pair or not pair.get("get"):
             row["status"].setText("missing getter")
-            return
+            return None
         cmd = fill_axis_command(pair["get"], self._axis_id(), "")
         ok, msg = self.read_raw_command(cmd)
         row["status"].setText("OK" if ok else "ERR")
@@ -1004,14 +1006,39 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             self._record_current_value(self._axis_id(), row.get("path", ""), disp_val)
         else:
             row["read_edit"].setText(msg)
+        return bool(ok)
 
-    def _read_all_matched(self):
+    def _read_all_matched(self, abort_on_error=False):
         count = 0
+        failed = False
         for row in self._leaf_rows:
-            if row.get("pair") and not row.get("blocked"):
-                self._read_row(row)
-                count += 1
-        self._log(f"Read matched rows: {count}")
+            if row.get("blocked"):
+                continue
+            pair = row.get("pair")
+            if not pair or not pair.get("get"):
+                continue
+            ok = self._read_row(row)
+            count += 1
+            if ok is False:
+                failed = True
+                if abort_on_error:
+                    self._log(f'Read matched rows aborted after failure at key="{row.get("path","")}" ({count} attempted)')
+                    return False
+        self._log(f"Read matched rows: {count}" + (" (with errors)" if failed else ""))
+        return not failed
+
+    def _initial_read_all_and_copy(self):
+        if self._did_initial_read_copy:
+            return
+        self._did_initial_read_copy = True
+        try:
+            ok = self._read_all_matched(abort_on_error=True)
+            if ok:
+                self._copy_read_to_set()
+            else:
+                self._log("Startup Copy Read->Set skipped because startup Read All aborted on first read error")
+        except Exception as ex:
+            self._log(f"Startup Read All / Copy failed: {ex}")
 
     def _write_filled_matched(self):
         count = 0
