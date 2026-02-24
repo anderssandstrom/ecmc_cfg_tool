@@ -180,7 +180,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         super().__init__()
         self._base_title = "ecmc Motor Record Motion"
         self.setWindowTitle(self._base_title)
-        self.resize(920, 400)
+        self.resize(920, 380)
 
         self.client = EpicsClient(timeout=timeout)
         self.default_prefix = str(prefix or "").strip()
@@ -342,7 +342,7 @@ class MotionWindow(QtWidgets.QMainWindow):
 
         self._build_motion_settings_group(layout)
         motion_row = QtWidgets.QHBoxLayout()
-        motion_row.setSpacing(6)
+        motion_row.setSpacing(4)
         self.move_group = self._build_move_group()
         self.tweak_group = self._build_tweak_group()
         self.jog_group = self._build_jog_group()
@@ -773,6 +773,12 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.reset_err_btn.setMaximumHeight(24)
         self.reset_err_btn.clicked.connect(self.reset_error)
         l.addWidget(self.reset_err_btn, 2, 4)
+        self.reset_all_err_btn = QtWidgets.QPushButton("Reset All")
+        self.reset_all_err_btn.setAutoDefault(False)
+        self.reset_all_err_btn.setDefault(False)
+        self.reset_all_err_btn.setMaximumHeight(24)
+        self.reset_all_err_btn.clicked.connect(self.reset_all_errors)
+        l.addWidget(self.reset_all_err_btn, 2, 5)
 
         l.addWidget(QtWidgets.QLabel("MsgTxt"), 3, 0)
         self.msgtxt_status_edit = QtWidgets.QLineEdit("")
@@ -1218,6 +1224,19 @@ class MotionWindow(QtWidgets.QMainWindow):
             self._refresh_status_if_enabled()
         except Exception as ex:
             self._log(f"Reset failed: {ex}")
+
+    def reset_all_errors(self):
+        try:
+            prefix = self.prefix_edit.text().strip() if hasattr(self, "prefix_edit") else ""
+            prefix = prefix or self.default_prefix
+            if not prefix:
+                raise RuntimeError("IOC prefix is empty")
+            pv = _join_prefix_pv(prefix, "MCU-ErrRst")
+            self.client.put(pv, 1, wait=False)
+            self._log(f"PUT [nowait] {pv} = 1")
+            self._refresh_status_if_enabled()
+        except Exception as ex:
+            self._log(f"Reset All failed: {ex}")
 
     def _init_positions_from_rbv(self, vals=None, force=False):
         vals = dict(vals or {})
