@@ -566,12 +566,15 @@ class MotionWindow(QtWidgets.QMainWindow):
         l.setVerticalSpacing(3)
         self.motion_velo_edit = QtWidgets.QLineEdit("1")
         self.motion_acc_edit = QtWidgets.QLineEdit("1")
+        self.motion_vmax_edit = QtWidgets.QLineEdit("")
         self.motion_accs_edit = QtWidgets.QLineEdit("")
+        self.motion_vmax_edit.setPlaceholderText("optional")
         self.motion_accs_edit.setPlaceholderText("optional")
-        for e in (self.motion_velo_edit, self.motion_acc_edit, self.motion_accs_edit):
+        for e in (self.motion_velo_edit, self.motion_acc_edit, self.motion_vmax_edit, self.motion_accs_edit):
             e.setMaximumHeight(24)
         self.motion_velo_edit.setMaximumWidth(90)
         self.motion_acc_edit.setMaximumWidth(90)
+        self.motion_vmax_edit.setMaximumWidth(90)
         self.motion_accs_edit.setMaximumWidth(90)
         self.drive_enable_btn = QtWidgets.QPushButton("Drive: ?")
         stop_btn = QtWidgets.QPushButton("STOP")
@@ -596,11 +599,13 @@ class MotionWindow(QtWidgets.QMainWindow):
         l.addWidget(self.motion_velo_edit, 0, 1)
         l.addWidget(QtWidgets.QLabel("ACCL"), 0, 2)
         l.addWidget(self.motion_acc_edit, 0, 3)
-        l.addWidget(QtWidgets.QLabel("ACCS"), 0, 4)
-        l.addWidget(self.motion_accs_edit, 0, 5)
-        l.addWidget(self.drive_enable_btn, 0, 6)
-        l.addWidget(stop_btn, 0, 7)
-        l.addWidget(kill_btn, 0, 8)
+        l.addWidget(QtWidgets.QLabel("VMAX"), 0, 4)
+        l.addWidget(self.motion_vmax_edit, 0, 5)
+        l.addWidget(QtWidgets.QLabel("ACCS"), 0, 6)
+        l.addWidget(self.motion_accs_edit, 0, 7)
+        l.addWidget(self.drive_enable_btn, 0, 8)
+        l.addWidget(stop_btn, 0, 9)
+        l.addWidget(kill_btn, 0, 10)
         g.setMaximumHeight(62)
         parent_layout.addWidget(g)
 
@@ -742,7 +747,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.rbv_motion_label.setStyleSheet(
             "QLabel { background: #d8ead2; color: #173b17; font-weight: 700; padding: 2px 6px; border: 1px solid #9fbe95; }"
         )
-        names = [("VAL", 0, 0), ("RBV", 0, 2), ("DMOV", 0, 4), ("MOVN", 0, 6), ("VELO", 1, 0), ("ACCL", 1, 2), ("ACCS", 1, 4), ("CNEN", 1, 6)]
+        names = [("VAL", 0, 0), ("RBV", 0, 2), ("DMOV", 0, 4), ("MOVN", 0, 6), ("VELO", 1, 0), ("ACCL", 1, 2), ("VMAX", 1, 4), ("CNEN", 1, 6)]
         for name, r, c in names:
             l.addWidget(QtWidgets.QLabel(name), r, c)
             e = QtWidgets.QLineEdit("")
@@ -1058,7 +1063,12 @@ class MotionWindow(QtWidgets.QMainWindow):
             return f"{a}:{m}"
         return a or m
 
-    def _set_move_params(self, velo, accl, accs=None):
+    def _set_move_params(self, velo, accl, accs=None, vmax=None):
+        if vmax is not None:
+            try:
+                self._put("VMAX", vmax)
+            except Exception as ex:
+                self._log(f"VMAX unavailable ({ex})")
         if accs is not None:
             try:
                 self._put("ACCS", accs)
@@ -1067,7 +1077,12 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._put("VELO", velo)
         self._put("ACCL", accl)
 
-    def _set_jog_params(self, velo, accl, accs=None):
+    def _set_jog_params(self, velo, accl, accs=None, vmax=None):
+        if vmax is not None:
+            try:
+                self._put("VMAX", vmax)
+            except Exception as ex:
+                self._log(f"VMAX unavailable ({ex})")
         if accs is not None:
             try:
                 self._put("ACCS", accs)
@@ -1083,9 +1098,11 @@ class MotionWindow(QtWidgets.QMainWindow):
     def _shared_motion_params(self):
         velo = _to_float(self.motion_velo_edit.text(), "VELO/JVEL")
         accl = _to_float(self.motion_acc_edit.text(), "ACCL")
+        vmax_txt = self.motion_vmax_edit.text().strip() if hasattr(self, "motion_vmax_edit") else ""
         accs_txt = self.motion_accs_edit.text().strip() if hasattr(self, "motion_accs_edit") else ""
+        vmax = _to_float(vmax_txt, "VMAX") if vmax_txt else None
         accs = _to_float(accs_txt, "ACCS") if accs_txt else None
-        return velo, accl, accs
+        return velo, accl, accs, vmax
 
     def _init_shared_motion_settings_from_pv(self):
         if not self.motor_record_edit.text().strip():
@@ -1100,6 +1117,12 @@ class MotionWindow(QtWidgets.QMainWindow):
             self.motion_acc_edit.setText(compact_float_text(a))
         except Exception as ex:
             self._log(f"Init ACCL from PV failed: {ex}")
+        try:
+            vm = self.client.get(self._pv("VMAX"), as_string=True)
+            self.motion_vmax_edit.setText(compact_float_text(vm))
+        except Exception:
+            if hasattr(self, "motion_vmax_edit"):
+                self.motion_vmax_edit.setText("")
         # ACCS is optional on some motor records.
         try:
             s = self.client.get(self._pv("ACCS"), as_string=True)
@@ -1373,8 +1396,8 @@ class MotionWindow(QtWidgets.QMainWindow):
         try:
             self._set_active_motion_mode("move")
             pos = _to_float(self.move_pos_edit.text(), "Position")
-            velo, accl, accs = self._shared_motion_params()
-            self._set_move_params(velo, accl, accs=accs)
+            velo, accl, accs, vmax = self._shared_motion_params()
+            self._set_move_params(velo, accl, accs=accs, vmax=vmax)
             if hasattr(self, "move_relative_chk") and self.move_relative_chk.isChecked():
                 self._put("RLV", pos)
             else:
@@ -1412,12 +1435,12 @@ class MotionWindow(QtWidgets.QMainWindow):
             self._set_active_motion_mode("sequence")
             a = _to_float(self.seq_a_edit.text(), "Pos A")
             b = _to_float(self.seq_b_edit.text(), "Pos B")
-            velo, accl, accs = self._shared_motion_params()
+            velo, accl, accs, vmax = self._shared_motion_params()
             idle_s = _to_float(self.seq_idle_edit.text(), "Idle time")
             if idle_s < 0:
                 raise ValueError("Idle time must be >= 0")
 
-            self._seq_params = {"a": a, "b": b, "velo": velo, "accl": accl, "accs": accs, "idle": idle_s}
+            self._seq_params = {"a": a, "b": b, "velo": velo, "accl": accl, "accs": accs, "vmax": vmax, "idle": idle_s}
             self._seq_next_target = b
             self._seq_idle_until = None
             self._seq_active = True
@@ -1432,7 +1455,7 @@ class MotionWindow(QtWidgets.QMainWindow):
 
     def _sequence_move_to(self, target):
         p = self._seq_params
-        self._set_move_params(p["velo"], p["accl"], accs=p.get("accs"))
+        self._set_move_params(p["velo"], p["accl"], accs=p.get("accs"), vmax=p.get("vmax"))
         self._put("VAL", target)
         self._log(f"Sequence target -> {compact_float_text(target)}")
         self._refresh_status_if_enabled()
@@ -1504,8 +1527,8 @@ class MotionWindow(QtWidgets.QMainWindow):
                 self._log(f"Endless {label} motion cancelled")
                 return
             self._set_active_motion_mode("jog")
-            velo, accl, accs = self._shared_motion_params()
-            self._set_jog_params(velo, accl, accs=accs)
+            velo, accl, accs, vmax = self._shared_motion_params()
+            self._set_jog_params(velo, accl, accs=accs, vmax=vmax)
             if direction == "F":
                 try:
                     self._put("JOGR", 0, quiet=True)

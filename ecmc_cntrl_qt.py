@@ -424,7 +424,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.view_mode = QtWidgets.QComboBox()
         self.view_mode.addItems(['Flat', 'Schematic', 'Diagram', 'Controller Sketch'])
         self.view_mode.setCurrentText('Controller Sketch')
-        self.view_mode.currentTextChanged.connect(self._populate_table)
+        self.view_mode.currentTextChanged.connect(self._on_view_mode_changed)
         search_row.addWidget(self.view_mode)
         search_row.addWidget(QtWidgets.QLabel('Axis All'))
         self.axis_all_edit = QtWidgets.QLineEdit(self.default_axis_id)
@@ -1022,6 +1022,14 @@ class CntrlWindow(QtWidgets.QMainWindow):
             return self.rows
         return [r for r in self.rows if txt in r['name'].lower()]
 
+    def _on_view_mode_changed(self, _mode=''):
+        self._populate_table()
+        try:
+            if self._read_all_rows():
+                self._copy_all_read_to_set()
+        except Exception as ex:
+            self._log(f'View-change Read/Copy failed: {ex}')
+
     def _populate_table(self):
         mode = self.view_mode.currentText()
         if hasattr(self, 'search'):
@@ -1587,7 +1595,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
         item.setToolTip(f"GET: {row_def.get('get') or '-'}\nSET: {row_def.get('set') or '-'}")
         self.table.setItem(r, 0, item)
 
-        axis = QtWidgets.QLineEdit('1')
+        axis_default = self.axis_all_edit.text().strip() if hasattr(self, 'axis_all_edit') else ''
+        axis = QtWidgets.QLineEdit(axis_default or self.default_axis_id)
         axis.setMaximumWidth(70)
         self.table.setCellWidget(r, 1, axis)
 
