@@ -182,6 +182,8 @@ softlimits:
   backwardEnable: false                               # Soft limit position bwd enable
 
 monitoring:
+  limits:
+    stopAtBoth: false                                 # stop at both limits, note thsi is not in normal yaml schema, only for comissioning!!
   lag:
     enable: false                                     # Enable position lag monitoring (following error)
     tolerance: 0.5                                    # Allowed tolerance

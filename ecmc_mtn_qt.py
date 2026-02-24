@@ -205,11 +205,13 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._active_motion_mode = None
         self._is_motor_moving = False
         self._jog_stop_dialog = None
+        self._did_startup_axis_presence_check = False
+        self._startup_axis_probe_ok = False
 
         self._build_ui(timeout)
         self._log(f"Connected via backend: {self.client.backend}")
         self._status_timer.start()
-        self.resolve_motor_record_name()
+        QtCore.QTimer.singleShot(0, self._startup_axis_presence_check)
 
     def _build_ui(self, timeout):
         root = QtWidgets.QWidget()
@@ -247,6 +249,10 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.axis_top_btn.setAutoDefault(False)
         self.axis_top_btn.setDefault(False)
         self.axis_top_btn.clicked.connect(self._apply_axis_top)
+        self.axis_pick_btn = QtWidgets.QPushButton("Select Axis...")
+        self.axis_pick_btn.setAutoDefault(False)
+        self.axis_pick_btn.setDefault(False)
+        self.axis_pick_btn.clicked.connect(self._open_axis_picker_dialog)
         for w in (
             self.cfg_toggle_btn,
             self.log_toggle_btn,
@@ -255,6 +261,7 @@ class MotionWindow(QtWidgets.QMainWindow):
             self.open_axis_btn,
             self.axis_top_edit,
             self.axis_top_btn,
+            self.axis_pick_btn,
         ):
             try:
                 w.setMaximumHeight(24)
@@ -268,6 +275,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         top_row.addWidget(QtWidgets.QLabel("Axis"))
         top_row.addWidget(self.axis_top_edit)
         top_row.addWidget(self.axis_top_btn)
+        top_row.addWidget(self.axis_pick_btn)
         top_row.addStretch(1)
         layout.addLayout(top_row)
 
@@ -385,6 +393,140 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._positions_initialized = False
         self.resolve_motor_record_name()
 
+    def _discover_axes_from_ioc(self):
+        prefix = self.prefix_edit.text().strip() or self.default_prefix
+        if not prefix:
+            raise RuntimeError("IOC prefix is empty")
+        cur = str(self.client.get(_join_prefix_pv(prefix, "MCU-Cfg-AX-FrstObjId"), as_string=True) or "").strip().strip('"')
+        out = []
+        seen = set()
+        while cur and cur != "-1":
+            axis_id = str(cur).strip()
+            if not axis_id or axis_id in seen:
+                break
+            seen.add(axis_id)
+            axis_pfx = ""
+            motor_name = ""
+            try:
+                axis_pfx = str(self.client.get(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-Pfx"), as_string=True) or "").strip().strip('"')
+            except Exception:
+                pass
+            try:
+                motor_name = str(self.client.get(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-Nam"), as_string=True) or "").strip().strip('"')
+            except Exception:
+                pass
+            out.append({
+                "axis_id": axis_id,
+                "motor": self._combine_motor_record(axis_pfx, motor_name),
+                "motor_name": motor_name,
+                "axis_type": "",
+            })
+            if out[-1]["motor"]:
+                try:
+                    out[-1]["axis_type"] = str(self.client.get(f"{out[-1]['motor']}-Type", as_string=True) or "").strip().strip('"')
+                except Exception:
+                    out[-1]["axis_type"] = ""
+            cur = str(self.client.get(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-NxtObjId"), as_string=True) or "").strip().strip('"')
+        return out
+
+    def _open_axis_picker_dialog(self):
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Select Axis")
+        dlg.resize(520, 320)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        info = QtWidgets.QLabel("Discovering axes from IOC configuration...")
+        lay.addWidget(info)
+        table = QtWidgets.QTableWidget(0, 4)
+        table.setHorizontalHeaderLabels(["Axis ID", "Type", "Motor", "Motor Name"])
+        table.verticalHeader().setVisible(False)
+        table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
+        lay.addWidget(table, 1)
+        btn_row = QtWidgets.QHBoxLayout()
+        refresh_btn = QtWidgets.QPushButton("Refresh")
+        select_btn = QtWidgets.QPushButton("Select")
+        close_btn = QtWidgets.QPushButton("Close")
+        for b in (refresh_btn, select_btn, close_btn):
+            b.setAutoDefault(False)
+            b.setDefault(False)
+        btn_row.addWidget(refresh_btn)
+        btn_row.addStretch(1)
+        btn_row.addWidget(select_btn)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+
+        def populate():
+            table.setRowCount(0)
+            try:
+                axes = self._discover_axes_from_ioc()
+            except Exception as ex:
+                info.setText(f"Axis discovery failed: {ex}")
+                return
+            info.setText(f"Found {len(axes)} axis(es)")
+            cur_axis = self._axis_id_text()
+            sel_row = -1
+            for r, ax in enumerate(axes):
+                table.insertRow(r)
+                axis_type = str(ax.get("axis_type", "") or "")
+                type_disp = "REAL" if axis_type.upper() == "REAL" else ("Virtual" if axis_type else "?")
+                vals = [str(ax.get("axis_id", "") or ""), type_disp, str(ax.get("motor", "") or ""), str(ax.get("motor_name", "") or "")]
+                for c, txt in enumerate(vals):
+                    it = QtWidgets.QTableWidgetItem(txt)
+                    if c in (0, 1):
+                        it.setTextAlignment(QtCore.Qt.AlignCenter)
+                    table.setItem(r, c, it)
+                if vals[0] == cur_axis:
+                    sel_row = r
+            if sel_row >= 0:
+                table.selectRow(sel_row)
+
+        def apply_selected():
+            r = table.currentRow()
+            if r < 0:
+                return
+            it = table.item(r, 0)
+            if it is None:
+                return
+            self.axis_top_edit.setText(it.text().strip())
+            self._apply_axis_top()
+            dlg.accept()
+
+        refresh_btn.clicked.connect(populate)
+        select_btn.clicked.connect(apply_selected)
+        close_btn.clicked.connect(dlg.reject)
+        table.itemDoubleClicked.connect(lambda _it: apply_selected())
+        populate()
+        dlg.exec_()
+
+    def _startup_axis_presence_check(self):
+        if self._did_startup_axis_presence_check:
+            return
+        self._did_startup_axis_presence_check = True
+        prefix = self.prefix_edit.text().strip() or self.default_prefix
+        cur_axis = self._axis_id_text()
+        if not prefix:
+            self._log("Startup axis probe skipped: IOC prefix unavailable")
+            self._open_axis_picker_dialog()
+            return
+        try:
+            probe_pv = _join_prefix_pv(prefix, f"MCU-Cfg-AX{cur_axis}-Pfx")
+            raw = self.client.get(probe_pv, as_string=True)
+        except Exception as ex:
+            self._log(f"Startup axis probe failed for axis {cur_axis}: {ex}; opening axis picker")
+            self._open_axis_picker_dialog()
+            return
+        if str(raw or "").strip().strip('"'):
+            self._startup_axis_probe_ok = True
+            self.resolve_motor_record_name()
+            return
+        self._log(f"Axis {cur_axis} probe returned empty; opening axis picker")
+        self._open_axis_picker_dialog()
+
     def _build_motion_settings_group(self, parent_layout):
         g = QtWidgets.QGroupBox("Shared Motion Settings")
         l = QtWidgets.QGridLayout(g)
@@ -401,15 +543,13 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.motion_acc_edit.setMaximumWidth(90)
         self.motion_accs_edit.setMaximumWidth(90)
         self.drive_enable_btn = QtWidgets.QPushButton("Drive: ?")
-        reset_btn = QtWidgets.QPushButton("Reset")
         stop_btn = QtWidgets.QPushButton("STOP")
         kill_btn = QtWidgets.QPushButton("KILL (CNEN=0)")
-        for b in (self.drive_enable_btn, reset_btn, stop_btn, kill_btn):
+        for b in (self.drive_enable_btn, stop_btn, kill_btn):
             b.setAutoDefault(False)
             b.setDefault(False)
             b.setMaximumHeight(24)
         self.drive_enable_btn.clicked.connect(self.toggle_drive_enable)
-        reset_btn.clicked.connect(self.reset_error)
         self._set_drive_enable_button_style(None)
         stop_btn.setStyleSheet(
             "QPushButton { background: #f39c12; color: #111; font-weight: 700; border: 1px solid #b86f00; padding: 4px 8px; }"
@@ -428,9 +568,8 @@ class MotionWindow(QtWidgets.QMainWindow):
         l.addWidget(QtWidgets.QLabel("ACCS"), 0, 4)
         l.addWidget(self.motion_accs_edit, 0, 5)
         l.addWidget(self.drive_enable_btn, 0, 6)
-        l.addWidget(reset_btn, 0, 7)
-        l.addWidget(stop_btn, 0, 8)
-        l.addWidget(kill_btn, 0, 9)
+        l.addWidget(stop_btn, 0, 7)
+        l.addWidget(kill_btn, 0, 8)
         g.setMaximumHeight(62)
         parent_layout.addWidget(g)
 
@@ -535,6 +674,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         l.setHorizontalSpacing(4)
         l.setVerticalSpacing(3)
         self.status_fields = {}
+        self.status_extra_fields = {}
         self.rbv_motion_label = QtWidgets.QLabel("idle")
         self.rbv_motion_label.setMinimumWidth(90)
         self.rbv_motion_label.setMinimumHeight(22)
@@ -559,7 +699,28 @@ class MotionWindow(QtWidgets.QMainWindow):
             self.status_fields[name] = e
         l.addWidget(QtWidgets.QLabel("Motion"), 2, 0)
         l.addWidget(self.rbv_motion_label, 2, 1)
-        g.setMaximumHeight(108)
+        l.addWidget(QtWidgets.QLabel("ErrId"), 2, 2)
+        self.errid_status_edit = QtWidgets.QLineEdit("")
+        self.errid_status_edit.setReadOnly(True)
+        self.errid_status_edit.setMaximumHeight(24)
+        self.errid_status_edit.setMaximumWidth(120)
+        l.addWidget(self.errid_status_edit, 2, 3)
+        self.status_extra_fields["ErrId"] = self.errid_status_edit
+        self.reset_err_btn = QtWidgets.QPushButton("Reset")
+        self.reset_err_btn.setAutoDefault(False)
+        self.reset_err_btn.setDefault(False)
+        self.reset_err_btn.setMaximumHeight(24)
+        self.reset_err_btn.clicked.connect(self.reset_error)
+        l.addWidget(self.reset_err_btn, 2, 4)
+
+        l.addWidget(QtWidgets.QLabel("MsgTxt"), 3, 0)
+        self.msgtxt_status_edit = QtWidgets.QLineEdit("")
+        self.msgtxt_status_edit.setReadOnly(True)
+        self.msgtxt_status_edit.setMaximumHeight(24)
+        self.msgtxt_status_edit.setMinimumWidth(320)
+        l.addWidget(self.msgtxt_status_edit, 3, 1, 1, 7)
+        self.status_extra_fields["MsgTxt"] = self.msgtxt_status_edit
+        g.setMaximumHeight(138)
         parent_layout.addWidget(g)
 
     def _build_trend_group(self, parent_layout):
@@ -668,6 +829,20 @@ class MotionWindow(QtWidgets.QMainWindow):
         axis_id = self._axis_id_text()
         prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
         try:
+            motor = self.motor_record_edit.text().strip() or self._combine_motor_record(
+                self._read_cfg_pv(self.axis_pfx_cfg_pv_edit.text().strip()) if self.axis_pfx_cfg_pv_edit.text().strip() else "",
+                self._read_cfg_pv(self.motor_name_cfg_pv_edit.text().strip()) if self.motor_name_cfg_pv_edit.text().strip() else "",
+            )
+            motor_type = str(self.client.get(f"{motor}-Type", as_string=True)).strip().strip('"') if motor else ""
+            if str(motor_type).upper() != "REAL":
+                msg = f'Controller app only supports REAL axes. Axis {axis_id} Type={motor_type or "?"}'
+                self._log(msg)
+                QtWidgets.QMessageBox.warning(self, "Non-REAL Axis", msg)
+                return
+        except Exception as ex:
+            self._log(f"Failed to verify axis type before opening controller: {ex}")
+            return
+        try:
             subprocess.Popen(
                 ["bash", str(script), str(prefix), str(axis_id)],
                 cwd=str(QtCore.QFileInfo(script).absolutePath()),
@@ -702,6 +877,19 @@ class MotionWindow(QtWidgets.QMainWindow):
             self.setWindowTitle(f"{self._base_title} [{motor}]")
         else:
             self.setWindowTitle(self._base_title)
+        self._update_open_controller_button_state()
+
+    def _update_open_controller_button_state(self):
+        try:
+            motor = self.motor_record_edit.text().strip() if hasattr(self, "motor_record_edit") else ""
+            if not motor:
+                self.open_cntrl_btn.setEnabled(True)
+                return
+            t = str(self.client.get(f"{motor}-Type", as_string=True) or "").strip().strip('"')
+            self.open_cntrl_btn.setEnabled(str(t).upper() == "REAL")
+        except Exception:
+            # Keep enabled if type cannot be verified.
+            self.open_cntrl_btn.setEnabled(True)
 
     def _update_cfg_pv_edits(self):
         prefix = self.prefix_edit.text().strip()
@@ -887,6 +1075,18 @@ class MotionWindow(QtWidgets.QMainWindow):
             except Exception as ex:
                 self.status_fields[f].setText(f"ERR: {ex}")
                 vals[f] = None
+        for name, suffix in (("ErrId", "-ErrId"), ("MsgTxt", "-MsgTxt")):
+            w = self.status_extra_fields.get(name) if hasattr(self, "status_extra_fields") else None
+            if w is None:
+                continue
+            try:
+                raw = self.client.get(self._motor_suffix_pv(suffix), as_string=True)
+                txt = str(raw).strip()
+                vals[name] = txt
+                w.setText(compact_float_text(txt) if name == "ErrId" else txt)
+            except Exception as ex:
+                vals[name] = None
+                w.setText(f"ERR: {ex}")
         self._update_motion_indicator(vals)
         self._update_drive_enable_button_from_status(vals)
         self._update_active_mode_from_status(vals)

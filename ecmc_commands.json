@@ -2734,6 +2734,24 @@
       "runtime_note": "Read/query command usable during runtime."
     },
     {
+      "command": "GetAxisMonStopAtAnyLimit(<int>)",
+      "command_named": "GetAxisMonStopAtAnyLimit(<axisIndex>)",
+      "param_names": [
+        "axisIndex",
+        "value"
+      ],
+      "parser_command": "GetAxisMonStopAtAnyLimit(<int>)",
+      "name": "GetAxisMonStopAtAnyLimit",
+      "category": "Motion",
+      "description": "Get stop at any limit setting.\n",
+      "header_source": "devEcmcSup/motion/ecmcMotion.h",
+      "header_example": "",
+      "parser_source": "",
+      "runtime_safe": true,
+      "runtime_class": "runtime",
+      "runtime_note": "Read/query command usable during runtime."
+    },
+    {
       "command": "GetAxisMonLimitBwdPolarity(<int>)",
       "command_named": "GetAxisMonLimitBwdPolarity(<axisIndex>)",
       "param_names": [
@@ -5765,6 +5783,24 @@
       "header_source": "devEcmcSup/motion/ecmcMotion.h",
       "header_example": "Cfg.SetAxisMonLatchLimit(4,0)",
       "parser_source": "devEcmcSup/com/ecmcCmdParser.c:2392",
+      "runtime_safe": false,
+      "runtime_class": "config_only",
+      "runtime_note": "Configuration command; typically intended before entering runtime mode."
+    },
+    {
+      "command": "Cfg.SetAxisMonStopAtAnyLimit(<int>,<int>)",
+      "command_named": "Cfg.SetAxisMonStopAtAnyLimit(<axisIndex>,<value>)",
+      "param_names": [
+        "axisIndex",
+        "value"
+      ],
+      "parser_command": "SetAxisMonStopAtAnyLimit(<int>,<int>)",
+      "name": "SetAxisMonStopAtAnyLimit",
+      "category": "Motion",
+      "description": "Set stop at any limit setting.\n",
+      "header_source": "devEcmcSup/motion/ecmcMotion.h",
+      "header_example": "",
+      "parser_source": "",
       "runtime_safe": false,
       "runtime_class": "config_only",
       "runtime_note": "Configuration command; typically intended before entering runtime mode."

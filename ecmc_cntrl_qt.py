@@ -269,11 +269,14 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.title_prefix = p
         self.sketch_image_path = str(sketch_image_path or '').strip()
         self._did_initial_read_all = False
+        self._did_real_axis_startup_check = False
+        self._closing_due_to_non_real = False
+        self._did_startup_axis_presence_check = False
+        self._startup_axis_probe_ok = False
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._populate_table()
         self._log(f'Connected via backend: {self.client.backend}')
-        QtCore.QTimer.singleShot(0, self._update_window_title_with_motor)
-        QtCore.QTimer.singleShot(0, self._initial_read_all)
+        QtCore.QTimer.singleShot(0, self._startup_axis_presence_check)
 
     def _load_catalog(self, path):
         p = Path(path)
@@ -434,6 +437,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.axis_all_btn.setDefault(False)
         self.axis_all_btn.clicked.connect(self._apply_axis_all)
         search_row.addWidget(self.axis_all_btn)
+        self.axis_pick_btn = QtWidgets.QPushButton('Select Axis...')
+        self.axis_pick_btn.setAutoDefault(False)
+        self.axis_pick_btn.setDefault(False)
+        self.axis_pick_btn.clicked.connect(self._open_axis_picker_dialog)
+        search_row.addWidget(self.axis_pick_btn)
         self.read_all_btn = QtWidgets.QPushButton('Read All')
         self.read_all_btn.setAutoDefault(False)
         self.read_all_btn.setDefault(False)
@@ -449,6 +457,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
             self.view_mode,
             self.axis_all_edit,
             self.axis_all_btn,
+            self.axis_pick_btn,
             self.read_all_btn,
             self.copy_read_to_set_btn,
         ):
@@ -541,6 +550,156 @@ class CntrlWindow(QtWidgets.QMainWindow):
             pass
         return self._combine_motor_record(axis_pfx, motor_name)
 
+    def _discover_axes_from_ioc(self):
+        prefix = self._ioc_prefix_for_title()
+        if not prefix:
+            raise RuntimeError('Cannot determine IOC prefix from title/cmd PV')
+        cur = str(self.client.get(_join_prefix_pv(prefix, 'MCU-Cfg-AX-FrstObjId'), as_string=True) or '').strip().strip('"')
+        out = []
+        seen = set()
+        while cur and cur != '-1':
+            axis_id = str(cur).strip()
+            if not axis_id or axis_id in seen:
+                break
+            seen.add(axis_id)
+            axis_pfx = ''
+            motor_name = ''
+            try:
+                axis_pfx = str(self.client.get(_join_prefix_pv(prefix, f'MCU-Cfg-AX{axis_id}-Pfx'), as_string=True) or '').strip().strip('"')
+            except Exception:
+                pass
+            try:
+                motor_name = str(self.client.get(_join_prefix_pv(prefix, f'MCU-Cfg-AX{axis_id}-Nam'), as_string=True) or '').strip().strip('"')
+            except Exception:
+                pass
+            out.append({
+                'axis_id': axis_id,
+                'motor': self._combine_motor_record(axis_pfx, motor_name),
+                'motor_name': motor_name,
+                'axis_type': '',
+            })
+            if out[-1]['motor']:
+                try:
+                    out[-1]['axis_type'] = str(self.client.get(f"{out[-1]['motor']}-Type", as_string=True) or '').strip().strip('"')
+                except Exception:
+                    out[-1]['axis_type'] = ''
+            cur = str(self.client.get(_join_prefix_pv(prefix, f'MCU-Cfg-AX{axis_id}-NxtObjId'), as_string=True) or '').strip().strip('"')
+        return out
+
+    def _open_axis_picker_dialog(self):
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle('Select Axis')
+        dlg.resize(520, 320)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        info = QtWidgets.QLabel('Discovering axes from IOC configuration...')
+        lay.addWidget(info)
+        table = QtWidgets.QTableWidget(0, 4)
+        table.setHorizontalHeaderLabels(['Axis ID', 'Type', 'Motor', 'Motor Name'])
+        table.verticalHeader().setVisible(False)
+        table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
+        lay.addWidget(table, 1)
+        btn_row = QtWidgets.QHBoxLayout()
+        refresh_btn = QtWidgets.QPushButton('Refresh')
+        select_btn = QtWidgets.QPushButton('Select')
+        close_btn = QtWidgets.QPushButton('Close')
+        for b in (refresh_btn, select_btn, close_btn):
+            b.setAutoDefault(False)
+            b.setDefault(False)
+        btn_row.addWidget(refresh_btn)
+        btn_row.addStretch(1)
+        btn_row.addWidget(select_btn)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+
+        def populate():
+            table.setRowCount(0)
+            try:
+                axes = self._discover_axes_from_ioc()
+            except Exception as ex:
+                info.setText(f'Axis discovery failed: {ex}')
+                return
+            info.setText(f'Found {len(axes)} axis(es)')
+            cur_axis = self.axis_all_edit.text().strip() or self.default_axis_id
+            sel_row = -1
+            for r, ax in enumerate(axes):
+                table.insertRow(r)
+                axis_type = str(ax.get('axis_type', '') or '')
+                type_disp = 'REAL' if axis_type.upper() == 'REAL' else ('Virtual' if axis_type else '?')
+                is_virtual = (type_disp == 'Virtual')
+                vals = [str(ax.get('axis_id', '') or ''), type_disp, str(ax.get('motor', '') or ''), str(ax.get('motor_name', '') or '')]
+                for c, txt in enumerate(vals):
+                    it = QtWidgets.QTableWidgetItem(txt)
+                    if c in (0, 1):
+                        it.setTextAlignment(QtCore.Qt.AlignCenter)
+                    if is_virtual:
+                        it.setForeground(QtGui.QBrush(QtGui.QColor('#9a9a9a')))
+                    table.setItem(r, c, it)
+                if vals[0] == cur_axis:
+                    sel_row = r
+            if sel_row >= 0:
+                table.selectRow(sel_row)
+
+        def apply_selected():
+            r = table.currentRow()
+            if r < 0:
+                return
+            it = table.item(r, 0)
+            if it is None:
+                return
+            type_item = table.item(r, 1)
+            type_txt = (type_item.text().strip() if type_item is not None else '')
+            if type_txt and type_txt.upper() != 'REAL':
+                QtWidgets.QMessageBox.warning(self, 'Non-REAL Axis', 'Controller app does not allow selecting a virtual axis.')
+                return
+            self.axis_all_edit.setText(it.text().strip())
+            self._apply_axis_all()
+            if not self._startup_axis_probe_ok:
+                self._startup_axis_probe_ok = True
+                self._run_startup_after_axis_probe()
+            dlg.accept()
+
+        refresh_btn.clicked.connect(populate)
+        select_btn.clicked.connect(apply_selected)
+        close_btn.clicked.connect(dlg.reject)
+        table.itemDoubleClicked.connect(lambda _it: apply_selected())
+        populate()
+        dlg.exec_()
+
+    def _startup_axis_presence_check(self):
+        if self._did_startup_axis_presence_check:
+            return
+        self._did_startup_axis_presence_check = True
+        prefix = self._ioc_prefix_for_title()
+        cur_axis = self.axis_all_edit.text().strip() or self.default_axis_id
+        if not prefix:
+            self._log('Startup axis probe skipped: IOC prefix unavailable')
+            self._open_axis_picker_dialog()
+            return
+        try:
+            probe_pv = _join_prefix_pv(prefix, f'MCU-Cfg-AX{cur_axis}-Pfx')
+            raw = self.client.get(probe_pv, as_string=True)
+        except Exception as ex:
+            self._log(f'Startup axis probe failed for axis {cur_axis}: {ex}; opening axis picker')
+            self._open_axis_picker_dialog()
+            return
+        if str(raw or '').strip().strip('"'):
+            self._startup_axis_probe_ok = True
+            self._run_startup_after_axis_probe()
+            return
+        self._log(f'Axis {cur_axis} probe returned empty; opening axis picker')
+        self._open_axis_picker_dialog()
+
+    def _run_startup_after_axis_probe(self):
+        self._update_window_title_with_motor()
+        self._startup_real_axis_check()
+        self._initial_read_all()
+
     def _update_window_title_with_motor(self):
         axis_id = self.axis_all_edit.text().strip() if hasattr(self, 'axis_all_edit') else self.default_axis_id
         try:
@@ -550,15 +709,62 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.setWindowTitle(f'{self._base_title} [{motor}]' if motor else self._base_title)
 
     def _initial_read_all(self):
+        if not self._startup_axis_probe_ok:
+            return
         if self._did_initial_read_all:
+            return
+        if self._closing_due_to_non_real:
             return
         self._did_initial_read_all = True
         try:
+            if not self._ensure_axis_is_real(self.axis_all_edit.text().strip() or self.default_axis_id, purpose='startup controller read', close_on_fail=True):
+                return
             if not self._read_all_rows():
                 return
             self._copy_all_read_to_set()
         except Exception as ex:
             self._log(f'Initial Read All failed: {ex}')
+
+    def _startup_real_axis_check(self):
+        if not self._startup_axis_probe_ok:
+            return
+        if self._did_real_axis_startup_check:
+            return
+        self._did_real_axis_startup_check = True
+        axis_id = self.axis_all_edit.text().strip() if hasattr(self, 'axis_all_edit') else self.default_axis_id
+        self._ensure_axis_is_real(axis_id or self.default_axis_id, purpose='open controller app', close_on_fail=True)
+
+    def _motor_type_for_axis(self, axis_id):
+        axis = str(axis_id or '').strip() or self.default_axis_id
+        motor = self._resolve_motor_record_name(axis)
+        if not motor:
+            return '', ''
+        try:
+            v = self.client.get(f'{motor}-Type', as_string=True)
+        except Exception:
+            v = ''
+        return motor, str(v or '').strip().strip('"')
+
+    def _ensure_axis_is_real(self, axis_id, purpose='controller command', close_on_fail=False):
+        axis = str(axis_id or '').strip() or self.default_axis_id
+        try:
+            motor, typ = self._motor_type_for_axis(axis)
+        except Exception as ex:
+            self._log(f'Cannot verify axis type for axis {axis}: {ex}')
+            return False
+        if str(typ).upper() == 'REAL':
+            return True
+        motor_txt = f' [{motor}]' if motor else ''
+        msg = f'Axis {axis}{motor_txt} is not REAL (Type={typ or "?"}); cannot {purpose}.'
+        self._log(msg)
+        try:
+            QtWidgets.QMessageBox.warning(self, 'Non-REAL Axis', msg)
+        except Exception:
+            pass
+        if close_on_fail:
+            self._closing_due_to_non_real = True
+            QtCore.QTimer.singleShot(0, self.close)
+        return False
 
     def _open_motion_window(self):
         script = Path(__file__).with_name('start_mtn.sh')
@@ -1395,6 +1601,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._update_window_title_with_motor()
 
     def _read_all_rows(self):
+        if not self._ensure_axis_is_real(self.axis_all_edit.text().strip() or self.default_axis_id, purpose='read controller values'):
+            return False
         if self.view_mode.currentText() in {'Diagram', 'Controller Sketch'}:
             count = 0
             for row_def, read_edit in self._diagram_read_rows:
@@ -1573,6 +1781,10 @@ class CntrlWindow(QtWidgets.QMainWindow):
             return False, msg
 
     def _read_row(self, row_def, axis_edit, read_edit):
+        if not self._ensure_axis_is_real(axis_edit.text(), purpose=f'read {row_def.get("name","controller value")}'):
+            if read_edit is not None:
+                read_edit.setText('Axis Type != REAL')
+            return False
         cmd, err = self._cmd_from_template(row_def.get('get', ''), axis_edit.text(), '')
         if err:
             read_edit.setText(err)
@@ -1595,6 +1807,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
             return False
 
     def _write_row(self, row_def, axis_edit, set_edit, read_edit):
+        if not self._ensure_axis_is_real(axis_edit.text(), purpose=f'write {row_def.get("name","controller value")}'):
+            if read_edit is not None:
+                read_edit.setText('Axis Type != REAL')
+            self._set_sketch_value_style(read_edit, False)
+            return
         set_txt = set_edit.text().strip()
         cmd, err = self._cmd_from_template(row_def.get('set', ''), axis_edit.text(), set_edit.text())
         if err:

@@ -64,6 +64,7 @@ monitoring.lag.tolerance,GetAxisMonPosLagTol(<axisIndex>),"Cfg.SetAxisMonPosLagT
 monitoring.stall.enable,GetAxisMonEnableStallMon(<axisIndex>),"Cfg.SetAxisMonEnableStallMon(<axisIndex>,<enable>)"
 monitoring.stall.time.factor,GetAxisMonStallTimeFactor(<axisIndex>),"Cfg.SetAxisMonStallTimeFactor(<axisIndex>,<timeFactor>)"
 monitoring.stall.time.timeout,GetAxisMonStallMinTimeOut(<axisIndex>),"Cfg.SetAxisMonStallMinTimeOut(<axisIndex>,<enable>)"
+monitoring.limits.stopAtBoth,GetAxisMonStopAtAnyLimit(<axisIndex>),"Cfg.SetAxisMonStopAtAnyLimit(<axisIndex>,<value>)"
 monitoring.target.enable,GetAxisMonEnableAtTargetMon(<axisIndex>),"Cfg.SetAxisMonEnableAtTargetMon(<axisIndex>,<value>)"
 monitoring.target.time,GetAxisMonAtTargetTime(<axisIndex>),"Cfg.SetAxisMonAtTargetTime(<axisIndex>,<value>)"
 monitoring.target.tolerance,GetAxisMonAtTargetTol(<axisIndex>),"Cfg.SetAxisMonAtTargetTol(<axisIndex>,<value>)"

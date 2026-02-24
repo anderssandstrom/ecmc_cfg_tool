@@ -212,6 +212,7 @@ EXPLICIT_PATH_TO_BASE = {
     "monitoring.stall.enable": "AxisMonEnableStallMon",
     "monitoring.stall.time.timeout": "AxisMonStallMinTimeOut",
     "monitoring.stall.time.factor": "AxisMonStallTimeFactor",
+    "monitoring.limits.stopAtBoth": "AxisMonStopAtAnyLimit",
     "plc.enable": "AxisPLCEnable",
     "plc.externalCommands": "AxisAllowCommandsFromPLC",
     "plc.velocity_filter.encoder.enable": "AxisPLCEncVelFilterEnable",
@@ -315,12 +316,14 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._changes_by_axis = {}
         self._current_values_by_axis = {}
         self._original_values_by_axis = {}
+        self._axis_is_real_cache = {}
         self._did_initial_read_copy = False
+        self._did_startup_axis_presence_check = False
+        self._startup_axis_probe_ok = False
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._load_yaml_tree()
         self._log(f"Connected via backend: {self.client.backend}")
-        QtCore.QTimer.singleShot(0, self._update_window_title_with_motor)
-        QtCore.QTimer.singleShot(0, self._initial_read_all_and_copy)
+        QtCore.QTimer.singleShot(0, self._startup_axis_presence_check)
 
     def _load_catalog(self, path):
         p = Path(path)
@@ -389,9 +392,14 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.axis_top_edit.setMaximumWidth(80)
         self.axis_top_edit.editingFinished.connect(lambda: self.axis_edit.setText(self.axis_top_edit.text()))
         self.axis_top_edit.editingFinished.connect(self._update_window_title_with_motor)
+        self.axis_pick_btn = QtWidgets.QPushButton("Select Axis...")
+        self.axis_pick_btn.setAutoDefault(False)
+        self.axis_pick_btn.setDefault(False)
+        self.axis_pick_btn.clicked.connect(self._open_axis_picker_dialog)
         search_row.addWidget(self.search, 1)
         search_row.addWidget(QtWidgets.QLabel("Axis"))
         search_row.addWidget(self.axis_top_edit)
+        search_row.addWidget(self.axis_pick_btn)
         layout.addLayout(search_row)
 
         self.cfg_group = QtWidgets.QGroupBox("Configuration")
@@ -499,6 +507,17 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             cmd_pv = self.cmd_pv.text().strip()
             m = re.match(r"^(.*):MCU-Cmd\\.AOUT$", cmd_pv)
             prefix = m.group(1) if m else "IOC:ECMC"
+        try:
+            motor = self._resolve_motor_record_name(axis_id)
+            motor_type = str(self.client.get(f"{motor}-Type", as_string=True)).strip().strip('"') if motor else ""
+            if str(motor_type).upper() != "REAL":
+                msg = f'Controller app only supports REAL axes. Axis {axis_id} Type={motor_type or "?"}'
+                self._log(msg)
+                QtWidgets.QMessageBox.warning(self, "Non-REAL Axis", msg)
+                return
+        except Exception as ex:
+            self._log(f"Failed to verify axis type before opening controller: {ex}")
+            return
         try:
             subprocess.Popen(
                 ["bash", str(script), str(prefix), str(axis_id)],
@@ -868,6 +887,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             "status": status,
         }
         self._leaf_rows.append(row)
+        set_edit.returnPressed.connect(lambda rr=row: self._write_row(rr))
 
         if matched and not blocked:
             w_btn = QtWidgets.QPushButton("W")
@@ -893,12 +913,167 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         a = self.axis_edit.text().strip()
         return a if a else self.axis_id_default
 
+    def _set_axis_id(self, axis_id):
+        a = str(axis_id or "").strip()
+        if not a:
+            return
+        self.axis_top_edit.setText(a)
+        self.axis_edit.setText(a)
+        self._update_window_title_with_motor()
+
     def _ioc_prefix_for_title(self):
         if self.title_prefix:
             return self.title_prefix
         cmd_pv = self.cmd_pv.text().strip() if hasattr(self, "cmd_pv") else ""
         m = re.match(r"^(.*):MCU-Cmd\.AOUT$", cmd_pv)
         return m.group(1) if m else ""
+
+    def _discover_axes_from_ioc(self):
+        prefix = self._ioc_prefix_for_title()
+        if not prefix:
+            raise RuntimeError("Cannot determine IOC prefix from title/cmd PV")
+
+        first_pv = _join_prefix_pv(prefix, "MCU-Cfg-AX-FrstObjId")
+        first_raw = self.client.get(first_pv, as_string=True)
+        cur = str(first_raw or "").strip().strip('"')
+        axes = []
+        visited = set()
+        steps = 0
+        while cur and cur != "-1":
+            if cur in visited:
+                break
+            visited.add(cur)
+            steps += 1
+            if steps > 10000:
+                break
+            axis_id = str(cur).strip()
+            axis_pfx = ""
+            motor_name = ""
+            try:
+                axis_pfx = str(self.client.get(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-Pfx"), as_string=True) or "").strip().strip('"')
+            except Exception:
+                pass
+            try:
+                motor_name = str(self.client.get(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-Nam"), as_string=True) or "").strip().strip('"')
+            except Exception:
+                pass
+            motor = self._combine_motor_record(axis_pfx, motor_name)
+            axis_type = ""
+            if motor:
+                try:
+                    axis_type = str(self.client.get(f"{motor}-Type", as_string=True) or "").strip().strip('"')
+                except Exception:
+                    axis_type = ""
+            axes.append({"axis_id": axis_id, "motor": motor, "axis_prefix": axis_pfx, "motor_name": motor_name, "axis_type": axis_type})
+            nxt_pv = _join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-NxtObjId")
+            nxt_raw = self.client.get(nxt_pv, as_string=True)
+            cur = str(nxt_raw or "").strip().strip('"')
+        return axes
+
+    def _open_axis_picker_dialog(self):
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Select Axis")
+        dlg.resize(520, 320)
+        lay = QtWidgets.QVBoxLayout(dlg)
+
+        info = QtWidgets.QLabel("Discovering axes from IOC configuration...")
+        lay.addWidget(info)
+
+        table = QtWidgets.QTableWidget(0, 4)
+        table.setHorizontalHeaderLabels(["Axis ID", "Type", "Motor", "Motor Name"])
+        table.verticalHeader().setVisible(False)
+        table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QtWidgets.QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
+        lay.addWidget(table, 1)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        refresh_btn = QtWidgets.QPushButton("Refresh")
+        select_btn = QtWidgets.QPushButton("Select")
+        close_btn = QtWidgets.QPushButton("Close")
+        for b in (refresh_btn, select_btn, close_btn):
+            b.setAutoDefault(False)
+            b.setDefault(False)
+        btn_row.addWidget(refresh_btn)
+        btn_row.addStretch(1)
+        btn_row.addWidget(select_btn)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+
+        def populate():
+            table.setRowCount(0)
+            try:
+                axes = self._discover_axes_from_ioc()
+            except Exception as ex:
+                info.setText(f"Axis discovery failed: {ex}")
+                return
+            info.setText(f"Found {len(axes)} axis(es)")
+            current_axis = self._axis_id()
+            current_row = -1
+            for r, ax in enumerate(axes):
+                table.insertRow(r)
+                axis_id = str(ax.get("axis_id", "") or "")
+                motor = str(ax.get("motor", "") or "")
+                motor_name = str(ax.get("motor_name", "") or "")
+                axis_type = str(ax.get("axis_type", "") or "")
+                type_disp = "REAL" if axis_type.upper() == "REAL" else ("Virtual" if axis_type else "?")
+                for c, txt in enumerate((axis_id, type_disp, motor, motor_name)):
+                    it = QtWidgets.QTableWidgetItem(txt)
+                    if c in (0, 1):
+                        it.setTextAlignment(QtCore.Qt.AlignCenter)
+                    table.setItem(r, c, it)
+                if axis_id == current_axis:
+                    current_row = r
+            if current_row >= 0:
+                table.selectRow(current_row)
+
+        def apply_selected():
+            r = table.currentRow()
+            if r < 0:
+                return
+            it = table.item(r, 0)
+            if it is None:
+                return
+            self._set_axis_id(it.text().strip())
+            self._read_and_copy_current_axis(reason="axis selection")
+            dlg.accept()
+
+        refresh_btn.clicked.connect(populate)
+        select_btn.clicked.connect(apply_selected)
+        close_btn.clicked.connect(dlg.reject)
+        table.itemDoubleClicked.connect(lambda _item: apply_selected())
+
+        populate()
+        dlg.exec_()
+
+    def _startup_axis_presence_check(self):
+        if self._did_startup_axis_presence_check:
+            return
+        self._did_startup_axis_presence_check = True
+        prefix = self._ioc_prefix_for_title()
+        current = self._axis_id()
+        if not prefix:
+            self._log("Startup axis probe skipped: IOC prefix unavailable")
+            self._open_axis_picker_dialog()
+            return
+        try:
+            probe_pv = _join_prefix_pv(prefix, f"MCU-Cfg-AX{current}-Pfx")
+            raw = self.client.get(probe_pv, as_string=True)
+        except Exception as ex:
+            self._log(f"Startup axis probe failed for axis {current}: {ex}; opening axis picker")
+            self._open_axis_picker_dialog()
+            return
+        if str(raw or "").strip().strip('"'):
+            self._startup_axis_probe_ok = True
+            self._update_window_title_with_motor()
+            self._initial_read_all_and_copy()
+            return
+        self._log(f'Axis {current} probe returned empty; opening axis picker')
+        self._open_axis_picker_dialog()
 
     def _combine_motor_record(self, axis_pfx, motor_name):
         a = str(axis_pfx or "").strip()
@@ -932,6 +1107,39 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         except Exception:
             motor = ""
         self.setWindowTitle(f"{self._base_title} [{motor}]" if motor else self._base_title)
+        self._update_open_controller_button_state()
+
+    def _update_open_controller_button_state(self):
+        try:
+            is_real = self._axis_is_real(self._axis_id())
+            self.open_cntrl_btn.setEnabled(bool(is_real))
+        except Exception:
+            # If type cannot be determined, keep the button enabled.
+            self.open_cntrl_btn.setEnabled(True)
+
+    def _axis_is_real(self, axis_id=None):
+        axis = str(axis_id or self._axis_id()).strip() or self.axis_id_default
+        cached = self._axis_is_real_cache.get(axis)
+        if cached is not None:
+            return bool(cached)
+        try:
+            motor = self._resolve_motor_record_name(axis)
+            if not motor:
+                self._axis_is_real_cache[axis] = False
+                return False
+            t = str(self.client.get(f"{motor}-Type", as_string=True) or "").strip().strip('"')
+            is_real = (t.upper() == "REAL")
+            self._axis_is_real_cache[axis] = is_real
+            return is_real
+        except Exception:
+            self._axis_is_real_cache[axis] = False
+            return False
+
+    def _row_blocked_for_virtual_axis(self, row):
+        path = str((row or {}).get("path", "") or "")
+        if not path.startswith(("drive.", "controller.")):
+            return False
+        return not self._axis_is_real(self._axis_id())
 
     def send_raw_command(self, cmd):
         pv = self.cmd_pv.text().strip()
@@ -973,6 +1181,10 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         if not pair or not pair.get("set"):
             row["status"].setText("missing setter")
             return
+        if self._row_blocked_for_virtual_axis(row):
+            row["status"].setText("virtual axis")
+            row["read_edit"].setText("Blocked for virtual axis")
+            return
         value = row["set_edit"].text().strip() or row.get("template_value", "")
         if not value or is_block_marked(value):
             row["status"].setText("no value")
@@ -995,6 +1207,10 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         pair = row.get("pair")
         if not pair or not pair.get("get"):
             row["status"].setText("missing getter")
+            return None
+        if self._row_blocked_for_virtual_axis(row):
+            row["status"].setText("virtual axis")
+            row["read_edit"].setText("Blocked for virtual axis")
             return None
         cmd = fill_axis_command(pair["get"], self._axis_id(), "")
         ok, msg = self.read_raw_command(cmd)
@@ -1028,17 +1244,25 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         return not failed
 
     def _initial_read_all_and_copy(self):
+        if not self._startup_axis_probe_ok:
+            return
         if self._did_initial_read_copy:
             return
         self._did_initial_read_copy = True
         try:
-            ok = self._read_all_matched(abort_on_error=True)
-            if ok:
-                self._copy_read_to_set()
-            else:
-                self._log("Startup Copy Read->Set skipped because startup Read All aborted on first read error")
+            self._read_and_copy_current_axis(reason="startup")
         except Exception as ex:
             self._log(f"Startup Read All / Copy failed: {ex}")
+
+    def _read_and_copy_current_axis(self, reason=""):
+        self._startup_axis_probe_ok = True
+        ok = self._read_all_matched(abort_on_error=True)
+        if ok:
+            self._copy_read_to_set()
+            return True
+        if reason:
+            self._log(f'Copy Read->Set skipped after {reason} because Read All aborted on first read error')
+        return False
 
     def _write_filled_matched(self):
         count = 0
