@@ -508,17 +508,6 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             m = re.match(r"^(.*):MCU-Cmd\\.AOUT$", cmd_pv)
             prefix = m.group(1) if m else "IOC:ECMC"
         try:
-            motor = self._resolve_motor_record_name(axis_id)
-            motor_type = str(self.client.get(f"{motor}-Type", as_string=True)).strip().strip('"') if motor else ""
-            if str(motor_type).upper() != "REAL":
-                msg = f'Controller app only supports REAL axes. Axis {axis_id} Type={motor_type or "?"}'
-                self._log(msg)
-                QtWidgets.QMessageBox.warning(self, "Non-REAL Axis", msg)
-                return
-        except Exception as ex:
-            self._log(f"Failed to verify axis type before opening controller: {ex}")
-            return
-        try:
             subprocess.Popen(
                 ["bash", str(script), str(prefix), str(axis_id)],
                 cwd=str(script.parent),
@@ -921,6 +910,27 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.axis_edit.setText(a)
         self._update_window_title_with_motor()
 
+    def _resolve_axis_selector_to_id(self, selector):
+        s = str(selector or "").strip()
+        if not s:
+            return ""
+        if re.fullmatch(r"\d+", s):
+            return s
+        try:
+            axes = self._discover_axes_from_ioc()
+        except Exception:
+            return ""
+        want = s.lower()
+        for ax in axes:
+            axis_id = str(ax.get("axis_id", "") or "").strip()
+            motor_name = str(ax.get("motor_name", "") or "").strip()
+            motor = str(ax.get("motor", "") or "").strip()
+            if want in {motor_name.lower(), motor.lower()}:
+                return axis_id
+            if motor and motor.split(":")[-1].lower() == want:
+                return axis_id
+        return ""
+
     def _ioc_prefix_for_title(self):
         if self.title_prefix:
             return self.title_prefix
@@ -1056,6 +1066,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._did_startup_axis_presence_check = True
         prefix = self._ioc_prefix_for_title()
         current = self._axis_id()
+        resolved_id = self._resolve_axis_selector_to_id(current)
+        if resolved_id and resolved_id != current:
+            self._log(f'Axis selector "{current}" resolved to axis {resolved_id}')
+            self._set_axis_id(resolved_id)
+            current = resolved_id
         if not prefix:
             self._log("Startup axis probe skipped: IOC prefix unavailable")
             self._open_axis_picker_dialog()
@@ -1110,12 +1125,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._update_open_controller_button_state()
 
     def _update_open_controller_button_state(self):
-        try:
-            is_real = self._axis_is_real(self._axis_id())
-            self.open_cntrl_btn.setEnabled(bool(is_real))
-        except Exception:
-            # If type cannot be determined, keep the button enabled.
-            self.open_cntrl_btn.setEnabled(True)
+        self.open_cntrl_btn.setEnabled(True)
 
     def _axis_is_real(self, axis_id=None):
         axis = str(axis_id or self._axis_id()).strip() or self.axis_id_default

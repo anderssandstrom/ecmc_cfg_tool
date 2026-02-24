@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import re
 import subprocess
 import sys
 import time
@@ -207,6 +208,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._jog_stop_dialog = None
         self._did_startup_axis_presence_check = False
         self._startup_axis_probe_ok = False
+        self._last_status_vals = {}
 
         self._build_ui(timeout)
         self._log(f"Connected via backend: {self.client.backend}")
@@ -342,8 +344,10 @@ class MotionWindow(QtWidgets.QMainWindow):
         motion_row = QtWidgets.QHBoxLayout()
         motion_row.setSpacing(6)
         self.move_group = self._build_move_group()
+        self.tweak_group = self._build_tweak_group()
         self.jog_group = self._build_jog_group()
         motion_row.addWidget(self.move_group, 1)
+        motion_row.addWidget(self.tweak_group, 1)
         motion_row.addWidget(self.jog_group, 1)
         layout.addLayout(motion_row)
         self.seq_group = self._build_sequence_group(layout)
@@ -429,6 +433,27 @@ class MotionWindow(QtWidgets.QMainWindow):
             cur = str(self.client.get(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-NxtObjId"), as_string=True) or "").strip().strip('"')
         return out
 
+    def _resolve_axis_selector_to_id(self, selector):
+        s = str(selector or "").strip()
+        if not s:
+            return ""
+        if re.fullmatch(r"\d+", s):
+            return s
+        try:
+            axes = self._discover_axes_from_ioc()
+        except Exception:
+            return ""
+        want = s.lower()
+        for ax in axes:
+            axis_id = str(ax.get("axis_id", "") or "").strip()
+            motor_name = str(ax.get("motor_name", "") or "").strip()
+            motor = str(ax.get("motor", "") or "").strip()
+            if want in {motor_name.lower(), motor.lower()}:
+                return axis_id
+            if motor and motor.split(":")[-1].lower() == want:
+                return axis_id
+        return ""
+
     def _open_axis_picker_dialog(self):
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("Select Axis")
@@ -509,6 +534,12 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._did_startup_axis_presence_check = True
         prefix = self.prefix_edit.text().strip() or self.default_prefix
         cur_axis = self._axis_id_text()
+        resolved_id = self._resolve_axis_selector_to_id(cur_axis)
+        if resolved_id and resolved_id != cur_axis:
+            self._log(f'Axis selector "{cur_axis}" resolved to axis {resolved_id}')
+            self.axis_top_edit.setText(resolved_id)
+            self._apply_axis_top()
+            cur_axis = resolved_id
         if not prefix:
             self._log("Startup axis probe skipped: IOC prefix unavailable")
             self._open_axis_picker_dialog()
@@ -603,7 +634,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         return g
 
     def _build_sequence_group(self, parent_layout):
-        g = QtWidgets.QGroupBox("3. Sequence (A <-> B)")
+        g = QtWidgets.QGroupBox("4. Sequence (A <-> B)")
         l = QtWidgets.QGridLayout(g)
         l.setContentsMargins(6, 6, 6, 6)
         l.setHorizontalSpacing(4)
@@ -644,7 +675,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         return g
 
     def _build_jog_group(self, parent_layout=None):
-        g = QtWidgets.QGroupBox("2. Endless Motion (Forward / Backward)")
+        g = QtWidgets.QGroupBox("3. Endless Motion (Forward / Backward)")
         l = QtWidgets.QGridLayout(g)
         l.setContentsMargins(6, 6, 6, 6)
         l.setHorizontalSpacing(4)
@@ -661,6 +692,36 @@ class MotionWindow(QtWidgets.QMainWindow):
 
         l.addWidget(bwd_btn, 0, 0)
         l.addWidget(fwd_btn, 0, 1)
+        g.setMaximumHeight(62)
+
+        if parent_layout is not None and hasattr(parent_layout, "addWidget"):
+            parent_layout.addWidget(g)
+        return g
+
+    def _build_tweak_group(self, parent_layout=None):
+        g = QtWidgets.QGroupBox("2. Tweak")
+        l = QtWidgets.QGridLayout(g)
+        l.setContentsMargins(6, 6, 6, 6)
+        l.setHorizontalSpacing(4)
+        l.setVerticalSpacing(3)
+
+        self.tweak_step_edit = QtWidgets.QLineEdit("1")
+        self.tweak_step_edit.setMaximumHeight(24)
+        self.tweak_step_edit.setMaximumWidth(90)
+
+        twr_btn = QtWidgets.QPushButton("TWR")
+        twf_btn = QtWidgets.QPushButton("TWF")
+        for b in (twr_btn, twf_btn):
+            b.setAutoDefault(False)
+            b.setDefault(False)
+            b.setMaximumHeight(24)
+        twr_btn.clicked.connect(self.tweak_reverse)
+        twf_btn.clicked.connect(self.tweak_forward)
+
+        l.addWidget(twr_btn, 0, 0)
+        l.addWidget(QtWidgets.QLabel("TWV"), 0, 1)
+        l.addWidget(self.tweak_step_edit, 0, 2)
+        l.addWidget(twf_btn, 0, 3)
         g.setMaximumHeight(62)
 
         if parent_layout is not None and hasattr(parent_layout, "addWidget"):
@@ -757,6 +818,7 @@ class MotionWindow(QtWidgets.QMainWindow):
     def _update_motion_group_enable_state(self):
         groups = {
             "move": getattr(self, "move_group", None),
+            "tweak": getattr(self, "tweak_group", None),
             "jog": getattr(self, "jog_group", None),
             "sequence": getattr(self, "seq_group", None),
         }
@@ -770,7 +832,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         if self._seq_active:
             self._set_active_motion_mode("sequence")
             return
-        if self._active_motion_mode in {"move", "jog"} and not self._is_motor_moving:
+        if self._active_motion_mode in {"move", "tweak", "jog"} and not self._is_motor_moving:
             self._clear_active_motion_mode()
 
     def _close_jog_stop_dialog(self):
@@ -792,7 +854,12 @@ class MotionWindow(QtWidgets.QMainWindow):
         v = QtWidgets.QVBoxLayout(dlg)
         v.setContentsMargins(10, 10, 10, 10)
         v.setSpacing(8)
-        msg = QtWidgets.QLabel(f"{activity_label} is active")
+        motor = self.motor_record_edit.text().strip() if hasattr(self, "motor_record_edit") else ""
+        msg_txt = f"{activity_label} is active"
+        if motor:
+            msg_txt += f"\n{motor}"
+        msg = QtWidgets.QLabel(msg_txt)
+        msg.setWordWrap(True)
         msg.setStyleSheet("QLabel { font-weight: 600; }")
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.setSpacing(8)
@@ -828,20 +895,6 @@ class MotionWindow(QtWidgets.QMainWindow):
             return
         axis_id = self._axis_id_text()
         prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
-        try:
-            motor = self.motor_record_edit.text().strip() or self._combine_motor_record(
-                self._read_cfg_pv(self.axis_pfx_cfg_pv_edit.text().strip()) if self.axis_pfx_cfg_pv_edit.text().strip() else "",
-                self._read_cfg_pv(self.motor_name_cfg_pv_edit.text().strip()) if self.motor_name_cfg_pv_edit.text().strip() else "",
-            )
-            motor_type = str(self.client.get(f"{motor}-Type", as_string=True)).strip().strip('"') if motor else ""
-            if str(motor_type).upper() != "REAL":
-                msg = f'Controller app only supports REAL axes. Axis {axis_id} Type={motor_type or "?"}'
-                self._log(msg)
-                QtWidgets.QMessageBox.warning(self, "Non-REAL Axis", msg)
-                return
-        except Exception as ex:
-            self._log(f"Failed to verify axis type before opening controller: {ex}")
-            return
         try:
             subprocess.Popen(
                 ["bash", str(script), str(prefix), str(axis_id)],
@@ -880,16 +933,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._update_open_controller_button_state()
 
     def _update_open_controller_button_state(self):
-        try:
-            motor = self.motor_record_edit.text().strip() if hasattr(self, "motor_record_edit") else ""
-            if not motor:
-                self.open_cntrl_btn.setEnabled(True)
-                return
-            t = str(self.client.get(f"{motor}-Type", as_string=True) or "").strip().strip('"')
-            self.open_cntrl_btn.setEnabled(str(t).upper() == "REAL")
-        except Exception:
-            # Keep enabled if type cannot be verified.
-            self.open_cntrl_btn.setEnabled(True)
+        self.open_cntrl_btn.setEnabled(True)
 
     def _update_cfg_pv_edits(self):
         prefix = self.prefix_edit.text().strip()
@@ -1057,6 +1101,12 @@ class MotionWindow(QtWidgets.QMainWindow):
         except Exception:
             if hasattr(self, "motion_accs_edit"):
                 self.motion_accs_edit.setText("")
+        try:
+            t = self.client.get(self._pv("TWV"), as_string=True)
+            if hasattr(self, "tweak_step_edit"):
+                self.tweak_step_edit.setText(compact_float_text(t))
+        except Exception:
+            pass
 
     def _refresh_status_if_enabled(self):
         if self.auto_refresh_status.isChecked():
@@ -1090,7 +1140,22 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._update_motion_indicator(vals)
         self._update_drive_enable_button_from_status(vals)
         self._update_active_mode_from_status(vals)
+        self._last_status_vals = dict(vals)
         return vals
+
+    def _errid_active(self, vals=None):
+        vals = dict(vals or getattr(self, "_last_status_vals", {}) or {})
+        err = vals.get("ErrId")
+        if err is None:
+            return False
+        s = str(err).strip().strip('"')
+        if not s:
+            return False
+        try:
+            return float(s) != 0.0
+        except Exception:
+            # Treat any non-empty, non-zero-ish text as active error.
+            return s.lower() not in {"0", "none", "ok"}
 
     def _set_drive_enable_button_style(self, enabled):
         if enabled is True:
@@ -1301,6 +1366,28 @@ class MotionWindow(QtWidgets.QMainWindow):
             self._clear_active_motion_mode()
             self._log(f"Move failed: {ex}")
 
+    def _tweak(self, direction):
+        try:
+            self._set_active_motion_mode("tweak")
+            twv = _to_float(self.tweak_step_edit.text(), "TWV")
+            self._put("TWV", twv)
+            if direction == "F":
+                self._put("TWF", 1)
+                self._log(f"Tweak forward (TWV={compact_float_text(twv)})")
+            else:
+                self._put("TWR", 1)
+                self._log(f"Tweak reverse (TWV={compact_float_text(twv)})")
+            self._refresh_status_if_enabled()
+        except Exception as ex:
+            self._clear_active_motion_mode()
+            self._log(f"Tweak failed: {ex}")
+
+    def tweak_forward(self):
+        self._tweak("F")
+
+    def tweak_reverse(self):
+        self._tweak("R")
+
     def start_sequence(self):
         try:
             self._set_active_motion_mode("sequence")
@@ -1336,6 +1423,16 @@ class MotionWindow(QtWidgets.QMainWindow):
             self._seq_timer.stop()
             return
         try:
+            if self._errid_active():
+                err_txt = ""
+                try:
+                    err_txt = str(self.status_extra_fields.get("ErrId").text() or "").strip()
+                except Exception:
+                    err_txt = ""
+                self._log(f"Sequence stopped due to active error (ErrId={err_txt or '?'})")
+                self.stop_sequence()
+                self.seq_state_label.setText("Stopped on error")
+                return
             now = time.monotonic()
             if self._seq_idle_until is not None:
                 remaining = self._seq_idle_until - now

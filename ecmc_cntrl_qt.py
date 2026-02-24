@@ -586,6 +586,27 @@ class CntrlWindow(QtWidgets.QMainWindow):
             cur = str(self.client.get(_join_prefix_pv(prefix, f'MCU-Cfg-AX{axis_id}-NxtObjId'), as_string=True) or '').strip().strip('"')
         return out
 
+    def _resolve_axis_selector_to_id(self, selector):
+        s = str(selector or '').strip()
+        if not s:
+            return ''
+        if re.fullmatch(r'\d+', s):
+            return s
+        try:
+            axes = self._discover_axes_from_ioc()
+        except Exception:
+            return ''
+        want = s.lower()
+        for ax in axes:
+            axis_id = str(ax.get('axis_id', '') or '').strip()
+            motor_name = str(ax.get('motor_name', '') or '').strip()
+            motor = str(ax.get('motor', '') or '').strip()
+            if want in {motor_name.lower(), motor.lower()}:
+                return axis_id
+            if motor and motor.split(':')[-1].lower() == want:
+                return axis_id
+        return ''
+
     def _open_axis_picker_dialog(self):
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle('Select Axis')
@@ -677,6 +698,12 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._did_startup_axis_presence_check = True
         prefix = self._ioc_prefix_for_title()
         cur_axis = self.axis_all_edit.text().strip() or self.default_axis_id
+        resolved_id = self._resolve_axis_selector_to_id(cur_axis)
+        if resolved_id and resolved_id != cur_axis:
+            self._log(f'Axis selector "{cur_axis}" resolved to axis {resolved_id}')
+            self.axis_all_edit.setText(resolved_id)
+            self._apply_axis_all()
+            cur_axis = resolved_id
         if not prefix:
             self._log('Startup axis probe skipped: IOC prefix unavailable')
             self._open_axis_picker_dialog()
@@ -732,7 +759,10 @@ class CntrlWindow(QtWidgets.QMainWindow):
             return
         self._did_real_axis_startup_check = True
         axis_id = self.axis_all_edit.text().strip() if hasattr(self, 'axis_all_edit') else self.default_axis_id
-        self._ensure_axis_is_real(axis_id or self.default_axis_id, purpose='open controller app', close_on_fail=True)
+        if self._ensure_axis_is_real(axis_id or self.default_axis_id, purpose='open controller app', close_on_fail=False):
+            return
+        self._log('Opening axis picker because controller app started on a virtual/non-REAL axis')
+        self._open_axis_picker_dialog()
 
     def _motor_type_for_axis(self, axis_id):
         axis = str(axis_id or '').strip() or self.default_axis_id
