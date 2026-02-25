@@ -367,11 +367,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.changed_yaml_btn.setAutoDefault(False)
         self.changed_yaml_btn.setDefault(False)
         self.changed_yaml_btn.clicked.connect(self._show_changed_yaml_window)
-        self.open_cntrl_btn = QtWidgets.QPushButton("Open Controller")
+        self.open_cntrl_btn = QtWidgets.QPushButton("Cntrl Cfg App")
         self.open_cntrl_btn.setAutoDefault(False)
         self.open_cntrl_btn.setDefault(False)
         self.open_cntrl_btn.clicked.connect(self._open_controller_window)
-        self.open_mtn_btn = QtWidgets.QPushButton("Open Motion")
+        self.open_mtn_btn = QtWidgets.QPushButton("Motion App")
         self.open_mtn_btn.setAutoDefault(False)
         self.open_mtn_btn.setDefault(False)
         self.open_mtn_btn.clicked.connect(self._open_motion_window)
@@ -1002,12 +1002,14 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         lay.addWidget(table, 1)
 
         btn_row = QtWidgets.QHBoxLayout()
+        open_new_chk = QtWidgets.QCheckBox("Open New Instance")
         refresh_btn = QtWidgets.QPushButton("Refresh")
         select_btn = QtWidgets.QPushButton("Select")
         close_btn = QtWidgets.QPushButton("Close")
         for b in (refresh_btn, select_btn, close_btn):
             b.setAutoDefault(False)
             b.setDefault(False)
+        btn_row.addWidget(open_new_chk)
         btn_row.addWidget(refresh_btn)
         btn_row.addStretch(1)
         btn_row.addWidget(select_btn)
@@ -1048,8 +1050,28 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             it = table.item(r, 0)
             if it is None:
                 return
-            self._set_axis_id(it.text().strip())
-            self._read_and_copy_current_axis(reason="axis selection")
+            axis_id = it.text().strip()
+            if open_new_chk.isChecked():
+                script = Path(__file__).with_name("start_axis.sh")
+                prefix = self.title_prefix or ""
+                if not prefix:
+                    cmd_pv = self.cmd_pv.text().strip()
+                    m = re.match(r"^(.*):MCU-Cmd\\.AOUT$", cmd_pv)
+                    prefix = m.group(1) if m else "IOC:ECMC"
+                try:
+                    subprocess.Popen(
+                        ["bash", str(script), str(prefix), str(axis_id), str(self.yaml_path)],
+                        cwd=str(script.parent),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    self._log(f"Started new axis cfg window for axis {axis_id} (prefix {prefix})")
+                except Exception as ex:
+                    self._log(f"Failed to start new axis cfg window: {ex}")
+                    return
+            else:
+                self._set_axis_id(axis_id)
+                self._read_and_copy_current_axis(reason="axis selection")
             dlg.accept()
 
         refresh_btn.clicked.connect(populate)

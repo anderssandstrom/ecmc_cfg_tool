@@ -236,11 +236,11 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.graphs_toggle_btn.setAutoDefault(False)
         self.graphs_toggle_btn.setDefault(False)
         self.graphs_toggle_btn.clicked.connect(self._toggle_graphs_panel)
-        self.open_cntrl_btn = QtWidgets.QPushButton("Open Controller")
+        self.open_cntrl_btn = QtWidgets.QPushButton("Cntrl Cfg App")
         self.open_cntrl_btn.setAutoDefault(False)
         self.open_cntrl_btn.setDefault(False)
         self.open_cntrl_btn.clicked.connect(self._open_controller_window)
-        self.open_axis_btn = QtWidgets.QPushButton("Open Axis")
+        self.open_axis_btn = QtWidgets.QPushButton("Axis Cfg App")
         self.open_axis_btn.setAutoDefault(False)
         self.open_axis_btn.setDefault(False)
         self.open_axis_btn.clicked.connect(self._open_axis_window)
@@ -473,12 +473,14 @@ class MotionWindow(QtWidgets.QMainWindow):
         table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
         lay.addWidget(table, 1)
         btn_row = QtWidgets.QHBoxLayout()
+        open_new_chk = QtWidgets.QCheckBox("Open New Instance")
         refresh_btn = QtWidgets.QPushButton("Refresh")
         select_btn = QtWidgets.QPushButton("Select")
         close_btn = QtWidgets.QPushButton("Close")
         for b in (refresh_btn, select_btn, close_btn):
             b.setAutoDefault(False)
             b.setDefault(False)
+        btn_row.addWidget(open_new_chk)
         btn_row.addWidget(refresh_btn)
         btn_row.addStretch(1)
         btn_row.addWidget(select_btn)
@@ -517,8 +519,24 @@ class MotionWindow(QtWidgets.QMainWindow):
             it = table.item(r, 0)
             if it is None:
                 return
-            self.axis_top_edit.setText(it.text().strip())
-            self._apply_axis_top()
+            axis_id = it.text().strip()
+            if open_new_chk.isChecked():
+                script = QtCore.QFileInfo(__file__).dir().filePath("start_mtn.sh")
+                prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
+                try:
+                    subprocess.Popen(
+                        ["bash", str(script), str(prefix), str(axis_id)],
+                        cwd=str(QtCore.QFileInfo(script).absolutePath()),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    self._log(f"Started new motion window for axis {axis_id} (prefix {prefix})")
+                except Exception as ex:
+                    self._log(f"Failed to start new motion window: {ex}")
+                    return
+            else:
+                self.axis_top_edit.setText(axis_id)
+                self._apply_axis_top()
             dlg.accept()
 
         refresh_btn.clicked.connect(populate)

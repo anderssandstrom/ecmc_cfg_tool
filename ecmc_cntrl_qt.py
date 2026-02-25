@@ -391,12 +391,12 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.changed_yaml_btn.setDefault(False)
         self.changed_yaml_btn.clicked.connect(self._show_changed_yaml_window)
         top_row.addWidget(self.changed_yaml_btn)
-        self.open_motion_btn = QtWidgets.QPushButton('Open Motion')
+        self.open_motion_btn = QtWidgets.QPushButton('Motion App')
         self.open_motion_btn.setAutoDefault(False)
         self.open_motion_btn.setDefault(False)
         self.open_motion_btn.clicked.connect(self._open_motion_window)
         top_row.addWidget(self.open_motion_btn)
-        self.open_axis_btn = QtWidgets.QPushButton('Open Axis')
+        self.open_axis_btn = QtWidgets.QPushButton('Axis Cfg App')
         self.open_axis_btn.setAutoDefault(False)
         self.open_axis_btn.setDefault(False)
         self.open_axis_btn.clicked.connect(self._open_axis_window)
@@ -626,12 +626,14 @@ class CntrlWindow(QtWidgets.QMainWindow):
         table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
         lay.addWidget(table, 1)
         btn_row = QtWidgets.QHBoxLayout()
+        open_new_chk = QtWidgets.QCheckBox('Open New Instance')
         refresh_btn = QtWidgets.QPushButton('Refresh')
         select_btn = QtWidgets.QPushButton('Select')
         close_btn = QtWidgets.QPushButton('Close')
         for b in (refresh_btn, select_btn, close_btn):
             b.setAutoDefault(False)
             b.setDefault(False)
+        btn_row.addWidget(open_new_chk)
         btn_row.addWidget(refresh_btn)
         btn_row.addStretch(1)
         btn_row.addWidget(select_btn)
@@ -678,11 +680,32 @@ class CntrlWindow(QtWidgets.QMainWindow):
             if type_txt and type_txt.upper() != 'REAL':
                 QtWidgets.QMessageBox.warning(self, 'Non-REAL Axis', 'Controller app does not allow selecting a virtual axis.')
                 return
-            self.axis_all_edit.setText(it.text().strip())
-            self._apply_axis_all()
-            if not self._startup_axis_probe_ok:
-                self._startup_axis_probe_ok = True
-                self._run_startup_after_axis_probe()
+            axis_id = it.text().strip()
+            if open_new_chk.isChecked():
+                script = Path(__file__).with_name('start_cntrl.sh')
+                prefix = self.title_prefix or ''
+                if not prefix:
+                    cmd_pv = self.cmd_pv.text().strip()
+                    m = re.match(r'^(.*):MCU-Cmd\.AOUT$', cmd_pv)
+                    prefix = m.group(1) if m else 'IOC:ECMC'
+                sketch_image = self.sketch_image_edit.text().strip() if hasattr(self, 'sketch_image_edit') else self.sketch_image_path
+                try:
+                    subprocess.Popen(
+                        ['bash', str(script), str(prefix), str(axis_id), str(sketch_image or '')],
+                        cwd=str(script.parent),
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    self._log(f'Started new controller window for axis {axis_id} (prefix {prefix})')
+                except Exception as ex:
+                    self._log(f'Failed to start new controller window: {ex}')
+                    return
+            else:
+                self.axis_all_edit.setText(axis_id)
+                self._apply_axis_all()
+                if not self._startup_axis_probe_ok:
+                    self._startup_axis_probe_ok = True
+                    self._run_startup_after_axis_probe()
             dlg.accept()
 
         refresh_btn.clicked.connect(populate)
