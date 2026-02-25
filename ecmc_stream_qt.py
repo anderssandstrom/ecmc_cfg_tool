@@ -9,9 +9,9 @@ from datetime import datetime
 from pathlib import Path
 
 try:
-    from PyQt5 import QtCore, QtWidgets
+    from PyQt5 import QtCore, QtGui, QtWidgets
 except Exception:
-    from PySide6 import QtCore, QtWidgets  # type: ignore
+    from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
 
 
 PLACEHOLDER_RE = re.compile(r'<([^>]+)>')
@@ -792,6 +792,10 @@ class MultiCommandDialog(QtWidgets.QDialog):
 
     def _write_row(self, row_idx):
         cmd = self._build_command(row_idx).strip()
+        if self.parent_window._is_blocked_command_text(cmd):
+            self.rows[row_idx]['result'].setText('Blocked command')
+            self.parent_window._log('Blocked command cannot be written from Selected Panel')
+            return
         ok, msg = self.parent_window.send_raw_command(cmd)
         self.rows[row_idx]['result'].setText(msg)
 
@@ -807,13 +811,16 @@ class MultiCommandDialog(QtWidgets.QDialog):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, catalog_path, favorites_path, default_cmd_pv, default_qry_pv, timeout):
+    def __init__(self, catalog_path, favorites_path, blocklist_path, default_cmd_pv, default_qry_pv, timeout):
         super().__init__()
         self.setWindowTitle('ecmc Stream Command Client')
-        self.resize(1280, 840)
+        self.resize(640, 480)
 
         self.client = EpicsClient(timeout=timeout)
         self.catalog = self._load_catalog(catalog_path)
+        self._blocklist_load_error = ''
+        self.blocked_commands = self._load_blocklist(blocklist_path)
+        self._blocked_category_count = self._apply_blocked_category()
         self.favorites_path = Path(favorites_path)
         self.favorites = self._load_favorites(self.favorites_path)
         self._child_windows = []
@@ -822,6 +829,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._populate_commands()
         self._populate_favorites()
         self._log(f'Connected via backend: {self.client.backend}')
+        if self._blocklist_load_error:
+            self._log(f'Blocklist load error: {self._blocklist_load_error}')
+        else:
+            self._log(f'Blocklist loaded: {len(self.blocked_commands)} entries; marked {self._blocked_category_count} commands as Blocked')
 
     def _load_catalog(self, path):
         p = Path(path)
@@ -831,6 +842,34 @@ class MainWindow(QtWidgets.QMainWindow):
             return json.loads(p.read_text())
         except Exception:
             return {'commands': []}
+
+    def _load_blocklist(self, path):
+        p = Path(path) if path else Path('ecmc_commands_blocklist_all.json')
+        if not p.exists():
+            return set()
+        try:
+            data = json.loads(p.read_text())
+        except Exception as ex:
+            self._blocklist_load_error = str(ex)
+            return set()
+        if isinstance(data, dict):
+            items = data.get('commands', [])
+        elif isinstance(data, list):
+            items = data
+        else:
+            items = []
+        return {str(x).strip() for x in items if str(x).strip()}
+
+    def _apply_blocked_category(self):
+        if not self.blocked_commands:
+            return 0
+        count = 0
+        for c in self.catalog.get('commands', []):
+            named = str(c.get('command_named', c.get('command', ''))).strip()
+            if named in self.blocked_commands:
+                c['category'] = 'Blocked'
+                count += 1
+        return count
 
     def _load_favorites(self, path):
         if not path.exists():
@@ -854,6 +893,42 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(root)
         layout = QtWidgets.QVBoxLayout(root)
 
+        top_row = QtWidgets.QHBoxLayout()
+        self.cfg_toggle_btn = QtWidgets.QPushButton('Show Config')
+        self.cfg_toggle_btn.setCheckable(True)
+        self.cfg_toggle_btn.setChecked(False)
+        self.cfg_toggle_btn.setAutoDefault(False)
+        self.cfg_toggle_btn.setDefault(False)
+        top_row.addWidget(self.cfg_toggle_btn)
+        self.log_toggle_btn = QtWidgets.QPushButton('Show Log')
+        self.log_toggle_btn.setCheckable(True)
+        self.log_toggle_btn.setChecked(False)
+        self.log_toggle_btn.setAutoDefault(False)
+        self.log_toggle_btn.setDefault(False)
+        top_row.addWidget(self.log_toggle_btn)
+        self.open_cntrl_btn = QtWidgets.QPushButton('Cntrl Cfg App')
+        self.open_cntrl_btn.setAutoDefault(False)
+        self.open_cntrl_btn.setDefault(False)
+        self.open_cntrl_btn.clicked.connect(self._open_cntrl_window)
+        top_row.addWidget(self.open_cntrl_btn)
+        self.open_mtn_btn = QtWidgets.QPushButton('Motion App')
+        self.open_mtn_btn.setAutoDefault(False)
+        self.open_mtn_btn.setDefault(False)
+        self.open_mtn_btn.clicked.connect(self._open_motion_window)
+        top_row.addWidget(self.open_mtn_btn)
+        self.open_axis_btn = QtWidgets.QPushButton('Axis Cfg App')
+        self.open_axis_btn.setAutoDefault(False)
+        self.open_axis_btn.setDefault(False)
+        self.open_axis_btn.clicked.connect(self._open_axis_window)
+        top_row.addWidget(self.open_axis_btn)
+        top_row.addStretch(1)
+        self.caqtdm_main_btn = QtWidgets.QPushButton('caqtdm Main')
+        self.caqtdm_main_btn.setAutoDefault(False)
+        self.caqtdm_main_btn.setDefault(False)
+        self.caqtdm_main_btn.clicked.connect(self._open_caqtdm_main_panel)
+        top_row.addWidget(self.caqtdm_main_btn)
+        layout.addLayout(top_row)
+
         cfg_group = QtWidgets.QGroupBox('PV Configuration')
         cfg = QtWidgets.QGridLayout(cfg_group)
         self.cmd_pv = QtWidgets.QLineEdit(default_cmd_pv)
@@ -870,11 +945,17 @@ class MainWindow(QtWidgets.QMainWindow):
         cfg.addWidget(self.qry_pv, 1, 1)
         cfg.addWidget(QtWidgets.QLabel('Timeout [s]'), 2, 0)
         cfg.addWidget(self.timeout_edit, 2, 1)
+        cfg_group.setVisible(False)
+        self.cfg_toggle_btn.toggled.connect(
+            lambda checked: (
+                cfg_group.setVisible(bool(checked)),
+                self.cfg_toggle_btn.setText('Hide Config' if checked else 'Show Config'),
+            )
+        )
         layout.addWidget(cfg_group)
 
         split = QtWidgets.QSplitter()
         split.setOrientation(QtCore.Qt.Horizontal)
-        layout.addWidget(split, stretch=1)
 
         left = QtWidgets.QWidget()
         left_l = QtWidgets.QVBoxLayout(left)
@@ -895,6 +976,10 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_row.addWidget(fav_add_btn)
         send_l.addWidget(self.command_edit)
         send_l.addLayout(btn_row)
+        self.readback_edit = QtWidgets.QLineEdit('')
+        self.readback_edit.setReadOnly(True)
+        self.readback_edit.setPlaceholderText('Latest readback/result...')
+        send_l.addWidget(self.readback_edit)
         left_l.addWidget(send_group)
 
         fav_group = QtWidgets.QGroupBox('Favorites')
@@ -931,7 +1016,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.response = QtWidgets.QPlainTextEdit()
         self.response.setReadOnly(True)
-        left_l.addWidget(self.response, stretch=1)
 
         split.addWidget(left)
 
@@ -942,10 +1026,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText('Filter commands or descriptions...')
         self.search.textChanged.connect(self._populate_commands)
-        self.runtime_only = QtWidgets.QCheckBox('Runtime-safe only')
-        self.runtime_only.toggled.connect(self._populate_commands)
+        self.show_all_commands = QtWidgets.QCheckBox('All commands')
+        self.show_all_commands.setChecked(False)
+        self.show_all_commands.toggled.connect(self._populate_commands)
         search_row.addWidget(self.search)
-        search_row.addWidget(self.runtime_only)
+        search_row.addWidget(self.show_all_commands)
         right_l.addLayout(search_row)
 
         self.command_list = QtWidgets.QListWidget()
@@ -955,11 +1040,11 @@ class MainWindow(QtWidgets.QMainWindow):
         right_l.addWidget(self.command_list, stretch=1)
 
         btns = QtWidgets.QHBoxLayout()
-        insert_btn = QtWidgets.QPushButton('Insert Template')
+        insert_btn = QtWidgets.QPushButton('Insert Command')
         insert_btn.clicked.connect(self._use_selected_command)
-        copy_btn = QtWidgets.QPushButton('Copy Template')
+        copy_btn = QtWidgets.QPushButton('Copy Command')
         copy_btn.clicked.connect(self._copy_selected_command)
-        add_fav_btn = QtWidgets.QPushButton('Template -> Favorites')
+        add_fav_btn = QtWidgets.QPushButton('Command -> Favorites')
         add_fav_btn.clicked.connect(self._add_selected_template_to_favorites)
         multi_btn = QtWidgets.QPushButton('Open Selected Panel')
         multi_btn.clicked.connect(self._open_selected_panel)
@@ -974,10 +1059,91 @@ class MainWindow(QtWidgets.QMainWindow):
         right_l.addWidget(self.details, stretch=1)
 
         split.addWidget(right)
-        split.setSizes([680, 620])
+        split.setSizes([300, 260])
+        layout.addWidget(split, stretch=1)
+
+        self.response.setVisible(False)
+        self.response.setMaximumHeight(120)
+        self.log_toggle_btn.toggled.connect(
+            lambda checked: (
+                self.response.setVisible(bool(checked)),
+                self.log_toggle_btn.setText('Hide Log' if checked else 'Show Log'),
+            )
+        )
+        layout.addWidget(self.response, stretch=0)
 
     def _set_timeout(self, value):
         self.client.timeout = float(value)
+
+    def _ioc_prefix_for_title(self):
+        cmd_pv = self.cmd_pv.text().strip() if hasattr(self, 'cmd_pv') else ''
+        m = re.match(r'^(.*):MCU-Cmd\.AOUT$', cmd_pv)
+        return m.group(1) if m else ''
+
+    def _open_caqtdm_main_panel(self):
+        ioc_prefix = self._ioc_prefix_for_title() or ''
+        macro = f'IOC={ioc_prefix}'
+        try:
+            cmd = f'caqtdm -macro "{macro}" ecmcMain.ui'
+            subprocess.Popen(
+                ['bash', '-lc', cmd],
+                cwd=str(Path(__file__).resolve().parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f'Started caQtDM main panel ({macro})')
+        except Exception as ex:
+            self._log(f'Failed to start caQtDM main panel: {ex}')
+
+    def _open_script_window(self, script_name, label, axis_id='1'):
+        script = Path(__file__).with_name(script_name)
+        if not script.exists():
+            self._log(f'Launcher not found: {script.name}')
+            return
+        prefix = self._ioc_prefix_for_title() or 'IOC:ECMC'
+        try:
+            subprocess.Popen(
+                ['bash', str(script), str(prefix), str(axis_id)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f'Started {label} window for axis {axis_id} (prefix {prefix})')
+        except Exception as ex:
+            self._log(f'Failed to start {label} window: {ex}')
+
+    def _open_motion_window(self):
+        self._open_script_window('start_mtn.sh', 'motion')
+
+    def _open_cntrl_window(self):
+        self._open_script_window('start_cntrl.sh', 'controller')
+
+    def _open_axis_window(self):
+        self._open_script_window('start_axis.sh', 'axis')
+
+    def _is_config_only_command(self, cmd):
+        return str(cmd or '').strip().startswith('Cfg.')
+
+    def _confirm_config_only_command(self, cmd):
+        if not self._is_config_only_command(cmd):
+            return True
+        text = str(cmd or '').strip()
+        ret = QtWidgets.QMessageBox.question(
+            self,
+            'Confirm Config Command',
+            (
+                'This is a config-only command and may change configuration.\n'
+                'WARNING: The IOC might crash if objects are created.\n\n'
+                f'Execute?\n{text}'
+            ),
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        return ret == QtWidgets.QMessageBox.Yes
+
+    def _set_readback_field(self, text):
+        if hasattr(self, 'readback_edit'):
+            self.readback_edit.setText(str(text or ''))
 
     def _log(self, msg):
         t = datetime.now().strftime('%H:%M:%S')
@@ -986,11 +1152,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def _filtered_commands(self):
         txt = self.search.text().strip().lower()
         cmds = self.catalog.get('commands', [])
-        runtime_only = bool(self.runtime_only.isChecked())
+        show_all = bool(self.show_all_commands.isChecked()) if hasattr(self, 'show_all_commands') else False
 
         out = []
         for c in cmds:
-            if runtime_only and not bool(c.get('runtime_safe', False)):
+            if (not show_all) and str(c.get('category', '') or '').strip().lower() == 'blocked':
                 continue
             if not txt:
                 out.append(c)
@@ -1013,7 +1179,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.command_list.clear()
         for c in self.filtered:
             label = (
-                f"[{c.get('runtime_class', 'unknown')}] "
                 f"[{c.get('category', 'General')}] "
                 f"{c.get('command_named', c.get('command', ''))}"
             )
@@ -1024,6 +1189,8 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             item = QtWidgets.QListWidgetItem(label)
             item.setToolTip(tooltip)
+            if str(c.get('category', '') or '').strip().lower() == 'blocked':
+                item.setForeground(QtGui.QColor('#8a8a8a'))
             self.command_list.addItem(item)
         if self.filtered:
             self.command_list.setCurrentRow(0)
@@ -1064,9 +1231,23 @@ class MainWindow(QtWidgets.QMainWindow):
         rows = sorted({idx.row() for idx in self.command_list.selectedIndexes()})
         return [self.filtered[r] for r in rows if 0 <= r < len(self.filtered)]
 
+    def _is_blocked_catalog_command(self, cmd_obj):
+        if not cmd_obj:
+            return False
+        return str(cmd_obj.get('category', '') or '').strip().lower() == 'blocked'
+
+    def _is_blocked_command_text(self, cmd_text):
+        txt = normalize_float_literals(str(cmd_text or '').strip())
+        if not txt:
+            return False
+        return txt in self.blocked_commands
+
     def _use_selected_command(self):
         c = self._selected_command()
         if not c:
+            return
+        if self._is_blocked_catalog_command(c):
+            self._log('Blocked command cannot be inserted into Send Command field')
             return
         self.command_edit.setText(c.get('command_named', c.get('command', '')))
 
@@ -1079,8 +1260,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _open_selected_panel(self):
         commands = self._selected_commands()
+        commands = [c for c in commands if not self._is_blocked_catalog_command(c)]
         if not commands:
-            self._log('ERROR: Select one or more commands first')
+            self._log('ERROR: Select one or more non-blocked commands first')
             return
         dlg = MultiCommandDialog(self, commands)
         self._child_windows.append(dlg)
@@ -1152,6 +1334,11 @@ class MainWindow(QtWidgets.QMainWindow):
             msg = 'ERROR: Command text is empty'
             self._log(msg)
             return False, msg
+        if not self._confirm_config_only_command(cmd):
+            msg = f'Canceled config command: {cmd}'
+            self._log(msg)
+            self._set_readback_field(msg)
+            return False, msg
         try:
             self.client.put(pv, cmd, wait=True)
             msg = f'CMD -> {pv} ({len(cmd)} chars): {cmd}'
@@ -1165,12 +1352,14 @@ class MainWindow(QtWidgets.QMainWindow):
     def read_raw_command(self, cmd):
         ok, msg = self.send_raw_command(cmd)
         if not ok:
+            self._set_readback_field(msg)
             return False, msg
 
         qp = self.qry_pv.text().strip()
         if not qp:
             msg = f'Command sent, no QRY PV configured: {cmd}'
             self._log(msg)
+            self._set_readback_field(msg)
             return True, msg
 
         try:
@@ -1179,14 +1368,16 @@ class MainWindow(QtWidgets.QMainWindow):
             val = self.client.get(qp, as_string=True)
             msg = compact_query_message_value(f'QRY <- {qp}: {val}')
             self._log(msg)
+            self._set_readback_field(val)
             return True, msg
         except Exception as ex:
             msg = f'ERROR query read: {ex}'
             self._log(msg)
+            self._set_readback_field(msg)
             return False, msg
 
     def send_command(self):
-        self.send_raw_command(self.command_edit.text())
+        self.read_raw_command(self.command_edit.text())
 
     def proc_and_read_query(self):
         qp = self.qry_pv.text().strip()
@@ -1197,8 +1388,10 @@ class MainWindow(QtWidgets.QMainWindow):
             proc_pv = _proc_pv_for_readback(qp)
             self.client.put(proc_pv, 1, wait=True)
             val = self.client.get(qp, as_string=True)
+            self._set_readback_field(val)
             self._log(compact_query_message_value(f'QRY <- {qp}: {val}'))
         except Exception as ex:
+            self._set_readback_field(f'ERROR query read: {ex}')
             self._log(f'ERROR query read: {ex}')
 
     def read_query_only(self):
@@ -1208,8 +1401,10 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         try:
             val = self.client.get(qp, as_string=True)
+            self._set_readback_field(val)
             self._log(compact_query_message_value(f'QRY <- {qp}: {val}'))
         except Exception as ex:
+            self._set_readback_field(f'ERROR query read: {ex}')
             self._log(f'ERROR query read: {ex}')
 
 
@@ -1217,6 +1412,7 @@ def main():
     ap = argparse.ArgumentParser(description='Qt app to send ecmc commands via EPICS PVs')
     ap.add_argument('--catalog', default='ecmc_commands.json', help='Path to command catalog JSON')
     ap.add_argument('--favorites', default='ecmc_favorites.json', help='Path to favorites JSON')
+    ap.add_argument('--blocklist', default='ecmc_commands_blocklist_all.json', help='Path to command blocklist JSON')
     ap.add_argument('--prefix', default='', help='PV prefix (e.g. IOC:ECMC)')
     ap.add_argument('--cmd-pv', default='', help='Command PV name (overrides --prefix)')
     ap.add_argument('--qry-pv', default='', help='Query PV name/readback PV (overrides --prefix)')
@@ -1234,6 +1430,7 @@ def main():
     w = MainWindow(
         catalog_path=args.catalog,
         favorites_path=args.favorites,
+        blocklist_path=args.blocklist,
         default_cmd_pv=default_cmd_pv,
         default_qry_pv=default_qry_pv,
         timeout=args.timeout,
