@@ -53,6 +53,8 @@ def _category(sig: str) -> str:
         return 'EtherCAT'
     if 'plc' in key:
         return 'PLC'
+    if 'axisenclookuptable' in key:
+        return 'Motion'
     # Avoid matching unrelated names like "moveAbsolute..." on the substring "lut".
     if 'storage' in key or 'lookuptable' in key or key.startswith('loadlut'):
         return 'Storage/Misc'

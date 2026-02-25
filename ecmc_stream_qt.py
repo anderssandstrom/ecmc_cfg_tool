@@ -753,18 +753,15 @@ class MultiCommandDialog(QtWidgets.QDialog):
         actions_l.setSpacing(3)
         write_btn = QtWidgets.QPushButton('Write')
         read_btn = QtWidgets.QPushButton('Read')
-        copy_btn = QtWidgets.QPushButton('Copy')
-        for btn in (write_btn, read_btn, copy_btn):
+        for btn in (write_btn, read_btn):
             # Prevent Enter/Return in any editor from triggering an implicit
             # "default" action button on the dialog.
             btn.setAutoDefault(False)
             btn.setDefault(False)
         write_btn.setMaximumWidth(58)
         read_btn.setMaximumWidth(58)
-        copy_btn.setMaximumWidth(58)
         actions_l.addWidget(write_btn)
         actions_l.addWidget(read_btn)
-        actions_l.addWidget(copy_btn)
         self.table.setCellWidget(row_idx, 2, actions)
 
         result = QtWidgets.QLabel('')
@@ -783,7 +780,6 @@ class MultiCommandDialog(QtWidgets.QDialog):
 
         write_btn.clicked.connect(lambda _=False, i=data_idx: self._write_row(i))
         read_btn.clicked.connect(lambda _=False, i=data_idx: self._read_row(i))
-        copy_btn.clicked.connect(lambda _=False, i=data_idx: self._copy_row(i))
 
     def _build_command(self, row_idx):
         row = self.rows[row_idx]
@@ -811,7 +807,7 @@ class MultiCommandDialog(QtWidgets.QDialog):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, catalog_path, favorites_path, blocklist_path, default_cmd_pv, default_qry_pv, timeout):
+    def __init__(self, catalog_path, blocklist_path, default_cmd_pv, default_qry_pv, timeout):
         super().__init__()
         self.setWindowTitle('ecmc Stream Command Client')
         self.resize(640, 480)
@@ -821,13 +817,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._blocklist_load_error = ''
         self.blocked_commands = self._load_blocklist(blocklist_path)
         self._blocked_category_count = self._apply_blocked_category()
-        self.favorites_path = Path(favorites_path)
-        self.favorites = self._load_favorites(self.favorites_path)
         self._child_windows = []
 
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._populate_commands()
-        self._populate_favorites()
         self._log(f'Connected via backend: {self.client.backend}')
         if self._blocklist_load_error:
             self._log(f'Blocklist load error: {self._blocklist_load_error}')
@@ -870,23 +863,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 c['category'] = 'Blocked'
                 count += 1
         return count
-
-    def _load_favorites(self, path):
-        if not path.exists():
-            return []
-        try:
-            data = json.loads(path.read_text())
-            if isinstance(data, list):
-                return [str(x) for x in data]
-            if isinstance(data, dict) and isinstance(data.get('favorites'), list):
-                return [str(x) for x in data.get('favorites', [])]
-        except Exception:
-            pass
-        return []
-
-    def _save_favorites(self):
-        payload = {'favorites': self.favorites}
-        self.favorites_path.write_text(json.dumps(payload, indent=2) + '\n')
 
     def _build_ui(self, default_cmd_pv, default_qry_pv, timeout):
         root = QtWidgets.QWidget()
@@ -954,73 +930,52 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         layout.addWidget(cfg_group)
 
-        split = QtWidgets.QSplitter()
-        split.setOrientation(QtCore.Qt.Horizontal)
+        main_split = QtWidgets.QSplitter()
+        main_split.setOrientation(QtCore.Qt.Vertical)
 
-        left = QtWidgets.QWidget()
-        left_l = QtWidgets.QVBoxLayout(left)
+        upper = QtWidgets.QWidget()
+        upper_l = QtWidgets.QVBoxLayout(upper)
+        upper_l.setContentsMargins(0, 0, 0, 0)
+        upper_l.setSpacing(4)
 
         send_group = QtWidgets.QGroupBox('Send Command')
         send_l = QtWidgets.QVBoxLayout(send_group)
+        send_l.setContentsMargins(6, 6, 6, 6)
+        send_l.setSpacing(3)
         self.command_edit = QtWidgets.QLineEdit('GetControllerError()')
         self.command_edit.returnPressed.connect(self.send_command)
         btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.setSpacing(3)
         send_btn = QtWidgets.QPushButton('Send to CMD PV')
         send_btn.clicked.connect(self.send_command)
         clear_btn = QtWidgets.QPushButton('Clear Command')
         clear_btn.clicked.connect(lambda: self.command_edit.setText(''))
-        fav_add_btn = QtWidgets.QPushButton('Add to Favorites')
-        fav_add_btn.clicked.connect(self._add_current_to_favorites)
+        proc_btn = QtWidgets.QPushButton('PROC + Read QRY')
+        proc_btn.clicked.connect(self.proc_and_read_query)
+        read_btn = QtWidgets.QPushButton('Read QRY Only')
+        read_btn.clicked.connect(self.read_query_only)
         btn_row.addWidget(send_btn)
         btn_row.addWidget(clear_btn)
-        btn_row.addWidget(fav_add_btn)
+        btn_row.addWidget(proc_btn)
+        btn_row.addWidget(read_btn)
         send_l.addWidget(self.command_edit)
         send_l.addLayout(btn_row)
         self.readback_edit = QtWidgets.QLineEdit('')
         self.readback_edit.setReadOnly(True)
         self.readback_edit.setPlaceholderText('Latest readback/result...')
         send_l.addWidget(self.readback_edit)
-        left_l.addWidget(send_group)
-
-        fav_group = QtWidgets.QGroupBox('Favorites')
-        fav_l = QtWidgets.QVBoxLayout(fav_group)
-        self.favorite_filter = QtWidgets.QLineEdit()
-        self.favorite_filter.setPlaceholderText('Filter favorites...')
-        self.favorite_filter.textChanged.connect(self._populate_favorites)
-        fav_l.addWidget(self.favorite_filter)
-        self.favorite_list = QtWidgets.QListWidget()
-        self.favorite_list.itemDoubleClicked.connect(self._use_selected_favorite)
-        fav_l.addWidget(self.favorite_list)
-        fav_btns = QtWidgets.QHBoxLayout()
-        fav_use = QtWidgets.QPushButton('Use Favorite')
-        fav_use.clicked.connect(self._use_selected_favorite)
-        fav_del = QtWidgets.QPushButton('Remove Favorite')
-        fav_del.clicked.connect(self._remove_selected_favorite)
-        fav_save = QtWidgets.QPushButton('Save Favorites')
-        fav_save.clicked.connect(self._save_favorites_clicked)
-        fav_btns.addWidget(fav_use)
-        fav_btns.addWidget(fav_del)
-        fav_btns.addWidget(fav_save)
-        fav_l.addLayout(fav_btns)
-        left_l.addWidget(fav_group)
-
-        qry_group = QtWidgets.QGroupBox('Query PV')
-        qry_l = QtWidgets.QHBoxLayout(qry_group)
-        proc_btn = QtWidgets.QPushButton('PROC + Read QRY')
-        proc_btn.clicked.connect(self.proc_and_read_query)
-        read_btn = QtWidgets.QPushButton('Read QRY Only')
-        read_btn.clicked.connect(self.read_query_only)
-        qry_l.addWidget(proc_btn)
-        qry_l.addWidget(read_btn)
-        left_l.addWidget(qry_group)
+        upper_l.addWidget(send_group)
 
         self.response = QtWidgets.QPlainTextEdit()
         self.response.setReadOnly(True)
 
-        split.addWidget(left)
+        main_split.addWidget(upper)
 
-        right = QtWidgets.QWidget()
-        right_l = QtWidgets.QVBoxLayout(right)
+        lower = QtWidgets.QWidget()
+        lower_l = QtWidgets.QVBoxLayout(lower)
+        lower_l.setContentsMargins(0, 0, 0, 0)
+        lower_l.setSpacing(4)
 
         search_row = QtWidgets.QHBoxLayout()
         self.search = QtWidgets.QLineEdit()
@@ -1031,36 +986,37 @@ class MainWindow(QtWidgets.QMainWindow):
         self.show_all_commands.toggled.connect(self._populate_commands)
         search_row.addWidget(self.search)
         search_row.addWidget(self.show_all_commands)
-        right_l.addLayout(search_row)
+        lower_l.addLayout(search_row)
+
+        browser_split = QtWidgets.QSplitter()
+        browser_split.setOrientation(QtCore.Qt.Vertical)
 
         self.command_list = QtWidgets.QListWidget()
         self.command_list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.command_list.currentRowChanged.connect(self._show_command_details)
         self.command_list.itemDoubleClicked.connect(self._use_selected_command)
-        right_l.addWidget(self.command_list, stretch=1)
+        browser_split.addWidget(self.command_list)
 
         btns = QtWidgets.QHBoxLayout()
         insert_btn = QtWidgets.QPushButton('Insert Command')
         insert_btn.clicked.connect(self._use_selected_command)
-        copy_btn = QtWidgets.QPushButton('Copy Command')
-        copy_btn.clicked.connect(self._copy_selected_command)
-        add_fav_btn = QtWidgets.QPushButton('Command -> Favorites')
-        add_fav_btn.clicked.connect(self._add_selected_template_to_favorites)
         multi_btn = QtWidgets.QPushButton('Open Selected Panel')
         multi_btn.clicked.connect(self._open_selected_panel)
         btns.addWidget(insert_btn)
-        btns.addWidget(copy_btn)
-        btns.addWidget(add_fav_btn)
         btns.addWidget(multi_btn)
-        right_l.addLayout(btns)
+        lower_l.addLayout(btns)
 
         self.details = QtWidgets.QPlainTextEdit()
         self.details.setReadOnly(True)
-        right_l.addWidget(self.details, stretch=1)
+        browser_split.addWidget(self.details)
+        browser_split.setSizes([220, 110])
+        lower_l.addWidget(browser_split, stretch=1)
 
-        split.addWidget(right)
-        split.setSizes([300, 260])
-        layout.addWidget(split, stretch=1)
+        main_split.addWidget(lower)
+        main_split.setStretchFactor(0, 0)
+        main_split.setStretchFactor(1, 1)
+        main_split.setSizes([95, 315])
+        layout.addWidget(main_split, stretch=1)
 
         self.response.setVisible(False)
         self.response.setMaximumHeight(120)
@@ -1175,7 +1131,13 @@ class MainWindow(QtWidgets.QMainWindow):
         return out
 
     def _populate_commands(self):
-        self.filtered = self._filtered_commands()
+        self.filtered = sorted(
+            self._filtered_commands(),
+            key=lambda c: (
+                str(c.get('category', 'General') or '').lower(),
+                str(c.get('command_named', c.get('command', '')) or '').lower(),
+            ),
+        )
         self.command_list.clear()
         for c in self.filtered:
             label = (
@@ -1268,61 +1230,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._child_windows.append(dlg)
         dlg.show()
 
-    def _add_to_favorites(self, command_text):
-        cmd = command_text.strip()
-        if not cmd:
-            self._log('ERROR: Empty command cannot be added to favorites')
-            return
-        if cmd in self.favorites:
-            self._log('Favorite already exists')
-            return
-        self.favorites.append(cmd)
-        self._populate_favorites()
-        self._save_favorites()
-        self._log(f'Added favorite: {cmd}')
-
-    def _populate_favorites(self):
-        self.favorite_list.clear()
-        txt = self.favorite_filter.text().strip().lower() if hasattr(self, 'favorite_filter') else ''
-        for cmd in self.favorites:
-            if txt and txt not in cmd.lower():
-                continue
-            self.favorite_list.addItem(cmd)
-
-    def _add_current_to_favorites(self):
-        self._add_to_favorites(self.command_edit.text())
-
-    def _add_selected_template_to_favorites(self):
-        c = self._selected_command()
-        if c:
-            self._add_to_favorites(c.get('command_named', c.get('command', '')))
-
-    def _selected_favorite_text(self):
-        item = self.favorite_list.currentItem()
-        if not item:
-            return ''
-        return item.text().strip()
-
-    def _use_selected_favorite(self):
-        cmd = self._selected_favorite_text()
-        if not cmd:
-            return
-        self.command_edit.setText(cmd)
-
-    def _remove_selected_favorite(self):
-        cmd = self._selected_favorite_text()
-        if not cmd:
-            self._log('ERROR: No favorite selected')
-            return
-        self.favorites = [x for x in self.favorites if x != cmd]
-        self._populate_favorites()
-        self._save_favorites()
-        self._log(f'Removed favorite: {cmd}')
-
-    def _save_favorites_clicked(self):
-        self._save_favorites()
-        self._log(f'Saved favorites: {self.favorites_path}')
-
     def send_raw_command(self, cmd):
         pv = self.cmd_pv.text().strip()
         cmd = normalize_float_literals((cmd or '').strip())
@@ -1411,7 +1318,6 @@ class MainWindow(QtWidgets.QMainWindow):
 def main():
     ap = argparse.ArgumentParser(description='Qt app to send ecmc commands via EPICS PVs')
     ap.add_argument('--catalog', default='ecmc_commands.json', help='Path to command catalog JSON')
-    ap.add_argument('--favorites', default='ecmc_favorites.json', help='Path to favorites JSON')
     ap.add_argument('--blocklist', default='ecmc_commands_blocklist_all.json', help='Path to command blocklist JSON')
     ap.add_argument('--prefix', default='', help='PV prefix (e.g. IOC:ECMC)')
     ap.add_argument('--cmd-pv', default='', help='Command PV name (overrides --prefix)')
@@ -1429,7 +1335,6 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     w = MainWindow(
         catalog_path=args.catalog,
-        favorites_path=args.favorites,
         blocklist_path=args.blocklist,
         default_cmd_pv=default_cmd_pv,
         default_qry_pv=default_qry_pv,
