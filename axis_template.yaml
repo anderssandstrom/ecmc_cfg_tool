@@ -112,7 +112,7 @@ encoder:
     postMovePosition: 10                              # Position to move to after successfull homing
     # trigg: block                                      # Ethercat entry for triggering drive internal homing seq (seq id 26)
     # ready: block                                     # Ethercat entry for readinf drive internal homing seq ready (seq id 26)
-    # latchCount: block                                     # latch number to ref on (1=ref on first latch)
+    # latchCount: 1                                     # latch number to ref on (1=ref on first latch)
   delayComp:                                          # Delay compensation for time between application of setpoint to reading of encoder (normally atleast 1 cycle)
     time: 1.5                                         # Delay time between set and act [cycles]
     enable: true                                     # enable (defaults to 1 if not set)
@@ -158,21 +158,22 @@ trajectory:
 
 #  Limits can be overridden with plc-code by setting input.limit.forward or input.limit.backward to 'plcOverride', then 'ax<id>.mon.lowlim' and or 'ax<id>.mon.highlim' needs to be written to in plc code (1 means linit OK).
 
-#input:
-#  limit:
+input:
+  limit:
 #    forward: block                 # Ethercat entry for low limit switch input,
-#    forwardPolarity: block                               # Polarity of forward limit switch
+    forwardPolarity: 1                               # Polarity of forward limit switch
 #    backward: block                          # Ethercat entry for high limit switch input
-#    backwardPolarity: block                              # Polarity of forward limit switch
+    backwardPolarity: 1                              # Polarity of forward limit switch
 #  home: block               # Ethercat entry for home switch
-#  homePolarity: block                                     # Polarity of home switch
+  homePolarity: 1                                     # Polarity of home switch
 #  interlock: block                # Ethercat entry for interlock switch input
-#  interlockPolarity: block                                # Polarity of interlock switch
-#  analog:
+  interlockPolarity: 1                                # Polarity of interlock switch
+  analog:
 #    interlock: block              # Ethercat entry for analog interlock
-#    interlockPolarity: 1                              # 0: High value is bad, 1 = Low value is bad
-#    rawLimit: 2000                                    # Analog raw limit
-#    enable: true                                      # Enable analog interlock default true if analog.interlock is set
+    interlockPolarity: 1                              # 0: High value is bad, 1 = Low value is bad
+    rawLimit: 2000                                    # Analog raw limit
+    rawValue: 0                                       # Readback of actual analog interlock raw input value (runtime)
+    enable: true                                      # Enable analog interlock default true if analog.interlock is set
 
 softlimits:
   # enable: block                                       # Enable soft limits

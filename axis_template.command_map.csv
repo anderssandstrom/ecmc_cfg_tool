@@ -55,9 +55,14 @@ encoder.numerator,GetAxisEncScaleNum(<axisIndex>),"Cfg.SetAxisEncScaleNum(<axisI
 encoder.primary,Cfg.GetAxisEncPrimaryIndex(<axisIndex>),"Cfg.SelectAxisEncPrimary(<axisIndex>,<encindex>)"
 encoder.source,GetAxisEncSourceType(<axisIndex>),"Cfg.SetAxisEncSourceType(<axisIndex>,<value>)"
 epics.motorRecord.syncSoftLimits,,
-input.analog.enable,,"Cfg.SetAxisMonEnAnIL(<axisIndex>,<value>)"
-input.analog.interlockPolarity,,"Cfg.SetAxisMonAnILPol(<axisIndex>,<value>)"
-input.analog.rawLimit,,"Cfg.SetAxisMonAnILRawLim(<axisIndex>,<value>)"
+input.homePolarity,GetAxisMonHomeSwitchPolarity(<axisIndex>),"Cfg.SetAxisMonHomeSwitchPolarity(<axisIndex>,<value>)"
+input.limit.backwardPolarity,GetAxisMonLimitBwdPolarity(<axisIndex>),"Cfg.SetAxisMonLimitBwdPolarity(<axisIndex>,<value>)"
+input.limit.forwardPolarity,GetAxisMonLimitFwdPolarity(<axisIndex>),"Cfg.SetAxisMonLimitFwdPolarity(<axisIndex>,<value>)"
+input.interlockPolarity,GetAxisMonExtHWInterlockPolarity(<axisIndex>),"Cfg.SetAxisMonExtHWInterlockPolarity(<axisIndex>,<value>)"
+input.analog.enable,GetAxisMonEnableAnalogInterlock(<axisIndex>),"Cfg.SetAxisMonEnAnIL(<axisIndex>,<value>)"
+input.analog.interlockPolarity,GetAxisMonAnalogInterlockPolarity(<axisIndex>),"Cfg.SetAxisMonAnILPol(<axisIndex>,<value>)"
+input.analog.rawLimit,GetAxisMonAnalogInterlockRawLimit(<axisIndex>),"Cfg.SetAxisMonAnILRawLim(<axisIndex>,<value>)"
+input.analog.rawValue,GetAxisMonAnalogInterlockRawValue(<axisIndex>),
 monitoring.lag.enable,GetAxisMonEnableLagMon(<axisIndex>),"Cfg.SetAxisMonEnableLagMon(<axisIndex>,<value>)"
 monitoring.lag.time,GetAxisMonPosLagTime(<axisIndex>),"Cfg.SetAxisMonPosLagTime(<axisIndex>,<value>)"
 monitoring.lag.tolerance,GetAxisMonPosLagTol(<axisIndex>),"Cfg.SetAxisMonPosLagTol(<axisIndex>,<value>)"
