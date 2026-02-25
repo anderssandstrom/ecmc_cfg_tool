@@ -302,7 +302,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         super().__init__()
         self._base_title = f"ecmc Axis YAML Config [{title_prefix}]" if title_prefix else "ecmc Axis YAML Config"
         self.setWindowTitle(self._base_title)
-        self.resize(920, 310)
+        _f = self.font()
+        if _f.pointSize() > 0:
+            _f.setPointSize(max(8, _f.pointSize() - 1))
+            self.setFont(_f)
+        self.resize(620, 340)
         self.client = EpicsClient(timeout=timeout)
         self.catalog = self._load_catalog(catalog_path)
         self.catalog_desc_by_named = self._build_catalog_description_index(self.catalog)

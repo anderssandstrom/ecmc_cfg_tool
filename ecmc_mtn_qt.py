@@ -180,7 +180,12 @@ class MotionWindow(QtWidgets.QMainWindow):
         super().__init__()
         self._base_title = "ecmc Motor Record Motion"
         self.setWindowTitle(self._base_title)
-        self.resize(920, 380)
+        # Slightly smaller base font to compact the whole UI.
+        _f = self.font()
+        if _f.pointSize() > 0:
+            _f.setPointSize(max(8, _f.pointSize() - 1))
+            self.setFont(_f)
+        self.resize(700, 340)
 
         self.client = EpicsClient(timeout=timeout)
         self.default_prefix = str(prefix or "").strip()
@@ -245,7 +250,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.open_axis_btn.setDefault(False)
         self.open_axis_btn.clicked.connect(self._open_axis_window)
         self.axis_top_edit = QtWidgets.QLineEdit(self.default_axis_id)
-        self.axis_top_edit.setMaximumWidth(80)
+        self.axis_top_edit.setMaximumWidth(70)
         self.axis_top_edit.editingFinished.connect(self._apply_axis_top)
         self.axis_top_btn = QtWidgets.QPushButton("Apply Axis")
         self.axis_top_btn.setAutoDefault(False)
@@ -289,7 +294,7 @@ class MotionWindow(QtWidgets.QMainWindow):
 
         self.prefix_edit = QtWidgets.QLineEdit(self.default_prefix)
         self.axis_edit = QtWidgets.QLineEdit(self.default_axis_id)
-        self.axis_edit.setMaximumWidth(90)
+        self.axis_edit.setMaximumWidth(70)
         self.axis_edit.editingFinished.connect(lambda: self.axis_top_edit.setText(self.axis_edit.text()))
         self.timeout_edit = QtWidgets.QDoubleSpinBox()
         self.timeout_edit.setRange(0.1, 60.0)
@@ -342,7 +347,7 @@ class MotionWindow(QtWidgets.QMainWindow):
 
         self._build_motion_settings_group(layout)
         motion_row = QtWidgets.QHBoxLayout()
-        motion_row.setSpacing(4)
+        motion_row.setSpacing(2)
         self.move_group = self._build_move_group()
         self.tweak_group = self._build_tweak_group()
         self.jog_group = self._build_jog_group()
@@ -590,13 +595,13 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.motion_accs_edit.setPlaceholderText("optional")
         for e in (self.motion_velo_edit, self.motion_acc_edit, self.motion_vmax_edit, self.motion_accs_edit):
             e.setMaximumHeight(24)
-        self.motion_velo_edit.setMaximumWidth(90)
-        self.motion_acc_edit.setMaximumWidth(90)
-        self.motion_vmax_edit.setMaximumWidth(90)
-        self.motion_accs_edit.setMaximumWidth(90)
+        self.motion_velo_edit.setMaximumWidth(72)
+        self.motion_acc_edit.setMaximumWidth(72)
+        self.motion_vmax_edit.setMaximumWidth(72)
+        self.motion_accs_edit.setMaximumWidth(72)
         self.drive_enable_btn = QtWidgets.QPushButton("Drive: ?")
         stop_btn = QtWidgets.QPushButton("STOP")
-        kill_btn = QtWidgets.QPushButton("KILL (CNEN=0)")
+        kill_btn = QtWidgets.QPushButton("KILL")
         for b in (self.drive_enable_btn, stop_btn, kill_btn):
             b.setAutoDefault(False)
             b.setDefault(False)
@@ -636,8 +641,8 @@ class MotionWindow(QtWidgets.QMainWindow):
 
         self.move_pos_edit = QtWidgets.QLineEdit("0")
         self.move_pos_edit.setMaximumHeight(24)
-        self.move_pos_edit.setMaximumWidth(110)
-        self.move_relative_chk = QtWidgets.QCheckBox("Relative")
+        self.move_pos_edit.setMaximumWidth(86)
+        self.move_relative_chk = QtWidgets.QCheckBox("Rel")
 
         move_btn = QtWidgets.QPushButton("Move")
         for b in (move_btn,):
@@ -668,11 +673,11 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.seq_idle_edit = QtWidgets.QLineEdit("0.5")
         for e in (self.seq_a_edit, self.seq_b_edit, self.seq_idle_edit):
             e.setMaximumHeight(24)
-            e.setMaximumWidth(90)
+            e.setMaximumWidth(72)
         self.seq_state_label = QtWidgets.QLabel("Stopped")
         self.seq_state_label.setMinimumHeight(20)
-        self.seq_state_label.setMinimumWidth(140)
-        self.seq_state_label.setMaximumWidth(140)
+        self.seq_state_label.setMinimumWidth(112)
+        self.seq_state_label.setMaximumWidth(112)
         self.seq_state_label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
 
         start_btn = QtWidgets.QPushButton("Start Sequence")
@@ -704,12 +709,13 @@ class MotionWindow(QtWidgets.QMainWindow):
         l.setHorizontalSpacing(4)
         l.setVerticalSpacing(3)
 
-        fwd_btn = QtWidgets.QPushButton("Endless Forward")
-        bwd_btn = QtWidgets.QPushButton("Endless Backward")
+        fwd_btn = QtWidgets.QPushButton("Endless Fwd")
+        bwd_btn = QtWidgets.QPushButton("Endless Bwd")
         for b in (fwd_btn, bwd_btn):
             b.setAutoDefault(False)
             b.setDefault(False)
             b.setMaximumHeight(24)
+            b.setFixedWidth(84)
         fwd_btn.clicked.connect(self.start_jog_forward)
         bwd_btn.clicked.connect(self.start_jog_backward)
 
@@ -730,14 +736,15 @@ class MotionWindow(QtWidgets.QMainWindow):
 
         self.tweak_step_edit = QtWidgets.QLineEdit("1")
         self.tweak_step_edit.setMaximumHeight(24)
-        self.tweak_step_edit.setMaximumWidth(90)
+        self.tweak_step_edit.setMaximumWidth(72)
 
-        twr_btn = QtWidgets.QPushButton("TWR")
-        twf_btn = QtWidgets.QPushButton("TWF")
+        twr_btn = QtWidgets.QPushButton("<-")
+        twf_btn = QtWidgets.QPushButton("->")
         for b in (twr_btn, twf_btn):
             b.setAutoDefault(False)
             b.setDefault(False)
             b.setMaximumHeight(24)
+            b.setFixedWidth(36)
         twr_btn.clicked.connect(self.tweak_reverse)
         twf_btn.clicked.connect(self.tweak_forward)
 
@@ -760,57 +767,56 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.status_fields = {}
         self.status_extra_fields = {}
         self.rbv_motion_label = QtWidgets.QLabel("idle")
-        self.rbv_motion_label.setMinimumWidth(90)
+        self.rbv_motion_label.setMinimumWidth(76)
         self.rbv_motion_label.setMinimumHeight(22)
         self.rbv_motion_label.setStyleSheet(
             "QLabel { background: #d8ead2; color: #173b17; font-weight: 700; padding: 2px 6px; border: 1px solid #9fbe95; }"
         )
-        names = [("VAL", 0, 0), ("RBV", 0, 2), ("DMOV", 0, 4), ("MOVN", 0, 6), ("VELO", 1, 0), ("ACCL", 1, 2), ("VMAX", 1, 4), ("CNEN", 1, 6)]
+        names = [("VAL", 0, 0), ("RBV", 0, 2), ("DMOV", 0, 4), ("VELO", 1, 0), ("ACCL", 1, 2), ("VMAX", 1, 4), ("CNEN", 1, 6)]
         for name, r, c in names:
             l.addWidget(QtWidgets.QLabel(name), r, c)
             e = QtWidgets.QLineEdit("")
             e.setReadOnly(True)
             e.setMaximumHeight(24)
-            e.setMaximumWidth(110)
+            e.setMaximumWidth(88)
             if name == "RBV":
-                e.setMinimumWidth(120)
-                e.setMaximumWidth(140)
+                e.setMinimumWidth(100)
+                e.setMaximumWidth(116)
                 e.setMaximumHeight(28)
                 e.setStyleSheet(
-                    "QLineEdit { font-size: 16px; font-weight: 700; background: #eef6ff; border: 2px solid #6f97c6; }"
+                    "QLineEdit { font-size: 14px; font-weight: 700; background: #eef6ff; border: 2px solid #6f97c6; }"
                 )
             l.addWidget(e, r, c + 1)
             self.status_fields[name] = e
-        l.addWidget(QtWidgets.QLabel("Motion"), 2, 0)
-        l.addWidget(self.rbv_motion_label, 2, 1)
-        l.addWidget(QtWidgets.QLabel("ErrId"), 2, 2)
+        l.addWidget(QtWidgets.QLabel("Motion"), 0, 6)
+        l.addWidget(self.rbv_motion_label, 0, 7)
+        l.addWidget(QtWidgets.QLabel("ErrId"), 2, 0)
         self.errid_status_edit = QtWidgets.QLineEdit("")
         self.errid_status_edit.setReadOnly(True)
         self.errid_status_edit.setMaximumHeight(24)
-        self.errid_status_edit.setMaximumWidth(120)
-        l.addWidget(self.errid_status_edit, 2, 3)
+        self.errid_status_edit.setMaximumWidth(90)
+        l.addWidget(self.errid_status_edit, 2, 1)
         self.status_extra_fields["ErrId"] = self.errid_status_edit
         self.reset_err_btn = QtWidgets.QPushButton("Reset")
         self.reset_err_btn.setAutoDefault(False)
         self.reset_err_btn.setDefault(False)
         self.reset_err_btn.setMaximumHeight(24)
         self.reset_err_btn.clicked.connect(self.reset_error)
-        l.addWidget(self.reset_err_btn, 2, 4)
+        l.addWidget(self.reset_err_btn, 2, 2)
         self.reset_all_err_btn = QtWidgets.QPushButton("Reset All")
         self.reset_all_err_btn.setAutoDefault(False)
         self.reset_all_err_btn.setDefault(False)
         self.reset_all_err_btn.setMaximumHeight(24)
         self.reset_all_err_btn.clicked.connect(self.reset_all_errors)
-        l.addWidget(self.reset_all_err_btn, 2, 5)
-
-        l.addWidget(QtWidgets.QLabel("MsgTxt"), 3, 0)
+        l.addWidget(self.reset_all_err_btn, 2, 3)
+        l.addWidget(QtWidgets.QLabel("MsgTxt"), 2, 4)
         self.msgtxt_status_edit = QtWidgets.QLineEdit("")
         self.msgtxt_status_edit.setReadOnly(True)
         self.msgtxt_status_edit.setMaximumHeight(24)
-        self.msgtxt_status_edit.setMinimumWidth(320)
-        l.addWidget(self.msgtxt_status_edit, 3, 1, 1, 7)
+        self.msgtxt_status_edit.setMinimumWidth(150)
+        l.addWidget(self.msgtxt_status_edit, 2, 5, 1, 3)
         self.status_extra_fields["MsgTxt"] = self.msgtxt_status_edit
-        g.setMaximumHeight(138)
+        g.setMaximumHeight(112)
         parent_layout.addWidget(g)
 
     def _build_trend_group(self, parent_layout):
@@ -893,17 +899,17 @@ class MotionWindow(QtWidgets.QMainWindow):
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.setSpacing(8)
         stop_btn = QtWidgets.QPushButton("STOP")
-        stop_btn.setMinimumSize(180, 64)
+        stop_btn.setMinimumSize(160, 54)
         stop_btn.setStyleSheet(
-            "QPushButton { background: #f39c12; color: #111; font-weight: 700; font-size: 22px; border: 2px solid #b86f00; padding: 8px 14px; }"
+            "QPushButton { background: #f39c12; color: #111; font-weight: 700; font-size: 18px; border: 2px solid #b86f00; padding: 6px 12px; }"
             "QPushButton:pressed { background: #d98500; }"
         )
         stop_btn.clicked.connect(self.stop_motion)
         stop_btn.clicked.connect(dlg.close)
         kill_btn = QtWidgets.QPushButton("KILL")
-        kill_btn.setMinimumSize(180, 64)
+        kill_btn.setMinimumSize(160, 54)
         kill_btn.setStyleSheet(
-            "QPushButton { background: #8b1e1e; color: #fff; font-weight: 700; font-size: 22px; border: 2px solid #5e1111; padding: 8px 14px; }"
+            "QPushButton { background: #8b1e1e; color: #fff; font-weight: 700; font-size: 18px; border: 2px solid #5e1111; padding: 6px 12px; }"
             "QPushButton:pressed { background: #6f1717; }"
         )
         kill_btn.clicked.connect(self.kill_motion)
@@ -1313,11 +1319,11 @@ class MotionWindow(QtWidgets.QMainWindow):
         if rbv_field is not None:
             if moving:
                 rbv_field.setStyleSheet(
-                    "QLineEdit { font-size: 16px; font-weight: 700; background: #fff1c9; border: 2px solid #f39c12; color: #111; }"
+                    "QLineEdit { font-size: 14px; font-weight: 700; background: #fff1c9; border: 2px solid #f39c12; color: #111; }"
                 )
             else:
                 rbv_field.setStyleSheet(
-                    "QLineEdit { font-size: 16px; font-weight: 700; background: #eef6ff; border: 2px solid #6f97c6; }"
+                    "QLineEdit { font-size: 14px; font-weight: 700; background: #eef6ff; border: 2px solid #6f97c6; }"
                 )
 
         if moving:

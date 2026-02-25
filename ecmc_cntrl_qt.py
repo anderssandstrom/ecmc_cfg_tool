@@ -255,6 +255,10 @@ class CntrlWindow(QtWidgets.QMainWindow):
         p = str(title_prefix or '').strip()
         self._base_title = f'ecmc PID/Controller Tuning [{p}]' if p else 'ecmc PID/Controller Tuning'
         self.setWindowTitle(self._base_title)
+        _f = self.font()
+        if _f.pointSize() > 0:
+            _f.setPointSize(max(8, _f.pointSize() - 1))
+            self.setFont(_f)
         self.resize(920, 504)
         self.client = EpicsClient(timeout=timeout)
         self.catalog = self._load_catalog(catalog_path)
