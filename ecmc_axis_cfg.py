@@ -324,6 +324,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._did_initial_read_copy = False
         self._did_startup_axis_presence_check = False
         self._startup_axis_probe_ok = False
+        self._axis_combo_updating = False
+        self._axis_combo_open_new_instance = False
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._load_yaml_tree()
         self._log(f"Connected via backend: {self.client.backend}")
@@ -380,8 +382,6 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.open_mtn_btn.setDefault(False)
         self.open_mtn_btn.clicked.connect(self._open_motion_window)
         top_row.addWidget(self.cfg_toggle_btn)
-        top_row.addWidget(self.log_toggle_btn)
-        top_row.addWidget(self.changes_toggle_btn)
         top_row.addWidget(self.changed_yaml_btn)
         top_row.addWidget(self.open_cntrl_btn)
         top_row.addWidget(self.open_mtn_btn)
@@ -392,18 +392,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText("Filter keys...")
         self.search.textChanged.connect(self._apply_tree_filter)
-        self.axis_top_edit = QtWidgets.QLineEdit(self.axis_id_default)
-        self.axis_top_edit.setMaximumWidth(80)
-        self.axis_top_edit.editingFinished.connect(lambda: self.axis_edit.setText(self.axis_top_edit.text()))
-        self.axis_top_edit.editingFinished.connect(self._update_window_title_with_motor)
-        self.axis_pick_btn = QtWidgets.QPushButton("Select Axis...")
-        self.axis_pick_btn.setAutoDefault(False)
-        self.axis_pick_btn.setDefault(False)
-        self.axis_pick_btn.clicked.connect(self._open_axis_picker_dialog)
+        self.axis_pick_combo = QtWidgets.QComboBox()
+        self.axis_pick_combo.setMinimumWidth(170)
+        self.axis_pick_combo.setMaximumWidth(300)
+        self.axis_pick_combo.activated.connect(self._on_axis_combo_activated)
         search_row.addWidget(self.search, 1)
-        search_row.addWidget(QtWidgets.QLabel("Axis"))
-        search_row.addWidget(self.axis_top_edit)
-        search_row.addWidget(self.axis_pick_btn)
         layout.addLayout(search_row)
 
         self.cfg_group = QtWidgets.QGroupBox("Configuration")
@@ -413,8 +406,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.qry_pv = QtWidgets.QLineEdit(default_qry_pv)
         self.axis_edit = QtWidgets.QLineEdit(self.axis_id_default)
         self.axis_edit.setMaximumWidth(80)
-        self.axis_edit.editingFinished.connect(lambda: self.axis_top_edit.setText(self.axis_edit.text()))
         self.axis_edit.editingFinished.connect(self._update_window_title_with_motor)
+        axis_apply_btn = QtWidgets.QPushButton("Apply Axis")
+        axis_apply_btn.setAutoDefault(False)
+        axis_apply_btn.setDefault(False)
+        axis_apply_btn.clicked.connect(lambda: self._read_and_copy_current_axis(reason="apply axis"))
         self.timeout_edit = CompactDoubleSpinBox()
         self.timeout_edit.setRange(0.1, 60.0)
         self.timeout_edit.setDecimals(1)
@@ -426,6 +422,10 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         reload_btn.setAutoDefault(False)
         reload_btn.setDefault(False)
         reload_btn.clicked.connect(self._reload_yaml_from_edit)
+        self.caqtdm_main_btn = QtWidgets.QPushButton("caqtdm Main")
+        self.caqtdm_main_btn.setAutoDefault(False)
+        self.caqtdm_main_btn.setDefault(False)
+        self.caqtdm_main_btn.clicked.connect(self._open_caqtdm_main_panel)
 
         cfg.addWidget(QtWidgets.QLabel("Command PV"), 0, 0)
         cfg.addWidget(self.cmd_pv, 0, 1)
@@ -433,11 +433,15 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         cfg.addWidget(self.qry_pv, 1, 1)
         cfg.addWidget(QtWidgets.QLabel("Axis ID"), 0, 2)
         cfg.addWidget(self.axis_edit, 0, 3)
+        cfg.addWidget(axis_apply_btn, 0, 4)
         cfg.addWidget(QtWidgets.QLabel("Timeout [s]"), 1, 2)
         cfg.addWidget(self.timeout_edit, 1, 3)
         cfg.addWidget(QtWidgets.QLabel("YAML Template"), 2, 0)
         cfg.addWidget(self.yaml_edit, 2, 1, 1, 3)
         cfg.addWidget(reload_btn, 2, 4)
+        cfg.addWidget(self.log_toggle_btn, 3, 0)
+        cfg.addWidget(self.changes_toggle_btn, 3, 1)
+        cfg.addWidget(self.caqtdm_main_btn, 3, 2)
         layout.addWidget(self.cfg_group)
 
         self.tree = QtWidgets.QTreeWidget()
@@ -473,6 +477,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         action_row.addWidget(self.copy_btn)
         action_row.addStretch(1)
         search_row.addLayout(action_row)
+        search_row.addWidget(QtWidgets.QLabel("Axis"))
+        search_row.addWidget(self.axis_pick_combo)
 
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
@@ -484,6 +490,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.cfg_group.setVisible(False)
         self.log.setVisible(False)
         self.changes_log.setVisible(False)
+        self._refresh_axis_pick_combo()
 
     def _toggle_config_panel(self):
         visible = not self.cfg_group.isVisible()
@@ -910,9 +917,117 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         a = str(axis_id or "").strip()
         if not a:
             return
-        self.axis_top_edit.setText(a)
         self.axis_edit.setText(a)
+        self._sync_axis_combo_to_axis_id(a)
         self._update_window_title_with_motor()
+
+    def _sync_axis_combo_to_axis_id(self, axis_id):
+        if not hasattr(self, "axis_pick_combo"):
+            return
+        want = str(axis_id or "").strip()
+        if not want:
+            return
+        idx = self.axis_pick_combo.findData(want, role=QtCore.Qt.UserRole)
+        if idx >= 0:
+            self._axis_combo_updating = True
+            self.axis_pick_combo.setCurrentIndex(idx)
+            self._axis_combo_updating = False
+
+    def _axis_combo_install_open_new_item(self):
+        if not hasattr(self, "axis_pick_combo") or self.axis_pick_combo.count() <= 0:
+            return
+        try:
+            item = self.axis_pick_combo.model().item(0)
+            if item is None:
+                return
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setData(
+                QtCore.Qt.Checked if self._axis_combo_open_new_instance else QtCore.Qt.Unchecked,
+                QtCore.Qt.CheckStateRole,
+            )
+        except Exception:
+            pass
+
+    def _axis_combo_toggle_open_new_item(self):
+        self._axis_combo_open_new_instance = not bool(self._axis_combo_open_new_instance)
+        self._axis_combo_install_open_new_item()
+
+    def _refresh_axis_pick_combo(self):
+        if not hasattr(self, "axis_pick_combo"):
+            return
+        current_axis = self._axis_id()
+        self._axis_combo_updating = True
+        self.axis_pick_combo.clear()
+        self.axis_pick_combo.addItem("Open New Instance", "__open_new__")
+        self._axis_combo_install_open_new_item()
+        self.axis_pick_combo.addItem(f"Axis {current_axis}", current_axis)
+        try:
+            axes = self._discover_axes_from_ioc()
+        except Exception:
+            self._axis_combo_updating = False
+            return
+        self.axis_pick_combo.clear()
+        self.axis_pick_combo.addItem("Open New Instance", "__open_new__")
+        self._axis_combo_install_open_new_item()
+        for ax in axes:
+            axis_id = str(ax.get("axis_id", "") or "").strip()
+            axis_type = str(ax.get("axis_type", "") or "")
+            motor_name = str(ax.get("motor_name", "") or "")
+            tdisp = "REAL" if axis_type.upper() == "REAL" else ("Virtual" if axis_type else "?")
+            label = f"{axis_id} | {tdisp}"
+            if motor_name:
+                label += f" | {motor_name}"
+            self.axis_pick_combo.addItem(label, axis_id)
+        if self.axis_pick_combo.count() <= 1:
+            self.axis_pick_combo.addItem(f"Axis {current_axis}", current_axis)
+        self._axis_combo_updating = False
+        self._sync_axis_combo_to_axis_id(current_axis)
+
+    def _on_axis_combo_activated(self, _index):
+        if self._axis_combo_updating:
+            return
+        axis_id = str(self.axis_pick_combo.currentData(QtCore.Qt.UserRole) or "").strip()
+        if axis_id == "__open_new__":
+            self._axis_combo_toggle_open_new_item()
+            self._sync_axis_combo_to_axis_id(self._axis_id())
+            QtCore.QTimer.singleShot(0, self.axis_pick_combo.showPopup)
+            return
+        if not axis_id:
+            return
+        if self._axis_combo_open_new_instance:
+            script = Path(__file__).with_name("start_axis.sh")
+            prefix = self.title_prefix or ""
+            if not prefix:
+                cmd_pv = self.cmd_pv.text().strip()
+                m = re.match(r"^(.*):MCU-Cmd\.AOUT$", cmd_pv)
+                prefix = m.group(1) if m else "IOC:ECMC"
+            try:
+                subprocess.Popen(
+                    ["bash", str(script), str(prefix), str(axis_id), str(self.yaml_path)],
+                    cwd=str(script.parent),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                self._log(f"Started new axis cfg window for axis {axis_id} (prefix {prefix})")
+            except Exception as ex:
+                self._log(f"Failed to start new axis cfg window: {ex}")
+            self._sync_axis_combo_to_axis_id(self._axis_id())
+            return
+        self._set_axis_id(axis_id)
+        self._read_and_copy_current_axis(reason="axis selection")
+
+    def _prompt_axis_selection_via_combo(self, reason_msg=None):
+        if reason_msg:
+            self._log(reason_msg)
+        if not self.cfg_group.isVisible():
+            self.cfg_group.setVisible(True)
+            self.cfg_toggle_btn.setText("Hide Config")
+        self._refresh_axis_pick_combo()
+        try:
+            self.axis_pick_combo.setFocus(QtCore.Qt.OtherFocusReason)
+        except Exception:
+            pass
+        QtCore.QTimer.singleShot(0, self.axis_pick_combo.showPopup)
 
     def _resolve_axis_selector_to_id(self, selector):
         s = str(selector or "").strip()
@@ -941,6 +1056,21 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         cmd_pv = self.cmd_pv.text().strip() if hasattr(self, "cmd_pv") else ""
         m = re.match(r"^(.*):MCU-Cmd\.AOUT$", cmd_pv)
         return m.group(1) if m else ""
+
+    def _open_caqtdm_main_panel(self):
+        ioc_prefix = self._ioc_prefix_for_title() or ""
+        macro = f"IOC={ioc_prefix}"
+        try:
+            cmd = f'caqtdm -macro "{macro}" ecmcMain.ui'
+            subprocess.Popen(
+                ["bash", "-lc", cmd],
+                cwd=str(Path(__file__).resolve().parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started caQtDM main panel ({macro})")
+        except Exception as ex:
+            self._log(f"Failed to start caQtDM main panel: {ex}")
 
     def _discover_axes_from_ioc(self):
         prefix = self._ioc_prefix_for_title()
@@ -1098,23 +1228,22 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             self._set_axis_id(resolved_id)
             current = resolved_id
         if not prefix:
-            self._log("Startup axis probe skipped: IOC prefix unavailable")
-            self._open_axis_picker_dialog()
+            self._prompt_axis_selection_via_combo("Startup axis probe skipped: IOC prefix unavailable; select axis from combo")
             return
         try:
             probe_pv = _join_prefix_pv(prefix, f"MCU-Cfg-AX{current}-Pfx")
             raw = self.client.get(probe_pv, as_string=True)
         except Exception as ex:
-            self._log(f"Startup axis probe failed for axis {current}: {ex}; opening axis picker")
-            self._open_axis_picker_dialog()
+            self._prompt_axis_selection_via_combo(
+                f"Startup axis probe failed for axis {current}: {ex}; select axis from combo"
+            )
             return
         if str(raw or "").strip().strip('"'):
             self._startup_axis_probe_ok = True
             self._update_window_title_with_motor()
             self._initial_read_all_and_copy()
             return
-        self._log(f'Axis {current} probe returned empty; opening axis picker')
-        self._open_axis_picker_dialog()
+        self._prompt_axis_selection_via_combo(f'Axis {current} probe returned empty; select axis from combo')
 
     def _combine_motor_record(self, axis_pfx, motor_name):
         a = str(axis_pfx or "").strip()

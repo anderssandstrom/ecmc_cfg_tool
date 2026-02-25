@@ -214,6 +214,8 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._did_startup_axis_presence_check = False
         self._startup_axis_probe_ok = False
         self._last_status_vals = {}
+        self._axis_combo_updating = False
+        self._axis_combo_open_new_instance = False
 
         self._build_ui(timeout)
         self._log(f"Connected via backend: {self.client.backend}")
@@ -249,26 +251,17 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.open_axis_btn.setAutoDefault(False)
         self.open_axis_btn.setDefault(False)
         self.open_axis_btn.clicked.connect(self._open_axis_window)
-        self.axis_top_edit = QtWidgets.QLineEdit(self.default_axis_id)
-        self.axis_top_edit.setMaximumWidth(70)
-        self.axis_top_edit.editingFinished.connect(self._apply_axis_top)
-        self.axis_top_btn = QtWidgets.QPushButton("Apply Axis")
-        self.axis_top_btn.setAutoDefault(False)
-        self.axis_top_btn.setDefault(False)
-        self.axis_top_btn.clicked.connect(self._apply_axis_top)
-        self.axis_pick_btn = QtWidgets.QPushButton("Select Axis...")
-        self.axis_pick_btn.setAutoDefault(False)
-        self.axis_pick_btn.setDefault(False)
-        self.axis_pick_btn.clicked.connect(self._open_axis_picker_dialog)
+        self.axis_pick_combo = QtWidgets.QComboBox()
+        self.axis_pick_combo.setMinimumWidth(170)
+        self.axis_pick_combo.setMaximumWidth(260)
+        self.axis_pick_combo.activated.connect(self._on_axis_combo_activated)
         for w in (
             self.cfg_toggle_btn,
             self.log_toggle_btn,
             self.graphs_toggle_btn,
             self.open_cntrl_btn,
             self.open_axis_btn,
-            self.axis_top_edit,
-            self.axis_top_btn,
-            self.axis_pick_btn,
+            self.axis_pick_combo,
         ):
             try:
                 w.setMaximumHeight(24)
@@ -279,11 +272,23 @@ class MotionWindow(QtWidgets.QMainWindow):
         top_row.addWidget(self.graphs_toggle_btn)
         top_row.addWidget(self.open_cntrl_btn)
         top_row.addWidget(self.open_axis_btn)
-        top_row.addWidget(QtWidgets.QLabel("Axis"))
-        top_row.addWidget(self.axis_top_edit)
-        top_row.addWidget(self.axis_top_btn)
-        top_row.addWidget(self.axis_pick_btn)
         top_row.addStretch(1)
+        axis_sel_col = QtWidgets.QVBoxLayout()
+        axis_sel_col.setContentsMargins(0, 0, 0, 0)
+        axis_sel_col.setSpacing(2)
+        axis_sel_row = QtWidgets.QHBoxLayout()
+        axis_sel_row.setContentsMargins(0, 0, 0, 0)
+        axis_sel_row.setSpacing(4)
+        axis_sel_row.addWidget(QtWidgets.QLabel("Axis"))
+        axis_sel_row.addWidget(self.axis_pick_combo)
+        axis_sel_col.addLayout(axis_sel_row)
+        self.caqtdm_axis_btn = QtWidgets.QPushButton("caqtdm Axis")
+        self.caqtdm_axis_btn.setAutoDefault(False)
+        self.caqtdm_axis_btn.setDefault(False)
+        self.caqtdm_axis_btn.setMaximumHeight(22)
+        self.caqtdm_axis_btn.clicked.connect(self._open_caqtdm_axis_panel)
+        axis_sel_col.addWidget(self.caqtdm_axis_btn)
+        top_row.addLayout(axis_sel_col)
         layout.addLayout(top_row)
 
         self.cfg_group = QtWidgets.QGroupBox("Axis / Motor Record")
@@ -295,7 +300,6 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.prefix_edit = QtWidgets.QLineEdit(self.default_prefix)
         self.axis_edit = QtWidgets.QLineEdit(self.default_axis_id)
         self.axis_edit.setMaximumWidth(70)
-        self.axis_edit.editingFinished.connect(lambda: self.axis_top_edit.setText(self.axis_edit.text()))
         self.timeout_edit = QtWidgets.QDoubleSpinBox()
         self.timeout_edit.setRange(0.1, 60.0)
         self.timeout_edit.setDecimals(1)
@@ -324,25 +328,35 @@ class MotionWindow(QtWidgets.QMainWindow):
         refresh_btn.setAutoDefault(False)
         refresh_btn.setDefault(False)
         refresh_btn.clicked.connect(self.refresh_status)
+        axis_apply_btn = QtWidgets.QPushButton("Apply Axis")
+        axis_apply_btn.setAutoDefault(False)
+        axis_apply_btn.setDefault(False)
+        axis_apply_btn.clicked.connect(self._apply_axis_top)
+        self.caqtdm_main_btn = QtWidgets.QPushButton("caqtdm Main")
+        self.caqtdm_main_btn.setAutoDefault(False)
+        self.caqtdm_main_btn.setDefault(False)
+        self.caqtdm_main_btn.clicked.connect(self._open_caqtdm_main_panel)
 
         cfg.addWidget(QtWidgets.QLabel("IOC Prefix"), 0, 0)
         cfg.addWidget(self.prefix_edit, 0, 1)
         cfg.addWidget(QtWidgets.QLabel("Axis ID"), 0, 2)
         cfg.addWidget(self.axis_edit, 0, 3)
-        cfg.addWidget(QtWidgets.QLabel("Timeout [s]"), 0, 4)
-        cfg.addWidget(self.timeout_edit, 0, 5)
+        cfg.addWidget(axis_apply_btn, 0, 4)
+        cfg.addWidget(QtWidgets.QLabel("Timeout [s]"), 0, 5)
+        cfg.addWidget(self.timeout_edit, 0, 6)
 
         cfg.addWidget(QtWidgets.QLabel("Axis Prefix PV"), 1, 0)
         cfg.addWidget(self.axis_pfx_cfg_pv_edit, 1, 1, 1, 3)
         cfg.addWidget(QtWidgets.QLabel("Motor Name PV"), 1, 4)
-        cfg.addWidget(self.motor_name_cfg_pv_edit, 1, 5)
+        cfg.addWidget(self.motor_name_cfg_pv_edit, 1, 5, 1, 2)
 
         cfg.addWidget(QtWidgets.QLabel("Motor Record"), 2, 0)
-        cfg.addWidget(self.motor_record_edit, 2, 1, 1, 4)
-        cfg.addWidget(resolve_btn, 2, 5)
+        cfg.addWidget(self.motor_record_edit, 2, 1, 1, 5)
+        cfg.addWidget(resolve_btn, 2, 6)
 
         cfg.addWidget(self.auto_refresh_status, 3, 0, 1, 3)
-        cfg.addWidget(refresh_btn, 3, 5)
+        cfg.addWidget(self.caqtdm_main_btn, 3, 5)
+        cfg.addWidget(refresh_btn, 3, 6)
         layout.addWidget(self.cfg_group)
 
         self._build_motion_settings_group(layout)
@@ -366,6 +380,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.cfg_group.setVisible(False)
         self.trends_group.setVisible(False)
         self.log.setVisible(False)
+        self._refresh_axis_pick_combo()
 
     def _toggle_config_panel(self):
         visible = not self.cfg_group.isVisible()
@@ -395,12 +410,119 @@ class MotionWindow(QtWidgets.QMainWindow):
         QtCore.QTimer.singleShot(0, _do)
 
     def _apply_axis_top(self):
-        axis_txt = self.axis_top_edit.text().strip() or self.default_axis_id
-        self.axis_top_edit.setText(axis_txt)
+        axis_txt = self.axis_edit.text().strip() or self.default_axis_id
         self.axis_edit.setText(axis_txt)
         self._update_cfg_pv_edits()
         self._positions_initialized = False
+        self._sync_axis_combo_to_axis_id(axis_txt)
         self.resolve_motor_record_name()
+
+    def _sync_axis_combo_to_axis_id(self, axis_id):
+        if not hasattr(self, "axis_pick_combo"):
+            return
+        want = str(axis_id or "").strip()
+        if not want:
+            return
+        idx = self.axis_pick_combo.findData(want, role=QtCore.Qt.UserRole)
+        if idx >= 0:
+            self._axis_combo_updating = True
+            self.axis_pick_combo.setCurrentIndex(idx)
+            self._axis_combo_updating = False
+
+    def _axis_combo_install_open_new_item(self):
+        if not hasattr(self, "axis_pick_combo") or self.axis_pick_combo.count() <= 0:
+            return
+        try:
+            item = self.axis_pick_combo.model().item(0)
+            if item is None:
+                return
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setData(
+                QtCore.Qt.Checked if self._axis_combo_open_new_instance else QtCore.Qt.Unchecked,
+                QtCore.Qt.CheckStateRole,
+            )
+        except Exception:
+            pass
+
+    def _axis_combo_toggle_open_new_item(self):
+        self._axis_combo_open_new_instance = not bool(self._axis_combo_open_new_instance)
+        self._axis_combo_install_open_new_item()
+
+    def _refresh_axis_pick_combo(self):
+        if not hasattr(self, "axis_pick_combo"):
+            return
+        current_axis = self._axis_id_text()
+        self._axis_combo_updating = True
+        self.axis_pick_combo.clear()
+        self.axis_pick_combo.addItem("Open New Instance", "__open_new__")
+        self._axis_combo_install_open_new_item()
+        self.axis_pick_combo.addItem(f"Axis {current_axis}", current_axis)
+        try:
+            axes = self._discover_axes_from_ioc()
+        except Exception:
+            self._axis_combo_updating = False
+            return
+        self.axis_pick_combo.clear()
+        self.axis_pick_combo.addItem("Open New Instance", "__open_new__")
+        self._axis_combo_install_open_new_item()
+        for ax in axes:
+            axis_id = str(ax.get("axis_id", "") or "").strip()
+            axis_type = str(ax.get("axis_type", "") or "")
+            motor_name = str(ax.get("motor_name", "") or "")
+            tdisp = "REAL" if axis_type.upper() == "REAL" else ("Virtual" if axis_type else "?")
+            label = f"{axis_id} | {tdisp}"
+            if motor_name:
+                label += f" | {motor_name}"
+            self.axis_pick_combo.addItem(label, axis_id)
+        if self.axis_pick_combo.count() == 0:
+            self.axis_pick_combo.addItem("Open New Instance", "__open_new__")
+            self._axis_combo_install_open_new_item()
+            self.axis_pick_combo.addItem(f"Axis {current_axis}", current_axis)
+        self._axis_combo_updating = False
+        self._sync_axis_combo_to_axis_id(current_axis)
+
+    def _on_axis_combo_activated(self, _index):
+        if self._axis_combo_updating:
+            return
+        axis_id = str(self.axis_pick_combo.currentData(QtCore.Qt.UserRole) or "").strip()
+        if axis_id == "__open_new__":
+            self._axis_combo_toggle_open_new_item()
+            self._sync_axis_combo_to_axis_id(self._axis_id_text())
+            QtCore.QTimer.singleShot(0, self.axis_pick_combo.showPopup)
+            return
+        if not axis_id:
+            return
+        if self._axis_combo_open_new_instance:
+            script = QtCore.QFileInfo(__file__).dir().filePath("start_mtn.sh")
+            prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
+            try:
+                subprocess.Popen(
+                    ["bash", str(script), str(prefix), str(axis_id)],
+                    cwd=str(QtCore.QFileInfo(script).absolutePath()),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                self._log(f"Started new motion window for axis {axis_id} (prefix {prefix})")
+            except Exception as ex:
+                self._log(f"Failed to start new motion window: {ex}")
+            self._sync_axis_combo_to_axis_id(self._axis_id_text())
+            return
+        self.axis_edit.setText(axis_id)
+        self._apply_axis_top()
+
+    def _prompt_axis_selection_via_combo(self, reason_msg=None):
+        if reason_msg:
+            self._log(reason_msg)
+        if not self.cfg_group.isVisible():
+            self.cfg_group.setVisible(True)
+            self.cfg_toggle_btn.setText("Hide Config")
+        self._refresh_axis_pick_combo()
+        self._resize_to_contents()
+        try:
+            self.axis_pick_combo.setFocus(QtCore.Qt.OtherFocusReason)
+        except Exception:
+            pass
+        QtCore.QTimer.singleShot(0, self.axis_pick_combo.showPopup)
 
     def _discover_axes_from_ioc(self):
         prefix = self.prefix_edit.text().strip() or self.default_prefix
@@ -540,7 +662,7 @@ class MotionWindow(QtWidgets.QMainWindow):
                     self._log(f"Failed to start new motion window: {ex}")
                     return
             else:
-                self.axis_top_edit.setText(axis_id)
+                self.axis_edit.setText(axis_id)
                 self._apply_axis_top()
             dlg.accept()
 
@@ -560,26 +682,25 @@ class MotionWindow(QtWidgets.QMainWindow):
         resolved_id = self._resolve_axis_selector_to_id(cur_axis)
         if resolved_id and resolved_id != cur_axis:
             self._log(f'Axis selector "{cur_axis}" resolved to axis {resolved_id}')
-            self.axis_top_edit.setText(resolved_id)
+            self.axis_edit.setText(resolved_id)
             self._apply_axis_top()
             cur_axis = resolved_id
         if not prefix:
-            self._log("Startup axis probe skipped: IOC prefix unavailable")
-            self._open_axis_picker_dialog()
+            self._prompt_axis_selection_via_combo("Startup axis probe skipped: IOC prefix unavailable; select axis from combo")
             return
         try:
             probe_pv = _join_prefix_pv(prefix, f"MCU-Cfg-AX{cur_axis}-Pfx")
             raw = self.client.get(probe_pv, as_string=True)
         except Exception as ex:
-            self._log(f"Startup axis probe failed for axis {cur_axis}: {ex}; opening axis picker")
-            self._open_axis_picker_dialog()
+            self._prompt_axis_selection_via_combo(
+                f"Startup axis probe failed for axis {cur_axis}: {ex}; select axis from combo"
+            )
             return
         if str(raw or "").strip().strip('"'):
             self._startup_axis_probe_ok = True
             self.resolve_motor_record_name()
             return
-        self._log(f"Axis {cur_axis} probe returned empty; opening axis picker")
-        self._open_axis_picker_dialog()
+        self._prompt_axis_selection_via_combo(f"Axis {cur_axis} probe returned empty; select axis from combo")
 
     def _build_motion_settings_group(self, parent_layout):
         g = QtWidgets.QGroupBox("Shared Motion Settings")
@@ -958,6 +1079,57 @@ class MotionWindow(QtWidgets.QMainWindow):
             self._log(f"Started axis window for axis {axis_id} (prefix {prefix})")
         except Exception as ex:
             self._log(f"Failed to start axis window: {ex}")
+
+    def _open_caqtdm_axis_panel(self):
+        ioc_prefix = self.prefix_edit.text().strip() or self.default_prefix or ""
+        axis_id = self._axis_id_text()
+        motor_prefix = ""
+        axis_name = ""
+        try:
+            pfx_pv = self.axis_pfx_cfg_pv_edit.text().strip() if hasattr(self, "axis_pfx_cfg_pv_edit") else ""
+            if pfx_pv:
+                motor_prefix = self._read_cfg_pv(pfx_pv)
+        except Exception:
+            motor_prefix = ""
+        try:
+            nam_pv = self.motor_name_cfg_pv_edit.text().strip() if hasattr(self, "motor_name_cfg_pv_edit") else ""
+            if nam_pv:
+                axis_name = self._read_cfg_pv(nam_pv)
+        except Exception:
+            axis_name = ""
+        motor_base = self.motor_record_edit.text().strip() if hasattr(self, "motor_record_edit") else ""
+        if not motor_prefix and motor_base and ":" in motor_base:
+            motor_prefix = motor_base.rsplit(":", 1)[0]
+        if not axis_name and motor_base:
+            axis_name = motor_base.rsplit(":", 1)[-1]
+        motor_prefix = str(motor_prefix or "").rstrip(":")
+        macro = f"DEV={motor_prefix},IOC={ioc_prefix},Axis={axis_name},AX_ID={axis_id}"
+        try:
+            cmd = f'caqtdm -macro "{macro}" ecmcAxis.ui'
+            subprocess.Popen(
+                ["bash", "-lc", cmd],
+                cwd=str(QtCore.QFileInfo(__file__).dir().absolutePath()),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started caQtDM axis panel ({macro})")
+        except Exception as ex:
+            self._log(f"Failed to start caQtDM axis panel: {ex}")
+
+    def _open_caqtdm_main_panel(self):
+        ioc_prefix = self.prefix_edit.text().strip() or self.default_prefix or ""
+        macro = f"IOC={ioc_prefix}"
+        try:
+            cmd = f'caqtdm -macro "{macro}" ecmcMain.ui'
+            subprocess.Popen(
+                ["bash", "-lc", cmd],
+                cwd=str(QtCore.QFileInfo(__file__).dir().absolutePath()),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started caQtDM main panel ({macro})")
+        except Exception as ex:
+            self._log(f"Failed to start caQtDM main panel: {ex}")
 
     def _update_window_title(self):
         motor = self.motor_record_edit.text().strip() if hasattr(self, "motor_record_edit") else ""
