@@ -381,21 +381,27 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.open_mtn_btn.setAutoDefault(False)
         self.open_mtn_btn.setDefault(False)
         self.open_mtn_btn.clicked.connect(self._open_motion_window)
+        self.axis_pick_combo = QtWidgets.QComboBox()
+        self.axis_pick_combo.setMinimumWidth(170)
+        self.axis_pick_combo.setMaximumWidth(300)
+        self.axis_pick_combo.activated.connect(self._on_axis_combo_activated)
         top_row.addWidget(self.cfg_toggle_btn)
         top_row.addWidget(self.changed_yaml_btn)
         top_row.addWidget(self.open_cntrl_btn)
         top_row.addWidget(self.open_mtn_btn)
         top_row.addStretch(1)
+        top_row.addWidget(QtWidgets.QLabel("Axis"))
+        top_row.addWidget(self.axis_pick_combo)
         layout.addLayout(top_row)
 
         search_row = QtWidgets.QHBoxLayout()
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText("Filter keys...")
         self.search.textChanged.connect(self._apply_tree_filter)
-        self.axis_pick_combo = QtWidgets.QComboBox()
-        self.axis_pick_combo.setMinimumWidth(170)
-        self.axis_pick_combo.setMaximumWidth(300)
-        self.axis_pick_combo.activated.connect(self._on_axis_combo_activated)
+        self.caqtdm_axis_btn = QtWidgets.QPushButton("caqtdm Axis")
+        self.caqtdm_axis_btn.setAutoDefault(False)
+        self.caqtdm_axis_btn.setDefault(False)
+        self.caqtdm_axis_btn.clicked.connect(self._open_caqtdm_axis_panel)
         search_row.addWidget(self.search, 1)
         layout.addLayout(search_row)
 
@@ -477,8 +483,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         action_row.addWidget(self.copy_btn)
         action_row.addStretch(1)
         search_row.addLayout(action_row)
-        search_row.addWidget(QtWidgets.QLabel("Axis"))
-        search_row.addWidget(self.axis_pick_combo)
+        search_row.addWidget(self.caqtdm_axis_btn)
 
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
@@ -1071,6 +1076,40 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             self._log(f"Started caQtDM main panel ({macro})")
         except Exception as ex:
             self._log(f"Failed to start caQtDM main panel: {ex}")
+
+    def _open_caqtdm_axis_panel(self):
+        axis_id = self._axis_id()
+        ioc_prefix = self._ioc_prefix_for_title() or ""
+        motor_prefix = ""
+        axis_name = ""
+        try:
+            raw = self.client.get(_join_prefix_pv(ioc_prefix, f"MCU-Cfg-AX{axis_id}-Pfx"), as_string=True)
+            motor_prefix = str(raw or "").strip().strip('"')
+        except Exception:
+            motor_prefix = ""
+        try:
+            raw = self.client.get(_join_prefix_pv(ioc_prefix, f"MCU-Cfg-AX{axis_id}-Nam"), as_string=True)
+            axis_name = str(raw or "").strip().strip('"')
+        except Exception:
+            axis_name = ""
+        motor_base = self._resolve_motor_record_name(axis_id)
+        if not motor_prefix and motor_base and ":" in motor_base:
+            motor_prefix = motor_base.rsplit(":", 1)[0]
+        if not axis_name and motor_base:
+            axis_name = motor_base.rsplit(":", 1)[-1]
+        motor_prefix = str(motor_prefix or "").rstrip(":")
+        macro = f"DEV={motor_prefix},IOC={ioc_prefix},Axis={axis_name},AX_ID={axis_id}"
+        try:
+            cmd = f'caqtdm -macro "{macro}" ecmcAxis.ui'
+            subprocess.Popen(
+                ["bash", "-lc", cmd],
+                cwd=str(Path(__file__).resolve().parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started caQtDM axis panel ({macro})")
+        except Exception as ex:
+            self._log(f"Failed to start caQtDM axis panel: {ex}")
 
     def _discover_axes_from_ioc(self):
         prefix = self._ioc_prefix_for_title()
