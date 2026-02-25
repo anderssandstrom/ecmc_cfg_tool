@@ -809,7 +809,7 @@ class MultiCommandDialog(QtWidgets.QDialog):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, catalog_path, blocklist_path, default_cmd_pv, default_qry_pv, timeout):
         super().__init__()
-        self.setWindowTitle('ecmc Stream Command Client')
+        self.setWindowTitle('ecmc Command Client')
         self.resize(640, 480)
 
         self.client = EpicsClient(timeout=timeout)
