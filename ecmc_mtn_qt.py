@@ -368,7 +368,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.move_group = self._build_move_group()
         self.tweak_group = self._build_tweak_group()
         self.jog_group = self._build_jog_group()
-        motion_row.addWidget(self.move_group, 4)
+        motion_row.addWidget(self.move_group, 5)
         motion_row.addWidget(self.tweak_group, 0)
         motion_row.addWidget(self.jog_group, 0)
         layout.addLayout(motion_row)
@@ -846,26 +846,26 @@ class MotionWindow(QtWidgets.QMainWindow):
         return g
 
     def _build_jog_group(self, parent_layout=None):
-        g = QtWidgets.QGroupBox("3. Endless Motion (Forward / Backward)")
+        g = QtWidgets.QGroupBox("3. Endless Motion")
         l = QtWidgets.QGridLayout(g)
         l.setContentsMargins(6, 6, 6, 6)
         l.setHorizontalSpacing(4)
         l.setVerticalSpacing(3)
 
-        fwd_btn = QtWidgets.QPushButton("Endless Fwd")
-        bwd_btn = QtWidgets.QPushButton("Endless Bwd")
+        fwd_btn = QtWidgets.QPushButton("Fwd")
+        bwd_btn = QtWidgets.QPushButton("Bwd")
         for b in (fwd_btn, bwd_btn):
             b.setAutoDefault(False)
             b.setDefault(False)
             b.setMaximumHeight(22)
-            b.setFixedWidth(72)
+            b.setFixedWidth(52)
         fwd_btn.clicked.connect(self.start_jog_forward)
         bwd_btn.clicked.connect(self.start_jog_backward)
 
         l.addWidget(bwd_btn, 0, 0)
         l.addWidget(fwd_btn, 0, 1)
         g.setMaximumHeight(62)
-        g.setMaximumWidth(176)
+        g.setMaximumWidth(132)
 
         if parent_layout is not None and hasattr(parent_layout, "addWidget"):
             parent_layout.addWidget(g)
