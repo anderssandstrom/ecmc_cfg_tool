@@ -809,7 +809,7 @@ class MultiCommandDialog(QtWidgets.QDialog):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, catalog_path, blocklist_path, default_cmd_pv, default_qry_pv, timeout):
         super().__init__()
-        self.setWindowTitle('ecmc Command Client')
+        self.setWindowTitle('ecmc Command Parser')
         self.resize(640, 480)
 
         self.client = EpicsClient(timeout=timeout)
@@ -955,6 +955,9 @@ class MainWindow(QtWidgets.QMainWindow):
         proc_btn.clicked.connect(self.proc_and_read_query)
         read_btn = QtWidgets.QPushButton('Read QRY Only')
         read_btn.clicked.connect(self.read_query_only)
+        for btn in (send_btn, clear_btn, proc_btn, read_btn):
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
         btn_row.addWidget(send_btn)
         btn_row.addWidget(clear_btn)
         btn_row.addWidget(proc_btn)
@@ -1270,8 +1273,6 @@ class MainWindow(QtWidgets.QMainWindow):
             return True, msg
 
         try:
-            proc_pv = _proc_pv_for_readback(qp)
-            self.client.put(proc_pv, 1, wait=True)
             val = self.client.get(qp, as_string=True)
             msg = compact_query_message_value(f'QRY <- {qp}: {val}')
             self._log(msg)

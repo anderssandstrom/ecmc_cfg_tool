@@ -178,7 +178,7 @@ class MiniTrendWidget(QtWidgets.QWidget):
 class MotionWindow(QtWidgets.QMainWindow):
     def __init__(self, prefix, axis_id, timeout):
         super().__init__()
-        self._base_title = "ecmc Motor Record Motion"
+        self._base_title = "ecmc Axis Motion Control"
         self.setWindowTitle(self._base_title)
         # Slightly smaller base font to compact the whole UI.
         _f = self.font()
@@ -195,6 +195,9 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._seq_idle_until = None
         self._seq_next_target = None
         self._seq_params = {}
+        self._seq_scan_points = []
+        self._seq_scan_dir = 1
+        self._seq_scan_idx = 0
         self._seq_timer = QtCore.QTimer(self)
         self._seq_timer.setInterval(250)
         self._seq_timer.timeout.connect(self._sequence_tick)
@@ -365,8 +368,8 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.move_group = self._build_move_group()
         self.tweak_group = self._build_tweak_group()
         self.jog_group = self._build_jog_group()
-        motion_row.addWidget(self.move_group, 1)
-        motion_row.addWidget(self.tweak_group, 1)
+        motion_row.addWidget(self.move_group, 2)
+        motion_row.addWidget(self.tweak_group, 0)
         motion_row.addWidget(self.jog_group, 1)
         layout.addLayout(motion_row)
         self.seq_group = self._build_sequence_group(layout)
@@ -412,6 +415,13 @@ class MotionWindow(QtWidgets.QMainWindow):
     def _apply_axis_top(self):
         axis_txt = self.axis_edit.text().strip() or self.default_axis_id
         self.axis_edit.setText(axis_txt)
+        if self._seq_active or self._active_motion_mode in {"move", "jog", "sequence"} or self._is_motor_moving:
+            try:
+                self._log(f"Axis change requested while motion active; stopping motion before switching to axis {axis_txt}")
+                self.stop_motion()
+            except Exception as ex:
+                self._log(f"Failed to stop motion during axis change: {ex}")
+            self._close_jog_stop_dialog()
         self._update_cfg_pv_edits()
         self._positions_initialized = False
         self._sync_axis_combo_to_axis_id(axis_txt)
@@ -686,21 +696,22 @@ class MotionWindow(QtWidgets.QMainWindow):
             self._apply_axis_top()
             cur_axis = resolved_id
         if not prefix:
-            self._prompt_axis_selection_via_combo("Startup axis probe skipped: IOC prefix unavailable; select axis from combo")
+            self._log("Startup axis probe skipped: IOC prefix unavailable; opening axis picker")
+            self._open_axis_picker_dialog()
             return
         try:
             probe_pv = _join_prefix_pv(prefix, f"MCU-Cfg-AX{cur_axis}-Pfx")
             raw = self.client.get(probe_pv, as_string=True)
         except Exception as ex:
-            self._prompt_axis_selection_via_combo(
-                f"Startup axis probe failed for axis {cur_axis}: {ex}; select axis from combo"
-            )
+            self._log(f"Startup axis probe failed for axis {cur_axis}: {ex}; opening axis picker")
+            self._open_axis_picker_dialog()
             return
         if str(raw or "").strip().strip('"'):
             self._startup_axis_probe_ok = True
             self.resolve_motor_record_name()
             return
-        self._prompt_axis_selection_via_combo(f"Axis {cur_axis} probe returned empty; select axis from combo")
+        self._log(f"Axis {cur_axis} probe returned empty; opening axis picker")
+        self._open_axis_picker_dialog()
 
     def _build_motion_settings_group(self, parent_layout):
         g = QtWidgets.QGroupBox("Shared Motion Settings")
@@ -762,7 +773,7 @@ class MotionWindow(QtWidgets.QMainWindow):
 
         self.move_pos_edit = QtWidgets.QLineEdit("0")
         self.move_pos_edit.setMaximumHeight(24)
-        self.move_pos_edit.setMaximumWidth(86)
+        self.move_pos_edit.setMaximumWidth(118)
         self.move_relative_chk = QtWidgets.QCheckBox("Rel")
 
         move_btn = QtWidgets.QPushButton("Move")
@@ -770,6 +781,7 @@ class MotionWindow(QtWidgets.QMainWindow):
             b.setAutoDefault(False)
             b.setDefault(False)
             b.setMaximumHeight(24)
+            b.setFixedWidth(46)
         move_btn.clicked.connect(self.move_to_position)
 
         l.addWidget(QtWidgets.QLabel("Position"), 0, 0)
@@ -791,14 +803,18 @@ class MotionWindow(QtWidgets.QMainWindow):
 
         self.seq_a_edit = QtWidgets.QLineEdit("0")
         self.seq_b_edit = QtWidgets.QLineEdit("10")
-        self.seq_idle_edit = QtWidgets.QLineEdit("0.5")
-        for e in (self.seq_a_edit, self.seq_b_edit, self.seq_idle_edit):
+        self.seq_idle_edit = QtWidgets.QLineEdit("0")
+        self.seq_steps_edit = QtWidgets.QLineEdit("1")
+        self.seq_relative_chk = QtWidgets.QCheckBox("Rel")
+        for e in (self.seq_a_edit, self.seq_b_edit, self.seq_idle_edit, self.seq_steps_edit):
             e.setMaximumHeight(24)
-            e.setMaximumWidth(72)
+        for e in (self.seq_a_edit, self.seq_b_edit, self.seq_idle_edit):
+            e.setMaximumWidth(64)
+        self.seq_steps_edit.setMaximumWidth(44)
         self.seq_state_label = QtWidgets.QLabel("Stopped")
         self.seq_state_label.setMinimumHeight(20)
-        self.seq_state_label.setMinimumWidth(112)
-        self.seq_state_label.setMaximumWidth(112)
+        self.seq_state_label.setMinimumWidth(96)
+        self.seq_state_label.setMaximumWidth(96)
         self.seq_state_label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
 
         start_btn = QtWidgets.QPushButton("Start Sequence")
@@ -810,14 +826,16 @@ class MotionWindow(QtWidgets.QMainWindow):
 
         l.addWidget(QtWidgets.QLabel("Pos A"), 0, 0)
         l.addWidget(self.seq_a_edit, 0, 1)
-        l.addWidget(QtWidgets.QLabel("Pos B"), 0, 2)
-        l.addWidget(self.seq_b_edit, 0, 3)
-
-        l.addWidget(QtWidgets.QLabel("Idle [s]"), 0, 4)
-        l.addWidget(self.seq_idle_edit, 0, 5)
-        l.addWidget(start_btn, 0, 6)
-        l.addWidget(QtWidgets.QLabel("State"), 0, 7)
-        l.addWidget(self.seq_state_label, 0, 8)
+        l.addWidget(QtWidgets.QLabel("Steps"), 0, 2)
+        l.addWidget(self.seq_steps_edit, 0, 3)
+        l.addWidget(QtWidgets.QLabel("Pos B"), 0, 4)
+        l.addWidget(self.seq_b_edit, 0, 5)
+        l.addWidget(QtWidgets.QLabel("Idle [s]"), 0, 6)
+        l.addWidget(self.seq_idle_edit, 0, 7)
+        l.addWidget(self.seq_relative_chk, 0, 8)
+        l.addWidget(start_btn, 0, 9)
+        l.addWidget(QtWidgets.QLabel("State"), 0, 10)
+        l.addWidget(self.seq_state_label, 0, 11)
         g.setMaximumHeight(62)
 
         parent_layout.addWidget(g)
@@ -870,10 +888,10 @@ class MotionWindow(QtWidgets.QMainWindow):
         twf_btn.clicked.connect(self.tweak_forward)
 
         l.addWidget(twr_btn, 0, 0)
-        l.addWidget(QtWidgets.QLabel("TWV"), 0, 1)
-        l.addWidget(self.tweak_step_edit, 0, 2)
-        l.addWidget(twf_btn, 0, 3)
+        l.addWidget(self.tweak_step_edit, 0, 1)
+        l.addWidget(twf_btn, 0, 2)
         g.setMaximumHeight(62)
+        g.setMaximumWidth(148)
 
         if parent_layout is not None and hasattr(parent_layout, "addWidget"):
             parent_layout.addWidget(g)
@@ -888,8 +906,12 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.status_fields = {}
         self.status_extra_fields = {}
         self.rbv_motion_label = QtWidgets.QLabel("idle")
-        self.rbv_motion_label.setMinimumWidth(76)
+        self.rbv_motion_label.setMinimumWidth(92)
+        self.rbv_motion_label.setMaximumWidth(92)
         self.rbv_motion_label.setMinimumHeight(22)
+        self.rbv_motion_label.setMaximumHeight(22)
+        self.rbv_motion_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.rbv_motion_label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         self.rbv_motion_label.setStyleSheet(
             "QLabel { background: #d8ead2; color: #173b17; font-weight: 700; padding: 2px 6px; border: 1px solid #9fbe95; }"
         )
@@ -1633,15 +1655,30 @@ class MotionWindow(QtWidgets.QMainWindow):
             b = _to_float(self.seq_b_edit.text(), "Pos B")
             velo, accl, accs, vmax = self._shared_motion_params()
             idle_s = _to_float(self.seq_idle_edit.text(), "Idle time")
+            steps = int(float(self.seq_steps_edit.text().strip() or "2"))
             if idle_s < 0:
                 raise ValueError("Idle time must be >= 0")
+            if steps < 1:
+                raise ValueError("Steps must be >= 1")
+            if bool(self.seq_relative_chk.isChecked()):
+                rbv = _to_float(self.client.get(self._pv("RBV"), as_string=True), "RBV")
+                a = rbv + a
+                b = rbv + b
+            # Step-scan semantics: "steps" is the number of increments (commands)
+            # between A and B, so there are steps+1 points including both ends.
+            scan_points = [a + (b - a) * (float(i) / float(steps)) for i in range(steps + 1)]
 
-            self._seq_params = {"a": a, "b": b, "velo": velo, "accl": accl, "accs": accs, "vmax": vmax, "idle": idle_s}
-            self._seq_next_target = b
+            self._seq_params = {
+                "a": a, "b": b, "velo": velo, "accl": accl, "accs": accs, "vmax": vmax, "idle": idle_s, "steps": steps
+            }
+            self._seq_scan_points = list(scan_points)
+            self._seq_scan_dir = 1
+            self._seq_scan_idx = 0
+            self._seq_next_target = scan_points[1]
             self._seq_idle_until = None
             self._seq_active = True
-            self.seq_state_label.setText("Moving to A")
-            self._sequence_move_to(a)
+            self.seq_state_label.setText("Step 1")
+            self._sequence_move_to(scan_points[0])
             self._show_jog_stop_dialog("Sequence (A <-> B)")
             self._seq_timer.start()
         except Exception as ex:
@@ -1677,9 +1714,24 @@ class MotionWindow(QtWidgets.QMainWindow):
                 if remaining > 0:
                     self.seq_state_label.setText(f"Idle {remaining:.1f}s")
                     return
-                target = self._seq_next_target
-                self._seq_next_target = self._seq_params["a"] if target == self._seq_params["b"] else self._seq_params["b"]
-                self.seq_state_label.setText(f"Moving to {compact_float_text(target)}")
+                pts = list(self._seq_scan_points or [])
+                if len(pts) < 2:
+                    raise RuntimeError("Sequence points unavailable")
+                if self._seq_scan_dir >= 0:
+                    if self._seq_scan_idx < len(pts) - 1:
+                        self._seq_scan_idx += 1
+                    else:
+                        self._seq_scan_dir = -1
+                        self._seq_scan_idx -= 1
+                else:
+                    if self._seq_scan_idx > 0:
+                        self._seq_scan_idx -= 1
+                    else:
+                        self._seq_scan_dir = 1
+                        self._seq_scan_idx += 1
+                target = pts[self._seq_scan_idx]
+                self._seq_next_target = target
+                self.seq_state_label.setText(f"Step {self._seq_scan_idx + 1}")
                 self._seq_idle_until = None
                 self._sequence_move_to(target)
                 return
@@ -1699,6 +1751,7 @@ class MotionWindow(QtWidgets.QMainWindow):
     def stop_sequence(self):
         self._seq_active = False
         self._seq_idle_until = None
+        self._seq_scan_points = []
         self._seq_timer.stop()
         self.seq_state_label.setText("Stopped")
         self._clear_active_motion_mode()

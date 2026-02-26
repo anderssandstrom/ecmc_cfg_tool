@@ -61,23 +61,18 @@ def parse_simple_yaml_tree(path):
     root = YNode("(root)", "")
     stack = [(-1, root)]
     list_counters = {}
-    pending_comment_lines = []
-
     for raw in Path(path).read_text().splitlines():
         if not raw.strip():
             continue
         if raw.lstrip().startswith("#"):
-            txt = raw.lstrip()[1:].strip()
-            if txt:
-                pending_comment_lines.append(txt)
             continue
         line, comment = _split_yaml_comment(raw)
         if not line.strip():
             continue
         indent = len(line) - len(line.lstrip(" "))
         text = line.lstrip(" ")
-        merged_comment = "\n".join(pending_comment_lines + ([comment] if comment else []))
-        pending_comment_lines = []
+        # Only use inline comments on the actual key/value line for tooltips.
+        merged_comment = str(comment or "").strip()
 
         while len(stack) > 1 and indent <= stack[-1][0]:
             stack.pop()
@@ -300,7 +295,7 @@ def fill_axis_command(template, axis_id, value):
 class AxisYamlConfigWindow(QtWidgets.QMainWindow):
     def __init__(self, catalog_path, yaml_path, mapping_path, default_cmd_pv, default_qry_pv, timeout, axis_id="1", title_prefix=""):
         super().__init__()
-        self._base_title = f"ecmc Axis YAML Config [{title_prefix}]" if title_prefix else "ecmc Axis YAML Config"
+        self._base_title = f"ecmc Axis Configurator [{title_prefix}]" if title_prefix else "ecmc Axis Configurator"
         self.setWindowTitle(self._base_title)
         _f = self.font()
         if _f.pointSize() > 0:
@@ -1267,22 +1262,23 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             self._set_axis_id(resolved_id)
             current = resolved_id
         if not prefix:
-            self._prompt_axis_selection_via_combo("Startup axis probe skipped: IOC prefix unavailable; select axis from combo")
+            self._log("Startup axis probe skipped: IOC prefix unavailable; opening axis picker")
+            self._open_axis_picker_dialog()
             return
         try:
             probe_pv = _join_prefix_pv(prefix, f"MCU-Cfg-AX{current}-Pfx")
             raw = self.client.get(probe_pv, as_string=True)
         except Exception as ex:
-            self._prompt_axis_selection_via_combo(
-                f"Startup axis probe failed for axis {current}: {ex}; select axis from combo"
-            )
+            self._log(f"Startup axis probe failed for axis {current}: {ex}; opening axis picker")
+            self._open_axis_picker_dialog()
             return
         if str(raw or "").strip().strip('"'):
             self._startup_axis_probe_ok = True
             self._update_window_title_with_motor()
             self._initial_read_all_and_copy()
             return
-        self._prompt_axis_selection_via_combo(f'Axis {current} probe returned empty; select axis from combo')
+        self._log(f'Axis {current} probe returned empty; opening axis picker')
+        self._open_axis_picker_dialog()
 
     def _combine_motor_record(self, axis_pfx, motor_name):
         a = str(axis_pfx or "").strip()

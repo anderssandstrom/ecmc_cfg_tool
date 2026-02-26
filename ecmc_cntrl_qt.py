@@ -253,7 +253,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
     def __init__(self, catalog_path, default_cmd_pv, default_qry_pv, timeout, default_axis_id='1', title_prefix='', sketch_image_path=''):
         super().__init__()
         p = str(title_prefix or '').strip()
-        self._base_title = f'ecmc PID/Controller Tuning [{p}]' if p else 'ecmc PID/Controller Tuning'
+        self._base_title = f'ecmc Axis Controller Configurator [{p}]' if p else 'ecmc Axis Controller Configurator'
         self.setWindowTitle(self._base_title)
         _f = self.font()
         if _f.pointSize() > 0:
@@ -745,21 +745,22 @@ class CntrlWindow(QtWidgets.QMainWindow):
             self._apply_axis_all()
             cur_axis = resolved_id
         if not prefix:
-            self._prompt_axis_selection_via_combo('Startup axis probe skipped: IOC prefix unavailable; select axis from combo')
+            self._log('Startup axis probe skipped: IOC prefix unavailable; opening axis picker')
+            self._open_axis_picker_dialog()
             return
         try:
             probe_pv = _join_prefix_pv(prefix, f'MCU-Cfg-AX{cur_axis}-Pfx')
             raw = self.client.get(probe_pv, as_string=True)
         except Exception as ex:
-            self._prompt_axis_selection_via_combo(
-                f'Startup axis probe failed for axis {cur_axis}: {ex}; select axis from combo'
-            )
+            self._log(f'Startup axis probe failed for axis {cur_axis}: {ex}; opening axis picker')
+            self._open_axis_picker_dialog()
             return
         if str(raw or '').strip().strip('"'):
             self._startup_axis_probe_ok = True
             self._run_startup_after_axis_probe()
             return
-        self._prompt_axis_selection_via_combo(f'Axis {cur_axis} probe returned empty; select axis from combo')
+        self._log(f'Axis {cur_axis} probe returned empty; opening axis picker')
+        self._open_axis_picker_dialog()
 
     def _run_startup_after_axis_probe(self):
         self._update_window_title_with_motor()
@@ -1727,6 +1728,12 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._log(f'Applied axis {axis_value} to {updated} rows')
         self._sync_axis_combo_to_axis_id(axis_value)
         self._update_window_title_with_motor()
+        if self._startup_axis_probe_ok and not self._closing_due_to_non_real:
+            try:
+                if self._read_all_rows():
+                    self._copy_all_read_to_set()
+            except Exception as ex:
+                self._log(f'Axis change read/copy failed: {ex}')
 
     def _sync_axis_combo_to_axis_id(self, axis_id):
         if not hasattr(self, 'axis_pick_combo'):
