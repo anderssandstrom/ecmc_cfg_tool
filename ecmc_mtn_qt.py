@@ -795,7 +795,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         return g
 
     def _build_sequence_group(self, parent_layout):
-        g = QtWidgets.QGroupBox("4. Sequence (A <-> B)")
+        g = QtWidgets.QGroupBox("4. Sequence/Scan (A<->B)")
         l = QtWidgets.QGridLayout(g)
         l.setContentsMargins(6, 6, 6, 6)
         l.setHorizontalSpacing(4)
@@ -805,6 +805,8 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.seq_b_edit = QtWidgets.QLineEdit("10")
         self.seq_idle_edit = QtWidgets.QLineEdit("0")
         self.seq_steps_edit = QtWidgets.QLineEdit("1")
+        self.seq_snake_chk = QtWidgets.QCheckBox("Snake")
+        self.seq_snake_chk.setChecked(True)
         self.seq_relative_chk = QtWidgets.QCheckBox("Rel")
         for e in (self.seq_a_edit, self.seq_b_edit, self.seq_idle_edit, self.seq_steps_edit):
             e.setMaximumHeight(24)
@@ -817,11 +819,12 @@ class MotionWindow(QtWidgets.QMainWindow):
         self.seq_state_label.setMaximumWidth(96)
         self.seq_state_label.setSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
 
-        start_btn = QtWidgets.QPushButton("Start Sequence")
+        start_btn = QtWidgets.QPushButton("Start")
         for b in (start_btn,):
             b.setAutoDefault(False)
             b.setDefault(False)
             b.setMaximumHeight(24)
+            b.setFixedWidth(48)
         start_btn.clicked.connect(self.start_sequence)
 
         l.addWidget(QtWidgets.QLabel("Pos A"), 0, 0)
@@ -832,10 +835,11 @@ class MotionWindow(QtWidgets.QMainWindow):
         l.addWidget(self.seq_b_edit, 0, 5)
         l.addWidget(QtWidgets.QLabel("Idle [s]"), 0, 6)
         l.addWidget(self.seq_idle_edit, 0, 7)
-        l.addWidget(self.seq_relative_chk, 0, 8)
-        l.addWidget(start_btn, 0, 9)
-        l.addWidget(QtWidgets.QLabel("State"), 0, 10)
-        l.addWidget(self.seq_state_label, 0, 11)
+        l.addWidget(self.seq_snake_chk, 0, 8)
+        l.addWidget(self.seq_relative_chk, 0, 9)
+        l.addWidget(start_btn, 0, 10)
+        l.addWidget(QtWidgets.QLabel("State"), 0, 11)
+        l.addWidget(self.seq_state_label, 0, 12)
         g.setMaximumHeight(62)
 
         parent_layout.addWidget(g)
@@ -1669,7 +1673,8 @@ class MotionWindow(QtWidgets.QMainWindow):
             scan_points = [a + (b - a) * (float(i) / float(steps)) for i in range(steps + 1)]
 
             self._seq_params = {
-                "a": a, "b": b, "velo": velo, "accl": accl, "accs": accs, "vmax": vmax, "idle": idle_s, "steps": steps
+                "a": a, "b": b, "velo": velo, "accl": accl, "accs": accs, "vmax": vmax, "idle": idle_s, "steps": steps,
+                "snake": bool(self.seq_snake_chk.isChecked()),
             }
             self._seq_scan_points = list(scan_points)
             self._seq_scan_dir = 1
@@ -1717,21 +1722,36 @@ class MotionWindow(QtWidgets.QMainWindow):
                 pts = list(self._seq_scan_points or [])
                 if len(pts) < 2:
                     raise RuntimeError("Sequence points unavailable")
-                if self._seq_scan_dir >= 0:
+                snake = bool(self._seq_params.get("snake", True))
+                if snake and self._seq_scan_dir >= 0:
                     if self._seq_scan_idx < len(pts) - 1:
                         self._seq_scan_idx += 1
                     else:
                         self._seq_scan_dir = -1
                         self._seq_scan_idx -= 1
-                else:
+                elif snake and self._seq_scan_dir < 0:
                     if self._seq_scan_idx > 0:
                         self._seq_scan_idx -= 1
                     else:
                         self._seq_scan_dir = 1
                         self._seq_scan_idx += 1
+                else:
+                    # Non-snake mode: A->B is stepped, B->A is one direct move.
+                    if self._seq_scan_dir >= 0:
+                        if self._seq_scan_idx < len(pts) - 1:
+                            self._seq_scan_idx += 1
+                        else:
+                            self._seq_scan_dir = -1
+                            self._seq_scan_idx = 0
+                    else:
+                        self._seq_scan_dir = 1
+                        self._seq_scan_idx = 1 if len(pts) > 1 else 0
                 target = pts[self._seq_scan_idx]
                 self._seq_next_target = target
-                self.seq_state_label.setText(f"Step {self._seq_scan_idx + 1}")
+                if (not snake) and self._seq_scan_dir < 0 and self._seq_scan_idx == 0:
+                    self.seq_state_label.setText("Return A")
+                else:
+                    self.seq_state_label.setText(f"Step {self._seq_scan_idx + 1}")
                 self._seq_idle_until = None
                 self._sequence_move_to(target)
                 return
