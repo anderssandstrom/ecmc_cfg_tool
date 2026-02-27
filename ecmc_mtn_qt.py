@@ -19,6 +19,8 @@ def _to_float(text, name):
     s = str(text).strip()
     if not s:
         raise ValueError(f"{name} is empty")
+    if "," in s and "." not in s:
+        s = s.replace(",", ".")
     return float(s)
 
 
@@ -224,6 +226,10 @@ class MotionWindow(QtWidgets.QMainWindow):
 
         self._build_ui(timeout)
         self._log(f"Connected via backend: {self.client.backend}")
+        if getattr(self.client, "backend", None) == "cli":
+            # CLI mode spawns caget/caput processes; lower poll rate to keep UI responsive.
+            self._status_timer.setInterval(900)
+            self._log("CLI backend detected: status polling set to 900 ms")
         self._status_timer.start()
         QtCore.QTimer.singleShot(0, self._startup_axis_presence_check)
 

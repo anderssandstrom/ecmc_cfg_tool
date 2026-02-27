@@ -17,6 +17,7 @@ except Exception:
 PLACEHOLDER_RE = re.compile(r'<([^>]+)>')
 FLOAT_LITERAL_RE = re.compile(r'(?<![A-Za-z0-9_])([+-]?(?:(?:\d+\.\d*)|(?:\.\d+))(?:[eE][+-]?\d+)?)(?![A-Za-z0-9_])')
 FLOAT_DISPLAY_RE = re.compile(r'^[+-]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+(?:\.\d*)?[eE][+-]?\d+)|(?:\.\d+[eE][+-]?\d+))$')
+FLOAT_DISPLAY_COMMA_RE = re.compile(r'^[+-]?(?:(?:\d+,\d*)|(?:,\d+)|(?:\d+(?:,\d*)?[eE][+-]?\d+)|(?:,\d+[eE][+-]?\d+))$')
 
 
 class EpicsClient:
@@ -88,6 +89,12 @@ class EpicsClient:
                 continue
             break
         s = ' '.join(parts)
+        # Many caget variants quote string/scalar values.
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in {'"', "'"}:
+            s = s[1:-1]
+        # Locale-dependent caget output may use decimal comma.
+        if FLOAT_DISPLAY_COMMA_RE.match(s) and '.' not in s:
+            s = s.replace(',', '.')
         return s
 
     def put(self, pv, value, wait=True):
@@ -241,6 +248,8 @@ def compact_float_text(value, sig_digits=15):
         s = str(value or '').strip()
         if not s:
             return s
+        if FLOAT_DISPLAY_COMMA_RE.match(s) and '.' not in s:
+            s = s.replace(',', '.')
         if not FLOAT_DISPLAY_RE.match(s):
             return str(value)
         # Preserve plain integer strings exactly as entered/read.
