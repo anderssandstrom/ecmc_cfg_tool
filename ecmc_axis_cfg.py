@@ -1125,6 +1125,9 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             if steps > 10000:
                 break
             axis_id = str(cur).strip()
+            if not re.fullmatch(r"\d+", axis_id):
+                self._log(f'Axis discovery: invalid object id "{axis_id}" from MCU-Cfg-AX-FrstObjId/NxtObjId; stopping traversal')
+                break
             axis_pfx = ""
             motor_name = ""
             try:

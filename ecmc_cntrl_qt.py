@@ -578,6 +578,9 @@ class CntrlWindow(QtWidgets.QMainWindow):
             axis_id = str(cur).strip()
             if not axis_id or axis_id in seen:
                 break
+            if not re.fullmatch(r'\d+', axis_id):
+                self._log(f'Axis discovery: invalid object id "{axis_id}" from MCU-Cfg-AX-FrstObjId/NxtObjId; stopping traversal')
+                break
             seen.add(axis_id)
             axis_pfx = ''
             motor_name = ''
