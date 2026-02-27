@@ -24,6 +24,7 @@ class EpicsClient:
         self.timeout = timeout
         self.backend = None
         self._epics = None
+        self._cli_available = bool(shutil.which('caput') and shutil.which('caget'))
 
         try:
             import epics  # type: ignore
@@ -34,18 +35,33 @@ class EpicsClient:
         except Exception:
             pass
 
-        if shutil.which('caput') and shutil.which('caget'):
+        if self._cli_available:
             self.backend = 'cli'
             return
 
         raise RuntimeError('No EPICS client available. Install pyepics or ensure caget/caput are in PATH.')
 
+    def _is_missing_ca_dll_error(self, ex):
+        msg = str(ex).lower()
+        return ('cannot find epics ca dll' in msg) or ('cannot load ca dll' in msg)
+
+    def _fallback_to_cli_if_possible(self, ex):
+        if self.backend == 'pyepics' and self._cli_available and self._is_missing_ca_dll_error(ex):
+            self.backend = 'cli'
+            self._epics = None
+            return True
+        return False
+
     def put(self, pv, value, wait=True):
         if self.backend == 'pyepics':
-            ok = self._epics.caput(pv, value, wait=wait, timeout=self.timeout)
-            if ok is None:
-                raise RuntimeError(f'caput failed for {pv}')
-            return
+            try:
+                ok = self._epics.caput(pv, value, wait=wait, timeout=self.timeout)
+                if ok is None:
+                    raise RuntimeError(f'caput failed for {pv}')
+                return
+            except Exception as ex:
+                if not self._fallback_to_cli_if_possible(ex):
+                    raise
 
         proc = subprocess.run(['caput', '-t', pv, str(value)], text=True, capture_output=True)
         if proc.returncode != 0:
@@ -53,10 +69,14 @@ class EpicsClient:
 
     def get(self, pv, as_string=True):
         if self.backend == 'pyepics':
-            val = self._epics.caget(pv, as_string=as_string, timeout=self.timeout)
-            if val is None:
-                raise RuntimeError(f'caget failed for {pv}')
-            return str(val)
+            try:
+                val = self._epics.caget(pv, as_string=as_string, timeout=self.timeout)
+                if val is None:
+                    raise RuntimeError(f'caget failed for {pv}')
+                return str(val)
+            except Exception as ex:
+                if not self._fallback_to_cli_if_possible(ex):
+                    raise
 
         proc = subprocess.run(['caget', '-t', pv], text=True, capture_output=True)
         if proc.returncode != 0:

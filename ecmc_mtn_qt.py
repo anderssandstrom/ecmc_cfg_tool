@@ -219,6 +219,8 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._last_status_vals = {}
         self._axis_combo_updating = False
         self._axis_combo_open_new_instance = False
+        self._ioc_connected = None
+        self._scan_abort_on_reconnect = False
 
         self._build_ui(timeout)
         self._log(f"Connected via backend: {self.client.backend}")
@@ -1372,19 +1374,77 @@ class MotionWindow(QtWidgets.QMainWindow):
         if self.auto_refresh_status.isChecked():
             self.refresh_status()
 
+    def _handle_ioc_connection_state(self, connected_now):
+        connected_now = bool(connected_now)
+        prev = self._ioc_connected
+        self._ioc_connected = connected_now
+        if prev is None or prev == connected_now:
+            return
+
+        if not connected_now:
+            self._log("IOC connection lost")
+            if self._seq_active:
+                self._log("Sequence/scan stopped due to IOC disconnect")
+                self.stop_sequence()
+                self.seq_state_label.setText("Stopped (IOC disconnected)")
+                self._scan_abort_on_reconnect = True
+            return
+
+        self._log("IOC connection restored")
+        if self._scan_abort_on_reconnect:
+            if self._send_reconnect_safety_stop():
+                self._scan_abort_on_reconnect = False
+
+    def _send_reconnect_safety_stop(self):
+        try:
+            try:
+                self._put("JOGF", 0, quiet=True)
+            except Exception:
+                pass
+            try:
+                self._put("JOGR", 0, quiet=True)
+            except Exception:
+                pass
+
+            stop_ok = False
+            try:
+                self._put("STOP", 1, quiet=True)
+                stop_ok = True
+            except Exception as ex:
+                self._log(f"Reconnect safety STOP failed ({ex}), trying SPMG=0")
+            if not stop_ok:
+                try:
+                    self._put("SPMG", 0, quiet=True)
+                    stop_ok = True
+                except Exception as ex:
+                    self._log(f"Reconnect safety SPMG stop failed ({ex})")
+            if not stop_ok:
+                self._log("Reconnect safety stop failed; will retry while connected")
+                return False
+            self._log("Reconnect safety stop sent (scan resume prevented)")
+            return True
+        except Exception as ex:
+            self._log(f"Reconnect safety stop failed: {ex}")
+            return False
+
     def refresh_status(self):
         if not self.motor_record_edit.text().strip():
             return {}
         vals = {}
+        ok_reads = 0
+        cannot_connect = False
         for f in list(self.status_fields.keys()):
             try:
                 raw = self.client.get(self._pv(f), as_string=True)
                 vals[f] = str(raw).strip()
                 txt = compact_float_text(raw)
                 self.status_fields[f].setText(txt)
+                ok_reads += 1
             except Exception as ex:
                 self.status_fields[f].setText(f"ERR: {ex}")
                 vals[f] = None
+                if "cannot connect to" in str(ex).lower():
+                    cannot_connect = True
         for name, suffix in (("ErrId", "-ErrId"), ("MsgTxt", "-MsgTxt")):
             w = self.status_extra_fields.get(name) if hasattr(self, "status_extra_fields") else None
             if w is None:
@@ -1394,9 +1454,15 @@ class MotionWindow(QtWidgets.QMainWindow):
                 txt = str(raw).strip()
                 vals[name] = txt
                 w.setText(compact_float_text(txt) if name == "ErrId" else txt)
+                ok_reads += 1
             except Exception as ex:
                 vals[name] = None
                 w.setText(f"ERR: {ex}")
+                if "cannot connect to" in str(ex).lower():
+                    cannot_connect = True
+        # Treat any explicit channel-access "cannot connect to ..." as disconnected,
+        # even if some other PVs still read successfully.
+        self._handle_ioc_connection_state(False if cannot_connect else (ok_reads > 0))
         self._update_motion_indicator(vals)
         self._update_drive_enable_button_from_status(vals)
         self._update_active_mode_from_status(vals)
@@ -1780,7 +1846,11 @@ class MotionWindow(QtWidgets.QMainWindow):
     def stop_sequence(self):
         self._seq_active = False
         self._seq_idle_until = None
+        self._seq_next_target = None
+        self._seq_params = {}
         self._seq_scan_points = []
+        self._seq_scan_dir = 1
+        self._seq_scan_idx = 0
         self._seq_timer.stop()
         self.seq_state_label.setText("Stopped")
         self._clear_active_motion_mode()

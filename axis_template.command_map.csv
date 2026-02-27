@@ -59,7 +59,7 @@ input.homePolarity,GetAxisMonHomeSwitchPolarity(<axisIndex>),"Cfg.SetAxisMonHome
 input.limit.backwardPolarity,GetAxisMonLimitBwdPolarity(<axisIndex>),"Cfg.SetAxisMonLimitBwdPolarity(<axisIndex>,<value>)"
 input.limit.forwardPolarity,GetAxisMonLimitFwdPolarity(<axisIndex>),"Cfg.SetAxisMonLimitFwdPolarity(<axisIndex>,<value>)"
 input.limit.stopAtBoth,GetAxisMonStopAtAnyLimit(<axisIndex>),"Cfg.SetAxisMonStopAtAnyLimit(<axisIndex>,<value>)"
-input.interlockPolarity,GetAxisMonExtHWInterlockPolarity(<axisIndex>),"Cfg.SetAxisMonExtHWInterlockPolarity(<axisIndex>,<value>)"
+input.interlockPolarity,GetAxisMonExtHWInterlockPolarity(<axisIndex>),"Cfg.SetAxisMonExtILPol(<axisIndex>,<value>)"
 input.analog.enable,GetAxisMonEnableAnalogInterlock(<axisIndex>),"Cfg.SetAxisMonEnAnIL(<axisIndex>,<value>)"
 input.analog.interlockPolarity,GetAxisMonAnalogInterlockPolarity(<axisIndex>),"Cfg.SetAxisMonAnILPol(<axisIndex>,<value>)"
 input.analog.rawLimit,GetAxisMonAnalogInterlockRawLimit(<axisIndex>),"Cfg.SetAxisMonAnILRawLim(<axisIndex>,<value>)"
