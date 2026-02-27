@@ -98,12 +98,24 @@ class EpicsClient:
                 if not self._fallback_to_cli_if_possible(ex):
                     raise
 
+        # Prefer a clean value-only output to avoid PV/alarm text mixing
+        # into application-level parsing (e.g. axis object-id discovery).
+        cmd = ['caget', '-t', '-noname', '-nostat', '-nounit', pv]
         proc = subprocess.run(
-            ['caget', '-t', pv],
+            cmd,
             universal_newlines=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
+        if proc.returncode != 0:
+            # Some caget variants may not support all formatting flags.
+            # Fallback to plain terse mode and parse best-effort.
+            proc = subprocess.run(
+                ['caget', '-t', pv],
+                universal_newlines=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f'caget failed for {pv}')
         return self._parse_cli_caget_value(pv, proc.stdout)
