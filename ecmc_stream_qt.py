@@ -52,6 +52,21 @@ class EpicsClient:
             return True
         return False
 
+    def _parse_cli_caget_value(self, pv, raw_out):
+        s = str(raw_out or '').strip()
+        if not s:
+            return s
+        # caget output can include PV name and alarm trailer:
+        #   "<pv> <value> SEVR:... STAT:..."
+        # Keep only the value payload.
+        if s.startswith(str(pv)):
+            s = s[len(str(pv)):].strip()
+        if ' SEVR:' in s:
+            s = s.split(' SEVR:', 1)[0].rstrip()
+        if ' STAT:' in s:
+            s = s.split(' STAT:', 1)[0].rstrip()
+        return s
+
     def put(self, pv, value, wait=True):
         if self.backend == 'pyepics':
             try:
@@ -91,7 +106,7 @@ class EpicsClient:
         )
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f'caget failed for {pv}')
-        return proc.stdout.strip()
+        return self._parse_cli_caget_value(pv, proc.stdout)
 
 
 def placeholders_in_template(template):
