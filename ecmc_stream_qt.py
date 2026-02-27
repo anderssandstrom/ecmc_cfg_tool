@@ -65,6 +65,29 @@ class EpicsClient:
             s = s.split(' SEVR:', 1)[0].rstrip()
         if ' STAT:' in s:
             s = s.split(' STAT:', 1)[0].rstrip()
+        # Some sites prepend a leading timestamp column, or "<undefined>"
+        # when no timestamp is available. Drop those first-column tokens.
+        parts = s.split()
+        while len(parts) > 1:
+            first = parts[0].strip()
+            low = first.lower()
+            if low in {'<undefined>', 'undefined'}:
+                parts.pop(0)
+                continue
+            # Timestamp-like token (must include separators; plain numeric value
+            # like "1" should not be treated as a timestamp).
+            if (
+                ':' in first
+                or 't' in low
+                or first.endswith('z')
+                or '/' in first
+                or '-' in first
+                or '.' in first
+            ) and any(ch.isdigit() for ch in first):
+                parts.pop(0)
+                continue
+            break
+        s = ' '.join(parts)
         return s
 
     def put(self, pv, value, wait=True):
