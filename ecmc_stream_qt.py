@@ -63,7 +63,12 @@ class EpicsClient:
                 if not self._fallback_to_cli_if_possible(ex):
                     raise
 
-        proc = subprocess.run(['caput', '-t', pv, str(value)], universal_newlines=True, capture_output=True)
+        proc = subprocess.run(
+            ['caput', '-t', pv, str(value)],
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f'caput failed for {pv}')
 
@@ -78,7 +83,12 @@ class EpicsClient:
                 if not self._fallback_to_cli_if_possible(ex):
                     raise
 
-        proc = subprocess.run(['caget', '-t', pv], universal_newlines=True, capture_output=True)
+        proc = subprocess.run(
+            ['caget', '-t', pv],
+            universal_newlines=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f'caget failed for {pv}')
         return proc.stdout.strip()
