@@ -321,6 +321,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._startup_axis_probe_ok = False
         self._axis_combo_updating = False
         self._axis_combo_open_new_instance = False
+        self._read_all_in_progress = False
+        self._read_all_cancel_requested = False
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._load_yaml_tree()
         self._log(f"Connected via backend: {self.client.backend}")
@@ -487,6 +489,24 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.changes_log.setReadOnly(True)
         self.changes_log.setPlaceholderText("Successful writes are tracked here for this session...")
         layout.addWidget(self.changes_log, stretch=0)
+        progress_row = QtWidgets.QHBoxLayout()
+        self.read_progress = QtWidgets.QProgressBar()
+        self.read_progress.setMinimum(0)
+        self.read_progress.setMaximum(100)
+        self.read_progress.setValue(0)
+        self.read_progress.setFormat("Read All: %v/%m")
+        self.read_progress.setVisible(False)
+        self.read_backend_label = QtWidgets.QLabel("")
+        self.read_backend_label.setVisible(False)
+        self.cancel_read_all_btn = QtWidgets.QPushButton("Cancel Read All")
+        self.cancel_read_all_btn.setAutoDefault(False)
+        self.cancel_read_all_btn.setDefault(False)
+        self.cancel_read_all_btn.setVisible(False)
+        self.cancel_read_all_btn.clicked.connect(lambda _=False: self._request_read_all_cancel())
+        progress_row.addWidget(self.read_progress, 1)
+        progress_row.addWidget(self.read_backend_label, 0)
+        progress_row.addWidget(self.cancel_read_all_btn, 0)
+        layout.addLayout(progress_row)
         self.cfg_group.setVisible(False)
         self.log.setVisible(False)
         self.changes_log.setVisible(False)
@@ -575,6 +595,42 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
 
     def _log_change(self, msg):
         self.changes_log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
+    def _set_read_all_busy(self, busy, total=0):
+        self._read_all_in_progress = bool(busy)
+        self.read_all_btn.setEnabled(not busy)
+        if hasattr(self, "copy_btn"):
+            self.copy_btn.setEnabled(not busy)
+        if busy:
+            self._read_all_cancel_requested = False
+            self.read_progress.setMaximum(max(1, int(total)))
+            self.read_progress.setValue(0)
+            self.read_progress.setVisible(True)
+            be = str(getattr(self.client, "backend", "") or "").strip().lower()
+            self.read_backend_label.setText("CLI (slow)" if be == "cli" else "EPICS")
+            self.read_backend_label.setVisible(True)
+            self.cancel_read_all_btn.setEnabled(True)
+            self.cancel_read_all_btn.setVisible(True)
+        else:
+            self.read_progress.setVisible(False)
+            self.read_progress.setValue(0)
+            self.read_backend_label.setVisible(False)
+            self.cancel_read_all_btn.setVisible(False)
+            self.cancel_read_all_btn.setEnabled(False)
+        QtWidgets.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 5)
+
+    def _update_read_all_progress(self, done):
+        if not self._read_all_in_progress:
+            return
+        self.read_progress.setValue(max(0, int(done)))
+        QtWidgets.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 5)
+
+    def _request_read_all_cancel(self):
+        if not self._read_all_in_progress:
+            return
+        self._read_all_cancel_requested = True
+        self.cancel_read_all_btn.setEnabled(False)
+        self.cancel_read_all_btn.setText("Cancelling...")
 
     def _record_change(self, axis_id, yaml_key, value):
         axis_key = str(axis_id).strip() or self.axis_id_default
@@ -1344,7 +1400,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             return False
         return not self._axis_is_real(self._axis_id())
 
-    def send_raw_command(self, cmd):
+    def send_raw_command(self, cmd, quiet=False, wait=True):
         pv = self.cmd_pv.text().strip()
         cmd = normalize_float_literals((cmd or "").strip())
         if not pv:
@@ -1352,31 +1408,36 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         if not cmd:
             return False, "ERROR: Command text is empty"
         try:
-            self.client.put(pv, cmd, wait=True)
+            self.client.put(pv, cmd, wait=bool(wait))
             msg = f"CMD -> {pv}: {cmd}"
-            self._log(msg)
+            if not quiet:
+                self._log(msg)
             return True, msg
         except Exception as ex:
             msg = f"ERROR sending command: {ex} | CMD={cmd}"
-            self._log(msg)
+            if not quiet:
+                self._log(msg)
             return False, msg
 
-    def read_raw_command(self, cmd):
-        ok, msg = self.send_raw_command(cmd)
+    def read_raw_command(self, cmd, quiet=False):
+        fast_cli = bool(quiet and getattr(self.client, "backend", "") == "cli")
+        ok, msg = self.send_raw_command(cmd, quiet=quiet, wait=(not fast_cli))
         if not ok:
             return False, msg
         qp = self.qry_pv.text().strip()
         if not qp:
             return True, "Command sent, no QRY PV configured"
         try:
-            self.client.put(_proc_pv_for_readback(qp), 1, wait=True)
+            self.client.put(_proc_pv_for_readback(qp), 1, wait=(not fast_cli))
             val = self.client.get(qp, as_string=True)
             msg = f"QRY <- {qp}: {val}"
-            self._log(msg)
+            if not quiet:
+                self._log(msg)
             return True, msg
         except Exception as ex:
             msg = f"ERROR query read: {ex}"
-            self._log(msg)
+            if not quiet:
+                self._log(msg)
             return False, msg
 
     def _write_row(self, row):
@@ -1406,7 +1467,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         else:
             row["read_edit"].setText(msg)
 
-    def _read_row(self, row):
+    def _read_row(self, row, quiet=False):
         pair = row.get("pair")
         if not pair or not pair.get("get"):
             row["status"].setText("missing getter")
@@ -1416,7 +1477,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             row["read_edit"].setText("Blocked for virtual axis")
             return None
         cmd = fill_axis_command(pair["get"], self._axis_id(), "")
-        ok, msg = self.read_raw_command(cmd)
+        ok, msg = self.read_raw_command(cmd, quiet=quiet)
         row["status"].setText("OK" if ok else "ERR")
         if ok and ": " in msg:
             val = msg.split(": ", 1)[1].strip()
@@ -1428,23 +1489,30 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         return bool(ok)
 
     def _read_all_matched(self, abort_on_error=False):
+        if self._read_all_in_progress:
+            return False
+        rows = [r for r in self._leaf_rows if (not r.get("blocked")) and r.get("pair") and r.get("pair", {}).get("get")]
         count = 0
         failed = False
-        for row in self._leaf_rows:
-            if row.get("blocked"):
-                continue
-            pair = row.get("pair")
-            if not pair or not pair.get("get"):
-                continue
-            ok = self._read_row(row)
-            count += 1
-            if ok is False:
-                failed = True
-                if abort_on_error:
-                    self._log(f'Read matched rows aborted after failure at key="{row.get("path","")}" ({count} attempted)')
+        self._set_read_all_busy(True, total=len(rows))
+        try:
+            for row in rows:
+                if self._read_all_cancel_requested:
+                    self._log(f"Read matched rows cancelled ({count}/{len(rows)})")
                     return False
-        self._log(f"Read matched rows: {count}" + (" (with errors)" if failed else ""))
-        return not failed
+                ok = self._read_row(row, quiet=True)
+                count += 1
+                self._update_read_all_progress(count)
+                if ok is False:
+                    failed = True
+                    if abort_on_error:
+                        self._log(f'Read matched rows aborted after failure at key="{row.get("path","")}" ({count} attempted)')
+                        return False
+            self._log(f"Read matched rows: {count}" + (" (with errors)" if failed else ""))
+            return not failed
+        finally:
+            self._set_read_all_busy(False)
+            self.cancel_read_all_btn.setText("Cancel Read All")
 
     def _initial_read_all_and_copy(self):
         if not self._startup_axis_probe_ok:

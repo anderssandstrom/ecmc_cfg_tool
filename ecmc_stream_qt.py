@@ -25,7 +25,9 @@ class EpicsClient:
         self.timeout = timeout
         self.backend = None
         self._epics = None
-        self._cli_available = bool(shutil.which('caput') and shutil.which('caget'))
+        self._caput_bin = shutil.which('caput')
+        self._caget_bin = shutil.which('caget')
+        self._cli_available = bool(self._caput_bin and self._caget_bin)
 
         try:
             import epics  # type: ignore
@@ -108,8 +110,15 @@ class EpicsClient:
                 if not self._fallback_to_cli_if_possible(ex):
                     raise
 
+        cmd = [str(self._caput_bin or 'caput'), '-t']
+        # In CLI mode, allow non-blocking puts for bulk operations.
+        if wait:
+            cmd.extend(['-w', str(float(self.timeout))])
+        else:
+            cmd.extend(['-w', '0'])
+        cmd.extend([pv, str(value)])
         proc = subprocess.run(
-            ['caput', '-t', pv, str(value)],
+            cmd,
             universal_newlines=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -130,7 +139,7 @@ class EpicsClient:
 
         # Prefer a clean value-only output to avoid PV/alarm text mixing
         # into application-level parsing (e.g. axis object-id discovery).
-        cmd = ['caget', '-t', '-noname', '-nostat', '-nounit', pv]
+        cmd = [str(self._caget_bin or 'caget'), '-t', '-w', str(float(self.timeout)), '-noname', '-nostat', '-nounit', pv]
         proc = subprocess.run(
             cmd,
             universal_newlines=True,
@@ -141,7 +150,7 @@ class EpicsClient:
             # Some caget variants may not support all formatting flags.
             # Fallback to plain terse mode and parse best-effort.
             proc = subprocess.run(
-                ['caget', '-t', pv],
+                [str(self._caget_bin or 'caget'), '-t', '-w', str(float(self.timeout)), pv],
                 universal_newlines=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

@@ -63,6 +63,10 @@ drive:
 #    - block                                               # Error 0 (if no drive error bit then leave empty)
 #    - block                                               # Error 1 (if no drive error bit then leave empty)
 #    - block                                              # Error 2 (if no drive error bit then leave empty)
+  actual:
+    enable: 0                                          # Actual status from drive
+    enabled: 0                                         # Actual status from drive
+    setpoint: 0                                        # Actual status from drive
 
 encoder:
   numerator: 360                                      # Scaling numerator example 360 deg/rev
@@ -121,6 +125,9 @@ encoder:
     enable: 1                                        # Enable correction table
     range: 0                                    # Modulo range
     scale: 1                                    # scale
+  actual:
+    position: 0                                      # Actual position (only for diag) 
+    velocity: 0                                      # Actual velcoity (only for diag)
 
 controller:
   Kp: 15                                              # Kp proportional gain
@@ -140,6 +147,13 @@ controller:
     Ki: 0.1                                           # Ki for when close to target
     Kd: 0.1                                           # Kd for when close to target
     tol: 0.1                                          # Distance from target for when inner PID params will be used, defaults to atTarget tol
+  actual:
+    errorAct: 0                                       # Actual values (only for status)
+    outputAct: 0                                      # Actual values (only for status)
+    outputPAct: 0                                     # Actual values (only for status)
+    outputIAct: 0                                     # Actual values (only for status)
+    outputDAct: 0                                     # Actual values (only for status)
+    outputFFAct: 0                                    # Actual values (only for status)
 
 trajectory:
   # type: block                                             # Default 0 = trapetz, 1 = S-curve (ruckig)
@@ -164,17 +178,23 @@ input:
     forwardPolarity: 0                               # Polarity of forward limit switch
 #    backward: block                          # Ethercat entry for high limit switch input
     backwardPolarity: 0                              # Polarity of backward limit switch
+    actual:
+      forward: 0               # Status 
+      backward: 0               # Status 
 #  home: block               # Ethercat entry for home switch
     stopAtBoth: false                                 # stop at both limits, note this is not in normal yaml schema, only for comissioning.
   homePolarity: 0                                     # Polarity of home switch
+  actual:
+    home: 0                        # home switch status
 #  interlock: block                # Ethercat entry for interlock switch input
   interlockPolarity: 0                                # Polarity of interlock switch
   analog:
 #    interlock: block              # Ethercat entry for analog interlock
     interlockPolarity: 0                              # 0: High value is bad, 1 = Low value is bad
-    rawLimit: 2000                                    # Analog raw limit
-    rawValue: 0                                       # Readback of actual analog interlock raw input value (runtime)
+    rawLimit: 2000                                    # Analog raw limit    
     enable: true                                      # Enable analog interlock default true if analog.interlock is set
+    actual:
+      rawValue: 0                                       # Readback of actual analog interlock raw input value (runtime)
 
 softlimits:
   # enable: block                                       # Enable soft limits

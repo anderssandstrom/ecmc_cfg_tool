@@ -269,6 +269,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._diagram_value_pairs = []
         self._changes_by_axis = {}
         self._current_values_by_axis = {}
+        self._axis_is_real_cache = {}
         self.default_axis_id = str(default_axis_id).strip() or '1'
         self.title_prefix = p
         self.sketch_image_path = str(sketch_image_path or '').strip()
@@ -279,6 +280,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._startup_axis_probe_ok = False
         self._axis_combo_updating = False
         self._axis_combo_open_new_instance = False
+        self._read_all_in_progress = False
+        self._read_all_cancel_requested = False
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._populate_table()
         self._log(f'Connected via backend: {self.client.backend}')
@@ -524,6 +527,24 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.changes_log.setPlaceholderText('Successful writes are tracked here for this session...')
         self.changes_log.setMaximumHeight(110)
         layout.addWidget(self.changes_log, stretch=0)
+        progress_row = QtWidgets.QHBoxLayout()
+        self.read_progress = QtWidgets.QProgressBar()
+        self.read_progress.setMinimum(0)
+        self.read_progress.setMaximum(100)
+        self.read_progress.setValue(0)
+        self.read_progress.setFormat('Read All: %v/%m')
+        self.read_progress.setVisible(False)
+        self.read_backend_label = QtWidgets.QLabel('')
+        self.read_backend_label.setVisible(False)
+        self.cancel_read_all_btn = QtWidgets.QPushButton('Cancel Read All')
+        self.cancel_read_all_btn.setAutoDefault(False)
+        self.cancel_read_all_btn.setDefault(False)
+        self.cancel_read_all_btn.setVisible(False)
+        self.cancel_read_all_btn.clicked.connect(lambda _=False: self._request_read_all_cancel())
+        progress_row.addWidget(self.read_progress, 1)
+        progress_row.addWidget(self.read_backend_label, 0)
+        progress_row.addWidget(self.cancel_read_all_btn, 0)
+        layout.addLayout(progress_row)
         self._refresh_axis_pick_combo()
 
     def _log(self, msg):
@@ -533,6 +554,42 @@ class CntrlWindow(QtWidgets.QMainWindow):
     def _log_change(self, msg):
         t = datetime.now().strftime('%H:%M:%S')
         self.changes_log.appendPlainText(f'[{t}] {msg}')
+
+    def _set_read_all_busy(self, busy, total=0):
+        self._read_all_in_progress = bool(busy)
+        self.read_all_btn.setEnabled(not busy)
+        if hasattr(self, 'copy_read_to_set_btn'):
+            self.copy_read_to_set_btn.setEnabled(not busy)
+        if busy:
+            self._read_all_cancel_requested = False
+            self.read_progress.setMaximum(max(1, int(total)))
+            self.read_progress.setValue(0)
+            self.read_progress.setVisible(True)
+            be = str(getattr(self.client, 'backend', '') or '').strip().lower()
+            self.read_backend_label.setText('CLI (slow)' if be == 'cli' else 'EPICS')
+            self.read_backend_label.setVisible(True)
+            self.cancel_read_all_btn.setEnabled(True)
+            self.cancel_read_all_btn.setVisible(True)
+        else:
+            self.read_progress.setVisible(False)
+            self.read_progress.setValue(0)
+            self.read_backend_label.setVisible(False)
+            self.cancel_read_all_btn.setVisible(False)
+            self.cancel_read_all_btn.setEnabled(False)
+        QtWidgets.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 5)
+
+    def _update_read_all_progress(self, done):
+        if not self._read_all_in_progress:
+            return
+        self.read_progress.setValue(max(0, int(done)))
+        QtWidgets.QApplication.processEvents(QtCore.QEventLoop.AllEvents, 5)
+
+    def _request_read_all_cancel(self):
+        if not self._read_all_in_progress:
+            return
+        self._read_all_cancel_requested = True
+        self.cancel_read_all_btn.setEnabled(False)
+        self.cancel_read_all_btn.setText('Cancelling...')
 
     def _ioc_prefix_for_title(self):
         if self.title_prefix:
@@ -820,13 +877,19 @@ class CntrlWindow(QtWidgets.QMainWindow):
 
     def _ensure_axis_is_real(self, axis_id, purpose='controller command', close_on_fail=False):
         axis = str(axis_id or '').strip() or self.default_axis_id
+        cached = self._axis_is_real_cache.get(axis)
+        if cached is not None:
+            return bool(cached)
         try:
             motor, typ = self._motor_type_for_axis(axis)
         except Exception as ex:
             self._log(f'Cannot verify axis type for axis {axis}: {ex}')
+            self._axis_is_real_cache[axis] = False
             return False
         if str(typ).upper() == 'REAL':
+            self._axis_is_real_cache[axis] = True
             return True
+        self._axis_is_real_cache[axis] = False
         motor_txt = f' [{motor}]' if motor else ''
         msg = f'Axis {axis}{motor_txt} is not REAL (Type={typ or "?"}); cannot {purpose}.'
         self._log(msg)
@@ -1859,35 +1922,44 @@ class CntrlWindow(QtWidgets.QMainWindow):
         QtCore.QTimer.singleShot(0, self.axis_pick_combo.showPopup)
 
     def _read_all_rows(self):
+        if self._read_all_in_progress:
+            return False
         if not self._ensure_axis_is_real(self.axis_all_edit.text().strip() or self.default_axis_id, purpose='read controller values'):
             return False
         if self.view_mode.currentText() in {'Diagram', 'Controller Sketch'}:
-            count = 0
-            for row_def, read_edit in self._diagram_read_rows:
-                if not self._read_row(row_def, self.axis_all_edit, read_edit):
+            rows = [(rd, self.axis_all_edit, re) for rd, re in self._diagram_read_rows if rd and rd.get('get')]
+        else:
+            rows = []
+            by_name = {r.get('name'): r for r in self.rows}
+            for r in range(self.table.rowCount()):
+                name_item = self.table.item(r, 0)
+                axis_edit = self.table.cellWidget(r, 1)
+                read_edit = self.table.cellWidget(r, 4)
+                if name_item is None or axis_edit is None or read_edit is None:
+                    continue
+                name = name_item.text().strip()
+                row_def = by_name.get(name)
+                if not row_def or not row_def.get('get'):
+                    continue
+                rows.append((row_def, axis_edit, read_edit))
+
+        count = 0
+        self._set_read_all_busy(True, total=len(rows))
+        try:
+            for row_def, axis_edit, read_edit in rows:
+                if self._read_all_cancel_requested:
+                    self._log(f'Read All cancelled ({count}/{len(rows)})')
+                    return False
+                if not self._read_row(row_def, axis_edit, read_edit, quiet=True):
                     self._log(f'Read All aborted after {count} rows (read failed: {row_def.get("name", "?")})')
                     return False
                 count += 1
+                self._update_read_all_progress(count)
             self._log(f'Read All completed ({count} rows)')
             return True
-
-        count = 0
-        for r in range(self.table.rowCount()):
-            name_item = self.table.item(r, 0)
-            axis_edit = self.table.cellWidget(r, 1)
-            read_edit = self.table.cellWidget(r, 4)
-            if name_item is None or axis_edit is None or read_edit is None:
-                continue
-            name = name_item.text().strip()
-            row_def = next((x for x in self.rows if x.get('name') == name), None)
-            if not row_def or not row_def.get('get'):
-                continue
-            if not self._read_row(row_def, axis_edit, read_edit):
-                self._log(f'Read All aborted after {count} rows (read failed: {name})')
-                return False
-            count += 1
-        self._log(f'Read All completed ({count} rows)')
-        return True
+        finally:
+            self._set_read_all_busy(False)
+            self.cancel_read_all_btn.setText('Cancel Read All')
 
     def _copy_all_read_to_set(self):
         copied = 0
@@ -2002,7 +2074,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         matched = self._values_match_text(getattr(set_edit, 'text', lambda: '')(), getattr(read_edit, 'text', lambda: '')())
         self._set_sketch_value_style(read_edit, matched)
 
-    def send_raw_command(self, cmd):
+    def send_raw_command(self, cmd, quiet=False, wait=True):
         pv = self.cmd_pv.text().strip()
         cmd = normalize_float_literals((cmd or '').strip())
         if not pv:
@@ -2010,17 +2082,20 @@ class CntrlWindow(QtWidgets.QMainWindow):
         if not cmd:
             return False, 'ERROR: Command text is empty'
         try:
-            self.client.put(pv, cmd, wait=True)
+            self.client.put(pv, cmd, wait=bool(wait))
             msg = f'CMD -> {pv} ({len(cmd)} chars): {cmd}'
-            self._log(msg)
+            if not quiet:
+                self._log(msg)
             return True, msg
         except Exception as ex:
             msg = f'ERROR sending command ({len(cmd)} chars): {ex} | CMD={cmd}'
-            self._log(msg)
+            if not quiet:
+                self._log(msg)
             return False, msg
 
-    def read_raw_command(self, cmd):
-        ok, msg = self.send_raw_command(cmd)
+    def read_raw_command(self, cmd, quiet=False):
+        fast_cli = bool(quiet and getattr(self.client, 'backend', '') == 'cli')
+        ok, msg = self.send_raw_command(cmd, quiet=quiet, wait=(not fast_cli))
         if not ok:
             return False, msg
         qp = self.qry_pv.text().strip()
@@ -2028,17 +2103,19 @@ class CntrlWindow(QtWidgets.QMainWindow):
             return True, f'Command sent, no QRY PV configured: {cmd}'
         try:
             proc_pv = _proc_pv_for_readback(qp)
-            self.client.put(proc_pv, 1, wait=True)
+            self.client.put(proc_pv, 1, wait=(not fast_cli))
             val = self.client.get(qp, as_string=True)
             msg = f'QRY <- {qp}: {val}'
-            self._log(msg)
+            if not quiet:
+                self._log(msg)
             return True, msg
         except Exception as ex:
             msg = f'ERROR query read: {ex}'
-            self._log(msg)
+            if not quiet:
+                self._log(msg)
             return False, msg
 
-    def _read_row(self, row_def, axis_edit, read_edit):
+    def _read_row(self, row_def, axis_edit, read_edit, quiet=False):
         if not self._ensure_axis_is_real(axis_edit.text(), purpose=f'read {row_def.get("name","controller value")}'):
             if read_edit is not None:
                 read_edit.setText('Axis Type != REAL')
@@ -2048,7 +2125,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
             read_edit.setText(err)
             self._set_sketch_value_style(read_edit, False)
             return False
-        ok, msg = self.read_raw_command(cmd)
+        ok, msg = self.read_raw_command(cmd, quiet=quiet)
         if ok and ': ' in msg:
             val = msg.split(': ', 1)[1].strip()
             disp_val = compact_float_text(val)
