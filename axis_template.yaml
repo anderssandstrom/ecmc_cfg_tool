@@ -182,7 +182,7 @@ input:
       forward: 0               # Status 
       backward: 0               # Status 
 #  home: block               # Ethercat entry for home switch
-    stopAtBoth: false                                 # stop at both limits, note this is not in normal yaml schema, only for comissioning.
+    stopAtAny: false                                 # stop at both limits, note this is not in normal yaml schema, only for comissioning.
   homePolarity: 0                                     # Polarity of home switch
   actual:
     home: 0                        # home switch status
