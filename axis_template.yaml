@@ -1,8 +1,8 @@
 axis:
-  # id: block                                               # Axis id
-  # type: block                                         # this is for future selection of axis type
-  mode: 0                                                # readonly supported mode, CSV and CSP, defaults CSV
-  # parameters: block                              # additional parameters      
+  # id: block                                          # Axis id
+  # type: block                                        # this is for future selection of axis type
+  mode: 0                                              # readonly supported mode, CSV=0 and CSP=1, CSP_PC=2 (only readback)
+  # parameters: block                                  # additional parameters      
   #                                                       "powerAutoOnOff=<value>;"  //2: What you want, 1:do not use, 0 to disable
   #                                                       "powerOffDelay=<value>:"
   #                                                       "powerOnDelay=<value>;"
