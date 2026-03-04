@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 try:
@@ -18,6 +19,12 @@ PLACEHOLDER_RE = re.compile(r'<([^>]+)>')
 FLOAT_LITERAL_RE = re.compile(r'(?<![A-Za-z0-9_])([+-]?(?:(?:\d+\.\d*)|(?:\.\d+))(?:[eE][+-]?\d+)?)(?![A-Za-z0-9_])')
 FLOAT_DISPLAY_RE = re.compile(r'^[+-]?(?:(?:\d+\.\d*)|(?:\.\d+)|(?:\d+(?:\.\d*)?[eE][+-]?\d+)|(?:\.\d+[eE][+-]?\d+))$')
 FLOAT_DISPLAY_COMMA_RE = re.compile(r'^[+-]?(?:(?:\d+,\d*)|(?:,\d+)|(?:\d+(?:,\d*)?[eE][+-]?\d+)|(?:,\d+[eE][+-]?\d+))$')
+QRY_ERROR_PREFIX_RE = re.compile(
+    r'^(?:error|err\b|failed|fail\b|invalid|unknown\b|exception|timeout|denied|blocked|'
+    r'not\s+allowed|cancel(?:ed|led)\b)'
+)
+ERROR_CODE_RE = re.compile(r'Error:\s*([A-Za-z0-9_.+-]+)', flags=re.IGNORECASE)
+LOCAL_ERROR_DB_NAME = 'ecmc_error_codes.json'
 
 
 class EpicsClient:
@@ -281,6 +288,78 @@ def compact_query_message_value(msg):
         return s
     head, val = s.rsplit(': ', 1)
     return f'{head}: {compact_float_text(val)}'
+
+
+def query_value_indicates_error(value):
+    s = str(value or '').strip()
+    if not s:
+        return False
+    low = s.lower()
+    # Treat explicit "no error"/"ok" as success even if they contain "error".
+    if low.startswith('no error') or low == 'ok' or low.startswith('ok '):
+        return False
+    return bool(QRY_ERROR_PREFIX_RE.match(low))
+
+
+def extract_error_code(text):
+    s = str(text or '')
+    m = ERROR_CODE_RE.search(s)
+    if m:
+        return m.group(1).strip()
+    return ''
+
+
+def parse_error_code(code_text):
+    s = str(code_text or '').strip()
+    if not s:
+        return None
+    s = s.rstrip('.,;:)]}')
+    try:
+        if s.lower().startswith('0x'):
+            return int(s, 16)
+        return int(s, 10)
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=8)
+def load_local_error_name_map(db_path=''):
+    base_dir = Path(__file__).resolve().parent
+    p = Path(str(db_path).strip()) if str(db_path or '').strip() else (base_dir / LOCAL_ERROR_DB_NAME)
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text())
+    except Exception:
+        return {}
+    items = data.get('errors', []) if isinstance(data, dict) else []
+    out = {}
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        name = str(it.get('name', '') or '').strip()
+        if not name:
+            continue
+        try:
+            out[int(it.get('code_dec'))] = name
+        except Exception:
+            continue
+    return out
+
+
+def summarize_error_text(text, error_name_by_code=None):
+    raw = str(text or '').strip()
+    code = extract_error_code(raw)
+    if not code:
+        return raw
+    code_num = parse_error_code(code)
+    code_txt = str(code_num) if code_num is not None else code
+    name = ''
+    if error_name_by_code and code_num is not None:
+        name = str(error_name_by_code.get(code_num, '') or '').strip()
+    if name:
+        return f'Error:{code_txt} ({name})'
+    return f'Error:{code_txt}'
 
 
 class CompactDoubleSpinBox(QtWidgets.QDoubleSpinBox):
@@ -593,8 +672,8 @@ class CommandEditorRow(QtWidgets.QGroupBox):
 
     def _write_command(self):
         cmd = self.command_text().strip()
-        ok, msg = self.parent_window.send_raw_command(cmd)
-        self.result.setText(msg)
+        ok, msg = self.parent_window.read_raw_command(cmd)
+        self.result.setText(compact_query_message_value(msg))
 
     def _read_command(self):
         cmd = self.command_text().strip()
@@ -616,8 +695,8 @@ class MultiCommandDialog(QtWidgets.QDialog):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(4)
         info = QtWidgets.QLabel(
-            'Edit parameters per command. "Write" sends command to CMD PV. '
-            '"Read" sends command to CMD PV and then reads QRY PV.'
+            'Edit parameters per command. "Write" and "Read" both send command '
+            'to CMD PV and then read QRY PV.'
         )
         info.setWordWrap(True)
         layout.addWidget(info)
@@ -890,8 +969,8 @@ class MultiCommandDialog(QtWidgets.QDialog):
             self.rows[row_idx]['result'].setText('Blocked command')
             self.parent_window._log('Blocked command cannot be written from Selected Panel')
             return
-        ok, msg = self.parent_window.send_raw_command(cmd)
-        self.rows[row_idx]['result'].setText(msg)
+        ok, msg = self.parent_window.read_raw_command(cmd)
+        self.rows[row_idx]['result'].setText(compact_query_message_value(msg))
 
     def _read_row(self, row_idx):
         cmd = self._build_command(row_idx).strip()
@@ -905,7 +984,7 @@ class MultiCommandDialog(QtWidgets.QDialog):
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, catalog_path, blocklist_path, default_cmd_pv, default_qry_pv, timeout):
+    def __init__(self, catalog_path, blocklist_path, default_cmd_pv, default_qry_pv, timeout, error_db_path=''):
         super().__init__()
         self.setWindowTitle('ecmc Command Parser')
         self.resize(640, 480)
@@ -915,6 +994,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._blocklist_load_error = ''
         self.blocked_commands = self._load_blocklist(blocklist_path)
         self._blocked_category_count = self._apply_blocked_category()
+        self.error_name_by_code = load_local_error_name_map(error_db_path)
         self._child_windows = []
 
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
@@ -924,6 +1004,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._log(f'Blocklist load error: {self._blocklist_load_error}')
         else:
             self._log(f'Blocklist loaded: {len(self.blocked_commands)} entries; marked {self._blocked_category_count} commands as Blocked')
+        if self.error_name_by_code:
+            self._log(f'Loaded local error DB: {len(self.error_name_by_code)} codes')
 
     def _load_catalog(self, path):
         p = Path(path)
@@ -1372,6 +1454,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         try:
             val = self.client.get(qp, as_string=True)
+            if query_value_indicates_error(val):
+                short = summarize_error_text(val, self.error_name_by_code)
+                msg = f'QRY ERROR <- {qp}: {short}'
+                self._log(msg)
+                self._set_readback_field(short)
+                return False, msg
             msg = compact_query_message_value(f'QRY <- {qp}: {val}')
             self._log(msg)
             self._set_readback_field(val)
@@ -1422,6 +1510,7 @@ def main():
     ap.add_argument('--cmd-pv', default='', help='Command PV name (overrides --prefix)')
     ap.add_argument('--qry-pv', default='', help='Query PV name/readback PV (overrides --prefix)')
     ap.add_argument('--timeout', type=float, default=2.0, help='EPICS timeout in seconds')
+    ap.add_argument('--error-db', default='', help='Path to local error DB JSON (default: ecmc_error_codes.json)')
     args = ap.parse_args()
 
     default_cmd_pv = args.cmd_pv.strip() if args.cmd_pv else _join_prefix_pv(args.prefix, 'MCU-Cmd.AOUT')
@@ -1438,6 +1527,7 @@ def main():
         default_cmd_pv=default_cmd_pv,
         default_qry_pv=default_qry_pv,
         timeout=args.timeout,
+        error_db_path=args.error_db,
     )
     w.show()
     sys.exit(app.exec_())

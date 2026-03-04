@@ -1,0 +1,1571 @@
+{
+  "generated_from": "/psi.ch/.nfs-server/nfs32.psi.ch/8210_8214/sandst_a/sources/ecmc_repos/ECMC/ecmc/devEcmcSup/main/ecmcErrorsList.h",
+  "count": 313,
+  "errors": [
+    {
+      "code_dec": 82688,
+      "code_hex": "0x14300",
+      "name": "ERROR_AXIS_OBJECTS_NULL_OR_EC_INIT_FAIL"
+    },
+    {
+      "code_dec": 82689,
+      "code_hex": "0x14301",
+      "name": "ERROR_AXIS_DRV_OBJECT_NULL"
+    },
+    {
+      "code_dec": 82690,
+      "code_hex": "0x14302",
+      "name": "ERROR_AXIS_ENC_OBJECT_NULL"
+    },
+    {
+      "code_dec": 82691,
+      "code_hex": "0x14303",
+      "name": "ERROR_AXIS_MON_OBJECT_NULL"
+    },
+    {
+      "code_dec": 82692,
+      "code_hex": "0x14304",
+      "name": "ERROR_AXIS_TRAJ_OBJECT_NULL"
+    },
+    {
+      "code_dec": 82693,
+      "code_hex": "0x14305",
+      "name": "ERROR_AXIS_CNTRL_OBJECT_NULL"
+    },
+    {
+      "code_dec": 82694,
+      "code_hex": "0x14306",
+      "name": "ERROR_AXIS_SEQ_ERROR_WRONG_SENSOR_EDGE"
+    },
+    {
+      "code_dec": 82695,
+      "code_hex": "0x14307",
+      "name": "ERROR_AXIS_UNDEFINED_TYPE"
+    },
+    {
+      "code_dec": 82696,
+      "code_hex": "0x14308",
+      "name": "ERROR_AXIS_FORWARD_TRANSFORM_NULL"
+    },
+    {
+      "code_dec": 82697,
+      "code_hex": "0x14309",
+      "name": "ERROR_AXIS_INVERSE_TRANSFORM_NULL"
+    },
+    {
+      "code_dec": 82698,
+      "code_hex": "0x1430A",
+      "name": "ERROR_AXIS_TRANSFORM_ERROR_OR_NOT_COMPILED"
+    },
+    {
+      "code_dec": 82699,
+      "code_hex": "0x1430B",
+      "name": "ERROR_AXIS_FUNCTION_NOT_SUPPRTED"
+    },
+    {
+      "code_dec": 82700,
+      "code_hex": "0x1430C",
+      "name": "ERROR_AXIS_MASTER_AXIS_OBJECT_NULL"
+    },
+    {
+      "code_dec": 82701,
+      "code_hex": "0x1430D",
+      "name": "ERROR_AXIS_MASTER_AXIS_ENCODER_NULL"
+    },
+    {
+      "code_dec": 82702,
+      "code_hex": "0x1430E",
+      "name": "ERROR_AXIS_MASTER_AXIS_TRAJECTORY_NULL"
+    },
+    {
+      "code_dec": 82703,
+      "code_hex": "0x1430F",
+      "name": "ERROR_AXIS_MASTER_AXIS_TRANSFORM_NULL"
+    },
+    {
+      "code_dec": 82704,
+      "code_hex": "0x14310",
+      "name": "ERROR_AXIS_SOURCE_TYPE_NOT_DEFINED"
+    },
+    {
+      "code_dec": 82705,
+      "code_hex": "0x14311",
+      "name": "ERROR_AXIS_CMD_NOT_ALLOWED_WHEN_ENABLED"
+    },
+    {
+      "code_dec": 82706,
+      "code_hex": "0x14312",
+      "name": "ERROR_AXIS_CONFIGURED_COUNT_ZERO"
+    },
+    {
+      "code_dec": 82707,
+      "code_hex": "0x14313",
+      "name": "ERROR_AXIS_CASCADED_AXIS_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 82708,
+      "code_hex": "0x14314",
+      "name": "ERROR_AXIS_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 82709,
+      "code_hex": "0x14315",
+      "name": "ERROR_AXIS_HARDWARE_STATUS_NOT_OK"
+    },
+    {
+      "code_dec": 82710,
+      "code_hex": "0x14316",
+      "name": "ERROR_AXIS_NOT_ENABLED"
+    },
+    {
+      "code_dec": 82711,
+      "code_hex": "0x14317",
+      "name": "ERROR_AXIS_AMPLIFIER_ENABLED_LOST"
+    },
+    {
+      "code_dec": 82712,
+      "code_hex": "0x14318",
+      "name": "ERROR_AXIS_SEQ_OBJECT_NULL"
+    },
+    {
+      "code_dec": 82713,
+      "code_hex": "0x14319",
+      "name": "ERROR_AXIS_COMMAND_NOT_ALLOWED_WHEN_ENABLED"
+    },
+    {
+      "code_dec": 82714,
+      "code_hex": "0x1431A",
+      "name": "ERROR_AXIS_ASSIGN_EXT_INTERFACE_TO_SEQ_FAILED"
+    },
+    {
+      "code_dec": 82715,
+      "code_hex": "0x1431B",
+      "name": "ERROR_AXIS_DATA_POINTER_NULL"
+    },
+    {
+      "code_dec": 82716,
+      "code_hex": "0x1431C",
+      "name": "ERROR_AXIS_BUSY"
+    },
+    {
+      "code_dec": 82717,
+      "code_hex": "0x1431D",
+      "name": "ERROR_AXIS_TRAJ_MASTER_SLAVE_IF_NULL"
+    },
+    {
+      "code_dec": 82718,
+      "code_hex": "0x1431E",
+      "name": "ERROR_AXIS_ENC_MASTER_SLAVE_IF_NULL"
+    },
+    {
+      "code_dec": 82719,
+      "code_hex": "0x1431F",
+      "name": "ERROR_AXIS_ASYN_PORT_OBJ_NULL"
+    },
+    {
+      "code_dec": 82720,
+      "code_hex": "0x14320",
+      "name": "ERROR_AXIS_ASYN_PRINT_TO_BUFFER_FAIL"
+    },
+    {
+      "code_dec": 82721,
+      "code_hex": "0x14321",
+      "name": "ERROR_AXIS_PRINT_TO_BUFFER_FAIL"
+    },
+    {
+      "code_dec": 82722,
+      "code_hex": "0x14322",
+      "name": "ERROR_AXIS_MODULO_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 82723,
+      "code_hex": "0x14323",
+      "name": "ERROR_AXIS_MODULO_TYPE_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 82724,
+      "code_hex": "0x14324",
+      "name": "ERROR_AXIS_FILTER_OBJECT_NULL"
+    },
+    {
+      "code_dec": 82725,
+      "code_hex": "0x14325",
+      "name": "ERROR_AXIS_PLC_OBJECT_NULL"
+    },
+    {
+      "code_dec": 82726,
+      "code_hex": "0x14326",
+      "name": "ERROR_AXIS_ENC_COUNT_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 82727,
+      "code_hex": "0x14327",
+      "name": "ERROR_AXIS_PRIMARY_ENC_ID_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 82728,
+      "code_hex": "0x14328",
+      "name": "ERROR_AXIS_SWITCH_PRIMARY_ENC_NOT_ALLOWED_WHEN_BUSY"
+    },
+    {
+      "code_dec": 82729,
+      "code_hex": "0x14329",
+      "name": "ERROR_AXIS_TRAJ_SRC_CHANGE_NOT_ALLOWED_WHEN_SAFETY_IL"
+    },
+    {
+      "code_dec": 82730,
+      "code_hex": "0x1432A",
+      "name": "ERROR_AXIS_SAFETY_IL_ACTIVE"
+    },
+    {
+      "code_dec": 82731,
+      "code_hex": "0x1432B",
+      "name": "ERROR_AXIS_SLAVED_AXIS_IN_ERROR"
+    },
+    {
+      "code_dec": 82732,
+      "code_hex": "0x1432C",
+      "name": "ERROR_AXIS_CMD_NOT_ALLOWED_IN_REALTIME"
+    },
+    {
+      "code_dec": 82733,
+      "code_hex": "0x1432D",
+      "name": "ERROR_AXIS_HW_NOT_READY"
+    },
+    {
+      "code_dec": 82734,
+      "code_hex": "0x1432E",
+      "name": "ERROR_AXIS_SLAVED_AXIS_INTERLOCK"
+    },
+    {
+      "code_dec": 82735,
+      "code_hex": "0x1432F",
+      "name": "ERROR_AXIS_AUTO_ENABLE_TIMEOUT"
+    },
+    {
+      "code_dec": 82736,
+      "code_hex": "0x14330",
+      "name": "ERROR_AXIS_BLOCKED"
+    },
+    {
+      "code_dec": 82944,
+      "code_hex": "0x14400",
+      "name": "ERROR_ENC_ASSIGN_ENTRY_FAILED"
+    },
+    {
+      "code_dec": 82945,
+      "code_hex": "0x14401",
+      "name": "ERROR_ENC_TYPE_NOT_SUPPORTED"
+    },
+    {
+      "code_dec": 82946,
+      "code_hex": "0x14402",
+      "name": "ERROR_ENC_SCALE_DENOM_ZERO"
+    },
+    {
+      "code_dec": 82947,
+      "code_hex": "0x14403",
+      "name": "ERROR_ENC_INVALID_RATE"
+    },
+    {
+      "code_dec": 82948,
+      "code_hex": "0x14404",
+      "name": "ERROR_ENC_ENTRY_NULL"
+    },
+    {
+      "code_dec": 82949,
+      "code_hex": "0x14405",
+      "name": "ERROR_ENC_ENTRY_READ_FAIL"
+    },
+    {
+      "code_dec": 82950,
+      "code_hex": "0x14406",
+      "name": "ERROR_ENC_TRANSFORM_NULL"
+    },
+    {
+      "code_dec": 82951,
+      "code_hex": "0x14407",
+      "name": "ERROR_ENC_EXT_MASTER_SOURCE_NULL"
+    },
+    {
+      "code_dec": 82952,
+      "code_hex": "0x14408",
+      "name": "ERROR_ENC_EXT_MASTER_SOURCE_COUNT_ZERO"
+    },
+    {
+      "code_dec": 82953,
+      "code_hex": "0x14409",
+      "name": "ERROR_ENC_INVALID_SAMPLE_TIME"
+    },
+    {
+      "code_dec": 82954,
+      "code_hex": "0x1440A",
+      "name": "ERROR_ENC_TRANSFORM_VALIDATION_ERROR"
+    },
+    {
+      "code_dec": 82955,
+      "code_hex": "0x1440B",
+      "name": "ERROR_ENC_SLAVE_INTERFACE_NULL"
+    },
+    {
+      "code_dec": 82956,
+      "code_hex": "0x1440C",
+      "name": "ERROR_ENC_VELOCITY_FILTER_NULL"
+    },
+    {
+      "code_dec": 82957,
+      "code_hex": "0x1440D",
+      "name": "ERROR_ENC_RAW_MASK_INVALID"
+    },
+    {
+      "code_dec": 82958,
+      "code_hex": "0x1440E",
+      "name": "ERROR_ENC_ABS_MASK_INVALID"
+    },
+    {
+      "code_dec": 82959,
+      "code_hex": "0x1440F",
+      "name": "ERROR_ENC_ABS_BIT_COUNT_INVALID"
+    },
+    {
+      "code_dec": 82960,
+      "code_hex": "0x14410",
+      "name": "ERROR_ENC_HW_ALARM_0"
+    },
+    {
+      "code_dec": 82961,
+      "code_hex": "0x14411",
+      "name": "ERROR_ENC_HW_ALARM_1"
+    },
+    {
+      "code_dec": 82962,
+      "code_hex": "0x14412",
+      "name": "ERROR_ENC_HW_ALARM_2"
+    },
+    {
+      "code_dec": 82963,
+      "code_hex": "0x14413",
+      "name": "ERROR_ENC_WARNING_READ_ENTRY_FAIL"
+    },
+    {
+      "code_dec": 82964,
+      "code_hex": "0x14414",
+      "name": "ERROR_ENC_ALARM_READ_ENTRY_FAIL"
+    },
+    {
+      "code_dec": 82965,
+      "code_hex": "0x14415",
+      "name": "ERROR_ENC_ASYN_PARAM_NULL"
+    },
+    {
+      "code_dec": 82966,
+      "code_hex": "0x14416",
+      "name": "ERROR_ENC_READY_READ_ENTRY_FAIL"
+    },
+    {
+      "code_dec": 82967,
+      "code_hex": "0x14417",
+      "name": "ERROR_ENC_NOT_READY"
+    },
+    {
+      "code_dec": 82968,
+      "code_hex": "0x14418",
+      "name": "ERROR_ENC_HOME_TRIGG_LINKS_INVALID"
+    },
+    {
+      "code_dec": 82969,
+      "code_hex": "0x14419",
+      "name": "ERROR_ENC_ENTRY_WRITE_FAIL"
+    },
+    {
+      "code_dec": 82970,
+      "code_hex": "0x1441A",
+      "name": "ERROR_ENC_LOOKUP_TABLE_LOAD_ERROR"
+    },
+    {
+      "code_dec": 82971,
+      "code_hex": "0x1441B",
+      "name": "ERROR_ENC_LOOKUP_TABLE_NOT_LOADED"
+    },
+    {
+      "code_dec": 82972,
+      "code_hex": "0x1441C",
+      "name": "ERROR_ENC_LOOKUP_TABLE_NOT_VALID"
+    },
+    {
+      "code_dec": 83456,
+      "code_hex": "0x14600",
+      "name": "ERROR_DRV_DRIVE_INTERLOCKED"
+    },
+    {
+      "code_dec": 83457,
+      "code_hex": "0x14601",
+      "name": "ERROR_DRV_ASSIGN_ENTRY_FAILED"
+    },
+    {
+      "code_dec": 83458,
+      "code_hex": "0x14602",
+      "name": "ERROR_DRV_SCALE_DENOM_ZERO"
+    },
+    {
+      "code_dec": 83459,
+      "code_hex": "0x14603",
+      "name": "ERROR_DRV_ENABLE_ENTRY_NULL"
+    },
+    {
+      "code_dec": 83460,
+      "code_hex": "0x14604",
+      "name": "ERROR_DRV_VEL_SET_ENTRY_NULL"
+    },
+    {
+      "code_dec": 83461,
+      "code_hex": "0x14605",
+      "name": "ERROR_DRV_ENABLED_ENTRY_NULL"
+    },
+    {
+      "code_dec": 83462,
+      "code_hex": "0x14606",
+      "name": "ERROR_DRV_ENABLED_READ_ENTRY_FAIL"
+    },
+    {
+      "code_dec": 83463,
+      "code_hex": "0x14607",
+      "name": "ERROR_DRV_BRAKE_ENTRY_NULL"
+    },
+    {
+      "code_dec": 83464,
+      "code_hex": "0x14608",
+      "name": "ERROR_DRV_REDUCE_TORQUE_ENTRY_NULL"
+    },
+    {
+      "code_dec": 83465,
+      "code_hex": "0x14609",
+      "name": "ERROR_DRV_COMMAND_NOT_ALLOWED_IN_AUTO_MODE"
+    },
+    {
+      "code_dec": 83466,
+      "code_hex": "0x1460A",
+      "name": "ERROR_DRV_BRAKE_OPEN_DELAY_TIME_INVALID"
+    },
+    {
+      "code_dec": 83467,
+      "code_hex": "0x1460B",
+      "name": "ERROR_DRV_BRAKE_CLOSE_AHEAD_TIME_INVALID"
+    },
+    {
+      "code_dec": 83468,
+      "code_hex": "0x1460C",
+      "name": "ERROR_DRV_ASYN_PORT_OBJ_NULL"
+    },
+    {
+      "code_dec": 83469,
+      "code_hex": "0x1460D",
+      "name": "ERROR_DRV_ASYN_PRINT_TO_BUFFER_FAIL"
+    },
+    {
+      "code_dec": 83470,
+      "code_hex": "0x1460E",
+      "name": "ERROR_DRV_HW_ALARM_0"
+    },
+    {
+      "code_dec": 83471,
+      "code_hex": "0x1460F",
+      "name": "ERROR_DRV_HW_ALARM_1"
+    },
+    {
+      "code_dec": 83472,
+      "code_hex": "0x14610",
+      "name": "ERROR_DRV_HW_ALARM_2"
+    },
+    {
+      "code_dec": 83473,
+      "code_hex": "0x14611",
+      "name": "ERROR_DRV_WARNING_READ_ENTRY_FAIL"
+    },
+    {
+      "code_dec": 83474,
+      "code_hex": "0x14612",
+      "name": "ERROR_DRV_ALARM_READ_ENTRY_FAIL"
+    },
+    {
+      "code_dec": 83475,
+      "code_hex": "0x14613",
+      "name": "ERROR_DRV_STATE_MACHINE_TIME_OUT"
+    },
+    {
+      "code_dec": 83476,
+      "code_hex": "0x14614",
+      "name": "ERROR_DRV_INVALID_DRV_MODE"
+    },
+    {
+      "code_dec": 83477,
+      "code_hex": "0x14615",
+      "name": "ERROR_DRV_CSP_ENC_NULL"
+    },
+    {
+      "code_dec": 84992,
+      "code_hex": "0x14C00",
+      "name": "ERROR_MON_ASSIGN_ENTRY_FAILED"
+    },
+    {
+      "code_dec": 84993,
+      "code_hex": "0x14C01",
+      "name": "ERROR_MON_ENTRY_READ_FAIL"
+    },
+    {
+      "code_dec": 84994,
+      "code_hex": "0x14C02",
+      "name": "ERROR_MON_ENTRY_HARD_BWD_NULL"
+    },
+    {
+      "code_dec": 84995,
+      "code_hex": "0x14C03",
+      "name": "ERROR_MON_ENTRY_HARD_FWD_NULL"
+    },
+    {
+      "code_dec": 84996,
+      "code_hex": "0x14C04",
+      "name": "ERROR_MON_ENTRY_HOME_NULL"
+    },
+    {
+      "code_dec": 84997,
+      "code_hex": "0x14C05",
+      "name": "ERROR_MON_ENTRY_HARDWARE_INTERLOCK_NULL"
+    },
+    {
+      "code_dec": 84998,
+      "code_hex": "0x14C06",
+      "name": "ERROR_MON_CNTRL_OUTPUT_EXCEED_LIMIT"
+    },
+    {
+      "code_dec": 84999,
+      "code_hex": "0x14C07",
+      "name": "ERROR_MON_MAX_VELOCITY_EXCEEDED"
+    },
+    {
+      "code_dec": 85000,
+      "code_hex": "0x14C08",
+      "name": "ERROR_MON_MAX_POSITION_LAG_EXCEEDED"
+    },
+    {
+      "code_dec": 85001,
+      "code_hex": "0x14C09",
+      "name": "ERROR_MON_EXTERNAL_HARDWARE_INTERLOCK"
+    },
+    {
+      "code_dec": 85002,
+      "code_hex": "0x14C0A",
+      "name": "ERROR_MON_CNTRL_OUTPUT_INCREASE_AT_LIMIT"
+    },
+    {
+      "code_dec": 85003,
+      "code_hex": "0x14C0B",
+      "name": "ERROR_MON_SOFT_LIMIT_FWD_INTERLOCK"
+    },
+    {
+      "code_dec": 85004,
+      "code_hex": "0x14C0C",
+      "name": "ERROR_MON_SOFT_LIMIT_BWD_INTERLOCK"
+    },
+    {
+      "code_dec": 85005,
+      "code_hex": "0x14C0D",
+      "name": "ERROR_MON_HARD_LIMIT_FWD_INTERLOCK"
+    },
+    {
+      "code_dec": 85006,
+      "code_hex": "0x14C0E",
+      "name": "ERROR_MON_HARD_LIMIT_BWD_INTERLOCK"
+    },
+    {
+      "code_dec": 85007,
+      "code_hex": "0x14C0F",
+      "name": "ERROR_MON_POS_LAG_INTERLOCK"
+    },
+    {
+      "code_dec": 85008,
+      "code_hex": "0x14C10",
+      "name": "ERROR_MON_BOTH_LIMIT_INTERLOCK"
+    },
+    {
+      "code_dec": 85009,
+      "code_hex": "0x14C11",
+      "name": "ERROR_MON_DISTANCE_TO_STOP_ZERO"
+    },
+    {
+      "code_dec": 85010,
+      "code_hex": "0x14C12",
+      "name": "ERROR_MON_ENTRY_EXT_INTERLOCK_NULL"
+    },
+    {
+      "code_dec": 85011,
+      "code_hex": "0x14C13",
+      "name": "ERROR_MON_UNEXPECTED_LIMIT_SWITCH_BEHAVIOUR_INTERLOCK"
+    },
+    {
+      "code_dec": 85012,
+      "code_hex": "0x14C14",
+      "name": "ERROR_MON_VELOCITY_DIFFERENCE_EXCEEDED"
+    },
+    {
+      "code_dec": 85013,
+      "code_hex": "0x14C15",
+      "name": "ERROR_MON_TOL_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 85014,
+      "code_hex": "0x14C16",
+      "name": "ERROR_MON_TIME_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 85015,
+      "code_hex": "0x14C17",
+      "name": "ERROR_MON_POLARITY_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 85016,
+      "code_hex": "0x14C18",
+      "name": "ERROR_MON_ENTRY_ANALOG_INTERLOCK_NULL"
+    },
+    {
+      "code_dec": 85017,
+      "code_hex": "0x14C19",
+      "name": "ERROR_MON_STALL"
+    },
+    {
+      "code_dec": 85248,
+      "code_hex": "0x14D00",
+      "name": "ERROR_SEQ_TRAJ_NULL"
+    },
+    {
+      "code_dec": 85249,
+      "code_hex": "0x14D01",
+      "name": "ERROR_SEQ_ENC_NULL"
+    },
+    {
+      "code_dec": 85250,
+      "code_hex": "0x14D02",
+      "name": "ERROR_SEQ_MON_NULL"
+    },
+    {
+      "code_dec": 85251,
+      "code_hex": "0x14D03",
+      "name": "ERROR_SEQ_CNTRL_NULL"
+    },
+    {
+      "code_dec": 85252,
+      "code_hex": "0x14D04",
+      "name": "ERROR_SEQ_SEQ_FAILED"
+    },
+    {
+      "code_dec": 85253,
+      "code_hex": "0x14D05",
+      "name": "ERROR_SEQ_COMMAND_NOT_SUPPORTED"
+    },
+    {
+      "code_dec": 85254,
+      "code_hex": "0x14D06",
+      "name": "ERROR_SEQ_SOFT_LIMIT_FWD"
+    },
+    {
+      "code_dec": 85255,
+      "code_hex": "0x14D07",
+      "name": "ERROR_SEQ_SOFT_LIMIT_BWD"
+    },
+    {
+      "code_dec": 85256,
+      "code_hex": "0x14D08",
+      "name": "ERROR_SEQ_TIMEOUT"
+    },
+    {
+      "code_dec": 85257,
+      "code_hex": "0x14D09",
+      "name": "ERROR_SEQ_CMD_UNDEFINED"
+    },
+    {
+      "code_dec": 85258,
+      "code_hex": "0x14D0A",
+      "name": "ERROR_SEQ_CMD_DATA_UNDEFINED"
+    },
+    {
+      "code_dec": 85259,
+      "code_hex": "0x14D0B",
+      "name": "ERROR_SEQ_EXTERNAL_DATA_INTERFACE_NULL"
+    },
+    {
+      "code_dec": 85260,
+      "code_hex": "0x14D0C",
+      "name": "ERROR_SEQ_NO_HOME_SWITCH_FLANK"
+    },
+    {
+      "code_dec": 85261,
+      "code_hex": "0x14D0D",
+      "name": "ERROR_SEQ_NO_SECOND_HOME_SWITCH_FLANK"
+    },
+    {
+      "code_dec": 85262,
+      "code_hex": "0x14D0E",
+      "name": "ERROR_SEQ_ERROR_ABS_BIT_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 85263,
+      "code_hex": "0x14D0F",
+      "name": "ERROR_SEQ_ERROR_POSITION_SANITY_CHECK_FAILED"
+    },
+    {
+      "code_dec": 85264,
+      "code_hex": "0x14D10",
+      "name": "ERROR_SEQ_ERROR_ACCELERATION_ZERO"
+    },
+    {
+      "code_dec": 85265,
+      "code_hex": "0x14D11",
+      "name": "ERROR_SEQ_ERROR_DECELERATION_ZERO"
+    },
+    {
+      "code_dec": 85266,
+      "code_hex": "0x14D12",
+      "name": "ERROR_SEQ_ERROR_VELOCITY_ZERO"
+    },
+    {
+      "code_dec": 85267,
+      "code_hex": "0x14D13",
+      "name": "ERROR_SEQ_ABS_OVER_UNDER_FLOW_ERROR"
+    },
+    {
+      "code_dec": 85268,
+      "code_hex": "0x14D14",
+      "name": "ERROR_SEQ_LATCH_COUNT_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 85269,
+      "code_hex": "0x14D15",
+      "name": "ERROR_SEQ_TARGET_POS_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 85270,
+      "code_hex": "0x14D16",
+      "name": "ERROR_SEQ_MOTION_CMD_NOT_ENABLED"
+    },
+    {
+      "code_dec": 85271,
+      "code_hex": "0x14D17",
+      "name": "ERROR_SEQ_HOME_POST_MOVE_FAILED"
+    },
+    {
+      "code_dec": 85272,
+      "code_hex": "0x14D18",
+      "name": "ERROR_SEQ_HOME_ENC_SOURCE_NOT_INTERNAL"
+    },
+    {
+      "code_dec": 85273,
+      "code_hex": "0x14D19",
+      "name": "ERROR_SEQ_HOME_SEQ_NOT_SUPPORTED"
+    },
+    {
+      "code_dec": 85274,
+      "code_hex": "0x14D1A",
+      "name": "ERROR_SEQ_HOME_NOT_ALLOWED"
+    },
+    {
+      "code_dec": 85275,
+      "code_hex": "0x14D1B",
+      "name": "ERROR_SEQ_PVT_OBJECT_BUSY"
+    },
+    {
+      "code_dec": 85276,
+      "code_hex": "0x14D1C",
+      "name": "ERROR_SEQ_PVT_OBJECT_NULL"
+    },
+    {
+      "code_dec": 85278,
+      "code_hex": "0x14D1E",
+      "name": "ERROR_SEQ_PVT_ERROR"
+    },
+    {
+      "code_dec": 85504,
+      "code_hex": "0x14E00",
+      "name": "ERROR_TRAJ_EXT_ENC_NULL"
+    },
+    {
+      "code_dec": 85505,
+      "code_hex": "0x14E01",
+      "name": "ERROR_TRAJ_EXT_TRAJ_NULL"
+    },
+    {
+      "code_dec": 85506,
+      "code_hex": "0x14E02",
+      "name": "ERROR_TRAJ_NOT_ENABLED"
+    },
+    {
+      "code_dec": 85507,
+      "code_hex": "0x14E03",
+      "name": "ERROR_TRAJ_GEAR_RATIO_DENOM_ZERO"
+    },
+    {
+      "code_dec": 85508,
+      "code_hex": "0x14E04",
+      "name": "ERROR_TRAJ_SOFT_LIMIT_FWD_INTERLOCK"
+    },
+    {
+      "code_dec": 85509,
+      "code_hex": "0x14E05",
+      "name": "ERROR_TRAJ_SOFT_LIMIT_BWD_INTERLOCK"
+    },
+    {
+      "code_dec": 85510,
+      "code_hex": "0x14E06",
+      "name": "ERROR_TRAJ_HARD_LIMIT_FWD_INTERLOCK"
+    },
+    {
+      "code_dec": 85511,
+      "code_hex": "0x14E07",
+      "name": "ERROR_TRAJ_HARD_LIMIT_BWD_INTERLOCK"
+    },
+    {
+      "code_dec": 85512,
+      "code_hex": "0x14E08",
+      "name": "ERROR_TRAJ_POS_LAG_INTERLOCK"
+    },
+    {
+      "code_dec": 85513,
+      "code_hex": "0x14E09",
+      "name": "ERROR_TRAJ_BOTH_LIMIT_INTERLOCK"
+    },
+    {
+      "code_dec": 85514,
+      "code_hex": "0x14E0A",
+      "name": "ERROR_TRAJ_EXTERNAL_INTERLOCK"
+    },
+    {
+      "code_dec": 85515,
+      "code_hex": "0x14E0B",
+      "name": "ERROR_TRAJ_EXECUTE_BUT_NO_ENABLE"
+    },
+    {
+      "code_dec": 85516,
+      "code_hex": "0x14E0C",
+      "name": "ERROR_TRAJ_EXT_TRANSFORM_NULL"
+    },
+    {
+      "code_dec": 85517,
+      "code_hex": "0x14E0D",
+      "name": "ERROR_TRAJ_TRANSFORM_NOT_COMPILED"
+    },
+    {
+      "code_dec": 85518,
+      "code_hex": "0x14E0E",
+      "name": "ERROR_TRAJ_TRANSFORM_INTERLOCK_ERROR"
+    },
+    {
+      "code_dec": 85519,
+      "code_hex": "0x14E0F",
+      "name": "ERROR_TRAJ_TRANSFORM_NULL"
+    },
+    {
+      "code_dec": 85520,
+      "code_hex": "0x14E10",
+      "name": "ERROR_TRAJ_EXT_MASTER_SOURCE_NULL"
+    },
+    {
+      "code_dec": 85521,
+      "code_hex": "0x14E11",
+      "name": "ERROR_TRAJ_EXT_MASTER_SOURCE_COUNT_ZERO"
+    },
+    {
+      "code_dec": 85522,
+      "code_hex": "0x14E12",
+      "name": "ERROR_TRAJ_INVALID_SAMPLE_TIME"
+    },
+    {
+      "code_dec": 85523,
+      "code_hex": "0x14E13",
+      "name": "ERROR_TRAJ_TRANSFORM_VALIDATION_ERROR"
+    },
+    {
+      "code_dec": 85524,
+      "code_hex": "0x14E14",
+      "name": "ERROR_TRAJ_SLAVE_INTERFACE_NULL"
+    },
+    {
+      "code_dec": 85525,
+      "code_hex": "0x14E15",
+      "name": "ERROR_TRAJ_MAX_SPEED_INTERLOCK"
+    },
+    {
+      "code_dec": 85526,
+      "code_hex": "0x14E16",
+      "name": "ERROR_TRAJ_MOD_FACTOR_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 85527,
+      "code_hex": "0x14E17",
+      "name": "ERROR_TRAJ_MOD_TYPE_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 85528,
+      "code_hex": "0x14E18",
+      "name": "ERROR_TRAJ_MOD_POS_CHANGE_WHILE_BUSY_NOT_ALLOWED"
+    },
+    {
+      "code_dec": 85632,
+      "code_hex": "0x14E80",
+      "name": "ERROR_TRAJ_RUCKIG_ERROR"
+    },
+    {
+      "code_dec": 85633,
+      "code_hex": "0x14E81",
+      "name": "ERROR_TRAJ_RUCKIG_INVALID_INPUT"
+    },
+    {
+      "code_dec": 85634,
+      "code_hex": "0x14E82",
+      "name": "ERROR_TRAJ_RUCKIG_TRAJ_DURATION"
+    },
+    {
+      "code_dec": 85635,
+      "code_hex": "0x14E83",
+      "name": "ERROR_TRAJ_RUCKIG_POS_LIMITS"
+    },
+    {
+      "code_dec": 85636,
+      "code_hex": "0x14E84",
+      "name": "ERROR_TRAJ_RUCKIG_NO_PHASE_SYNC"
+    },
+    {
+      "code_dec": 85637,
+      "code_hex": "0x14E85",
+      "name": "ERROR_TRAJ_RUCKIG_EXE_TIME_CALC"
+    },
+    {
+      "code_dec": 85638,
+      "code_hex": "0x14E86",
+      "name": "ERROR_TRAJ_RUCKIG_SYNC_CALC"
+    },
+    {
+      "code_dec": 85639,
+      "code_hex": "0x14E87",
+      "name": "ERROR_TRAJ_RUCKIG_JERK_ZERO"
+    },
+    {
+      "code_dec": 85760,
+      "code_hex": "0x14F00",
+      "name": "ERROR_VIRT_AXIS_TRAJ_NULL"
+    },
+    {
+      "code_dec": 85761,
+      "code_hex": "0x14F01",
+      "name": "ERROR_VIRT_AXIS_CREATE_TRANSFORM_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 85762,
+      "code_hex": "0x14F02",
+      "name": "ERROR_VIRT_AXIS_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 85763,
+      "code_hex": "0x14F03",
+      "name": "ERROR_VIRT_AXIS_LINKED_AXIS_TRAJ_NULL"
+    },
+    {
+      "code_dec": 85764,
+      "code_hex": "0x14F04",
+      "name": "ERROR_VIRT_AXIS_INDEX_NULL"
+    },
+    {
+      "code_dec": 86016,
+      "code_hex": "0x15000",
+      "name": "ERROR_CNTRL_INVALID_SAMPLE_TIME"
+    },
+    {
+      "code_dec": 90112,
+      "code_hex": "0x16000",
+      "name": "ERROR_AXISGRP_ADD_GROUP_FAIL"
+    },
+    {
+      "code_dec": 90113,
+      "code_hex": "0x16001",
+      "name": "ERROR_AXISGRP_NOT_FOUND"
+    },
+    {
+      "code_dec": 131072,
+      "code_hex": "0x20000",
+      "name": "ERROR_MAIN_APP_MODE_NOT_SUPPORTED"
+    },
+    {
+      "code_dec": 131073,
+      "code_hex": "0x20001",
+      "name": "ERROR_MAIN_DEMO_EC_ACITVATE_FAILED"
+    },
+    {
+      "code_dec": 131074,
+      "code_hex": "0x20002",
+      "name": "ERROR_MAIN_AXIS_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131076,
+      "code_hex": "0x20004",
+      "name": "ERROR_MAIN_AXIS_OBJECT_NULL"
+    },
+    {
+      "code_dec": 131077,
+      "code_hex": "0x20005",
+      "name": "ERROR_MAIN_ENCODER_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131078,
+      "code_hex": "0x20006",
+      "name": "ERROR_MAIN_ENCODER_OBJECT_NULL"
+    },
+    {
+      "code_dec": 131079,
+      "code_hex": "0x20007",
+      "name": "ERROR_MAIN_CONTROLLER_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131080,
+      "code_hex": "0x20008",
+      "name": "ERROR_MAIN_CONTROLLER_OBJECT_NULL"
+    },
+    {
+      "code_dec": 131081,
+      "code_hex": "0x20009",
+      "name": "ERROR_MAIN_TRAJECTORY_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131082,
+      "code_hex": "0x2000A",
+      "name": "ERROR_MAIN_TRAJECTORY_OBJECT_NULL"
+    },
+    {
+      "code_dec": 131083,
+      "code_hex": "0x2000B",
+      "name": "ERROR_MAIN_DRIVE_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131084,
+      "code_hex": "0x2000C",
+      "name": "ERROR_MAIN_DRIVE_OBJECT_NULL"
+    },
+    {
+      "code_dec": 131085,
+      "code_hex": "0x2000D",
+      "name": "ERROR_MAIN_MONITOR_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131086,
+      "code_hex": "0x2000E",
+      "name": "ERROR_MAIN_MONITOR_OBJECT_NULL"
+    },
+    {
+      "code_dec": 131087,
+      "code_hex": "0x2000F",
+      "name": "ERROR_MAIN_AXIS_TRAJ_OBJECT_NULL"
+    },
+    {
+      "code_dec": 131088,
+      "code_hex": "0x20010",
+      "name": "ERROR_MAIN_EC_NOT_INITIALIZED"
+    },
+    {
+      "code_dec": 131089,
+      "code_hex": "0x20011",
+      "name": "ERROR_MAIN_EC_SLAVE_NULL"
+    },
+    {
+      "code_dec": 131090,
+      "code_hex": "0x20012",
+      "name": "ERROR_MAIN_EC_SM_NULL"
+    },
+    {
+      "code_dec": 131091,
+      "code_hex": "0x20013",
+      "name": "ERROR_MAIN_EC_PDO_NULL"
+    },
+    {
+      "code_dec": 131092,
+      "code_hex": "0x20014",
+      "name": "ERROR_MAIN_EC_ENTRY_NULL"
+    },
+    {
+      "code_dec": 131093,
+      "code_hex": "0x20015",
+      "name": "ERROR_MAIN_ENCODER_ENTRY_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131094,
+      "code_hex": "0x20016",
+      "name": "ERROR_MAIN_DRIVE_ENTRY_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131095,
+      "code_hex": "0x20017",
+      "name": "ERROR_MAIN_MONITOR_ENTRY_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131096,
+      "code_hex": "0x20018",
+      "name": "ERROR_MAIN_DIAG_AXIS_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131097,
+      "code_hex": "0x20019",
+      "name": "ERROR_MAIN_DIAG_AXIS_FREQ_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131098,
+      "code_hex": "0x2001A",
+      "name": "ERROR_MAIN_APP_MODE_ALREADY_RUNTIME"
+    },
+    {
+      "code_dec": 131099,
+      "code_hex": "0x2001B",
+      "name": "ERROR_MAIN_EC_ACTIVATE_FAILED"
+    },
+    {
+      "code_dec": 131100,
+      "code_hex": "0x2001C",
+      "name": "ERROR_MAIN_ENC_SET_SCALE_FAIL_DRV_ENABLED"
+    },
+    {
+      "code_dec": 131101,
+      "code_hex": "0x2001D",
+      "name": "ERROR_MAIN_AXIS_ERROR_EXECUTE_INTERLOCKED"
+    },
+    {
+      "code_dec": 131102,
+      "code_hex": "0x2001E",
+      "name": "ERROR_MAIN_VIRT_AXIS_FUNCTION_NOT_SUPPORTED"
+    },
+    {
+      "code_dec": 131103,
+      "code_hex": "0x2001F",
+      "name": "ERROR_MAIN_AXIS_TYPE_UNKNOWN"
+    },
+    {
+      "code_dec": 131104,
+      "code_hex": "0x20020",
+      "name": "ERROR_MAIN_SEQUENCE_OBJECT_NULL"
+    },
+    {
+      "code_dec": 131105,
+      "code_hex": "0x20021",
+      "name": "ERROR_MAIN_TRAJ_TRANSFORM_OBJECT_NULL"
+    },
+    {
+      "code_dec": 131106,
+      "code_hex": "0x20022",
+      "name": "ERROR_MAIN_ENC_TRANSFORM_OBJECT_NULL"
+    },
+    {
+      "code_dec": 131107,
+      "code_hex": "0x20023",
+      "name": "ERROR_MAIN_EXTERNAL_DATA_SOURCE_INVALID"
+    },
+    {
+      "code_dec": 131108,
+      "code_hex": "0x20024",
+      "name": "ERROR_MAIN_TRANSFORM_OUTPUT_VAR_MISSING"
+    },
+    {
+      "code_dec": 131109,
+      "code_hex": "0x20025",
+      "name": "ERROR_MAIN_DATA_RECORDER_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131110,
+      "code_hex": "0x20026",
+      "name": "ERROR_MAIN_DATA_RECORDER_NULL"
+    },
+    {
+      "code_dec": 131111,
+      "code_hex": "0x20027",
+      "name": "ERROR_MAIN_DATA_STORAGE_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131112,
+      "code_hex": "0x20028",
+      "name": "ERROR_MAIN_DATA_STORAGE_INVALID_SIZE"
+    },
+    {
+      "code_dec": 131113,
+      "code_hex": "0x20029",
+      "name": "ERROR_MAIN_DATA_STORAGE_NULL"
+    },
+    {
+      "code_dec": 131114,
+      "code_hex": "0x2002A",
+      "name": "ERROR_MAIN_EVENT_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131115,
+      "code_hex": "0x2002B",
+      "name": "ERROR_MAIN_EVENT_NULL"
+    },
+    {
+      "code_dec": 131116,
+      "code_hex": "0x2002C",
+      "name": "ERROR_MAIN_AXIS_NOT_ENABLED"
+    },
+    {
+      "code_dec": 131117,
+      "code_hex": "0x2002D",
+      "name": "ERROR_MAIN_MASTER_SLAVE_IF_NULL"
+    },
+    {
+      "code_dec": 131118,
+      "code_hex": "0x2002E",
+      "name": "ERROR_MAIN_PRINT_TO_BUFFER_FAIL"
+    },
+    {
+      "code_dec": 131119,
+      "code_hex": "0x2002F",
+      "name": "ERROR_MAIN_MEM_MAP_NULL"
+    },
+    {
+      "code_dec": 131120,
+      "code_hex": "0x20030",
+      "name": "ERROR_MAIN_AXIS_ASYN_PAR_FORMAT_ERROR"
+    },
+    {
+      "code_dec": 131121,
+      "code_hex": "0x20031",
+      "name": "ERROR_MAIN_ASYN_PORT_DRIVER_NULL"
+    },
+    {
+      "code_dec": 131122,
+      "code_hex": "0x20032",
+      "name": "ERROR_MAIN_EC_MASTER_NULL"
+    },
+    {
+      "code_dec": 131123,
+      "code_hex": "0x20033",
+      "name": "ERROR_MAIN_ECMC_COMMAND_FORMAT_ERROR"
+    },
+    {
+      "code_dec": 131124,
+      "code_hex": "0x20034",
+      "name": "ERROR_MAIN_ECMC_LINK_INVALID"
+    },
+    {
+      "code_dec": 131125,
+      "code_hex": "0x20035",
+      "name": "ERROR_MAIN_PLC_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131126,
+      "code_hex": "0x20036",
+      "name": "ERROR_MAIN_PLC_OBJECT_NULL"
+    },
+    {
+      "code_dec": 131127,
+      "code_hex": "0x20037",
+      "name": "ERROR_MAIN_PLCS_NULL"
+    },
+    {
+      "code_dec": 131128,
+      "code_hex": "0x20038",
+      "name": "ERROR_MAIN_PLCS_SKIPCYCLES_INVALID"
+    },
+    {
+      "code_dec": 131129,
+      "code_hex": "0x20039",
+      "name": "ERROR_MAIN_AXIS_EXTERNAL_COM_DISABLED"
+    },
+    {
+      "code_dec": 131130,
+      "code_hex": "0x2003A",
+      "name": "ERROR_MAIN_EXCEPTION"
+    },
+    {
+      "code_dec": 131131,
+      "code_hex": "0x2003B",
+      "name": "ERROR_MAIN_PARSER_UNKOWN_CMD"
+    },
+    {
+      "code_dec": 131132,
+      "code_hex": "0x2003C",
+      "name": "ERROR_MAIN_PARSER_BUFFER_NULL"
+    },
+    {
+      "code_dec": 131133,
+      "code_hex": "0x2003D",
+      "name": "ERROR_MAIN_PARSER_CMD_TO_LONG"
+    },
+    {
+      "code_dec": 131134,
+      "code_hex": "0x2003E",
+      "name": "ERROR_MAIN_PARSER_INVALID_ADS_FORMAT"
+    },
+    {
+      "code_dec": 131135,
+      "code_hex": "0x2003F",
+      "name": "ERROR_MAIN_PARSER_INVALID_ADS_PORT"
+    },
+    {
+      "code_dec": 131136,
+      "code_hex": "0x20040",
+      "name": "ERROR_MAIN_PARSER_INVALID_ADS_LEN"
+    },
+    {
+      "code_dec": 131137,
+      "code_hex": "0x20041",
+      "name": "ERROR_MAIN_PARSER_UNKNOWN_ADS_CMD"
+    },
+    {
+      "code_dec": 131138,
+      "code_hex": "0x20042",
+      "name": "ERROR_MAIN_PARSER_INVALID_ADS_OFFSET"
+    },
+    {
+      "code_dec": 131139,
+      "code_hex": "0x20043",
+      "name": "ERROR_MAIN_PARSER_INVALID_ADS_TYPE"
+    },
+    {
+      "code_dec": 131140,
+      "code_hex": "0x20044",
+      "name": "ERROR_MAIN_ASYN_CREATE_PARAM_FAIL"
+    },
+    {
+      "code_dec": 131141,
+      "code_hex": "0x20045",
+      "name": "ERROR_MAIN_MLOCKALL_FAIL"
+    },
+    {
+      "code_dec": 131142,
+      "code_hex": "0x20046",
+      "name": "ERROR_MAIN_EC_NULL"
+    },
+    {
+      "code_dec": 131143,
+      "code_hex": "0x20047",
+      "name": "ERROR_MAIN_EC_SDO_VERIFICATION_FAIL"
+    },
+    {
+      "code_dec": 131144,
+      "code_hex": "0x20048",
+      "name": "ERROR_MAIN_OBSOLETE_COMMAND"
+    },
+    {
+      "code_dec": 131145,
+      "code_hex": "0x20049",
+      "name": "ERROR_MAIN_FILTER_INVALID_SIZE"
+    },
+    {
+      "code_dec": 131146,
+      "code_hex": "0x2004A",
+      "name": "ERROR_MAIN_EC_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131147,
+      "code_hex": "0x2004B",
+      "name": "ERROR_MAIN_RT_MUTEX_NULL"
+    },
+    {
+      "code_dec": 131148,
+      "code_hex": "0x2004C",
+      "name": "ERROR_MAIN_EC_TIMEOUT_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131149,
+      "code_hex": "0x2004D",
+      "name": "ERROR_MAIN_SAMPLE_RATE_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131150,
+      "code_hex": "0x2004E",
+      "name": "ERROR_MAIN_SAMPLE_RATE_CHANGE_NOT_ALLOWED"
+    },
+    {
+      "code_dec": 131151,
+      "code_hex": "0x2004F",
+      "name": "ERROR_MAIN_PLUGIN_LIST_FULL"
+    },
+    {
+      "code_dec": 131152,
+      "code_hex": "0x20050",
+      "name": "ERROR_MAIN_PLUGIN_OBJECT_NULL"
+    },
+    {
+      "code_dec": 131153,
+      "code_hex": "0x20051",
+      "name": "ERROR_MAIN_PLUGIN_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131154,
+      "code_hex": "0x20052",
+      "name": "ERROR_MAIN_TRAJ_SOURCE_NOT_INTERNAL"
+    },
+    {
+      "code_dec": 131155,
+      "code_hex": "0x20053",
+      "name": "ERROR_MAIN_AXIS_COM_BLOCKED"
+    },
+    {
+      "code_dec": 131156,
+      "code_hex": "0x20054",
+      "name": "ERROR_MAIN_EC_SCAN_TIMEOUT"
+    },
+    {
+      "code_dec": 131157,
+      "code_hex": "0x20055",
+      "name": "ERROR_MAIN_AXIS_ALREADY_CREATED"
+    },
+    {
+      "code_dec": 131158,
+      "code_hex": "0x20056",
+      "name": "ERROR_EC_MAIN_DOMAIN_NULL"
+    },
+    {
+      "code_dec": 131159,
+      "code_hex": "0x20057",
+      "name": "ERROR_SHMGET_ERROR"
+    },
+    {
+      "code_dec": 131160,
+      "code_hex": "0x20058",
+      "name": "ERROR_SHMMAT_ERROR"
+    },
+    {
+      "code_dec": 131161,
+      "code_hex": "0x20059",
+      "name": "ERROR_SHM_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131162,
+      "code_hex": "0x2005A",
+      "name": "ERROR_SHM_NULL"
+    },
+    {
+      "code_dec": 131163,
+      "code_hex": "0x2005B",
+      "name": "ERROR_SEM_NULL"
+    },
+    {
+      "code_dec": 131164,
+      "code_hex": "0x2005C",
+      "name": "ERROR_MAIN_SAFETY_PLUGIN_ALREADY_LOADED"
+    },
+    {
+      "code_dec": 131165,
+      "code_hex": "0x2005D",
+      "name": "ERROR_LUT_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 131166,
+      "code_hex": "0x2005E",
+      "name": "ERROR_LUT_LOAD_ERROR"
+    },
+    {
+      "code_dec": 131167,
+      "code_hex": "0x2005F",
+      "name": "ERROR_PVT_CTRL_NULL"
+    },
+    {
+      "code_dec": 131168,
+      "code_hex": "0x20060",
+      "name": "ERROR_GROUP_NULL"
+    },
+    {
+      "code_dec": 131169,
+      "code_hex": "0x20061",
+      "name": "ERROR_MST_SLV_SM_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "code_dec": 155654,
+      "code_hex": "0x26006",
+      "name": "ERROR_EC_MAIN_ENTRY_NULL"
+    },
+    {
+      "code_dec": 155660,
+      "code_hex": "0x2600C",
+      "name": "ERROR_EC_MAIN_DOMAIN_DATA_FAILED"
+    },
+    {
+      "code_dec": 155669,
+      "code_hex": "0x26015",
+      "name": "ERROR_EC_ASYN_PORT_OBJ_NULL"
+    },
+    {
+      "code_dec": 155670,
+      "code_hex": "0x26016",
+      "name": "ERROR_EC_ASYN_PORT_CREATE_PARAM_FAIL"
+    },
+    {
+      "code_dec": 155671,
+      "code_hex": "0x26017",
+      "name": "ERROR_EC_ASYN_SKIP_CYCLES_INVALID"
+    },
+    {
+      "code_dec": 155684,
+      "code_hex": "0x26024",
+      "name": "ERROR_EC_REG_ASYN_PAR_BUFFER_OVERFLOW"
+    },
+    {
+      "code_dec": 1131264,
+      "code_hex": "0x114300",
+      "name": "WARNING_AXIS_ASYN_CMD_WHILE_BUSY"
+    },
+    {
+      "code_dec": 1131265,
+      "code_hex": "0x114301",
+      "name": "WARNING_AXIS_ASYN_CMD_DATA_ERROR"
+    },
+    {
+      "code_dec": 1131543,
+      "code_hex": "0x114417",
+      "name": "WARNING_ENC_NOT_READY"
+    },
+    {
+      "code_dec": 1132032,
+      "code_hex": "0x114600",
+      "name": "WARNING_DRV_WARNING_BIT_HIGH"
+    },
+    {
+      "code_dec": 1132033,
+      "code_hex": "0x114601",
+      "name": "WARNING_DRV_ENABLED_LOST"
+    },
+    {
+      "code_dec": 1133568,
+      "code_hex": "0x114C00",
+      "name": "WARNING_MON_SOFT_LIMIT_FWD_INTERLOCK"
+    },
+    {
+      "code_dec": 1133569,
+      "code_hex": "0x114C01",
+      "name": "WARNING_MON_SOFT_LIMIT_BWD_INTERLOCK"
+    },
+    {
+      "code_dec": 1133570,
+      "code_hex": "0x114C02",
+      "name": "WARNING_MON_HARD_LIMIT_FWD_INTERLOCK"
+    },
+    {
+      "code_dec": 1133571,
+      "code_hex": "0x114C03",
+      "name": "WARNING_MON_HARD_LIMIT_BWD_INTERLOCK"
+    },
+    {
+      "code_dec": 1133824,
+      "code_hex": "0x114D00",
+      "name": "WARNING_SEQ_SETPOINT_SOFTLIM_FWD_VILOATION"
+    },
+    {
+      "code_dec": 1133825,
+      "code_hex": "0x114D01",
+      "name": "WARNING_SEQ_SETPOINT_SOFTLIM_BWD_VILOATION"
+    },
+    {
+      "code_dec": 1133827,
+      "code_hex": "0x114D03",
+      "name": "WARNING_SEQ_MISSING_HOME_PARAMS"
+    },
+    {
+      "code_dec": 2293760,
+      "code_hex": "0x230000",
+      "name": "ERROR_AXIS_FILTER_ALLOC_FAIL"
+    }
+  ]
+}

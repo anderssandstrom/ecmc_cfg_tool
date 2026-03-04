@@ -9,9 +9,9 @@ from datetime import datetime
 from pathlib import Path
 
 try:
-    from PyQt5 import QtCore, QtWidgets
+    from PyQt5 import QtCore, QtGui, QtWidgets
 except Exception:
-    from PySide6 import QtCore, QtWidgets  # type: ignore
+    from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
 
 from ecmc_stream_qt import (
     CompactDoubleSpinBox,
@@ -20,10 +20,14 @@ from ecmc_stream_qt import (
     _proc_pv_for_readback,
     compact_float_text,
     normalize_float_literals,
+    query_value_indicates_error,
 )
 
 
 PLACEHOLDER_RE = re.compile(r"<([^>]+)>")
+SETPOINT_MATCH_BG = "#dff5dd"
+SETPOINT_MISMATCH_BG = "#e0e0e0"
+LOCAL_ERROR_DB_NAME = "ecmc_error_codes.json"
 
 
 class YNode:
@@ -293,7 +297,18 @@ def fill_axis_command(template, axis_id, value):
 
 
 class AxisYamlConfigWindow(QtWidgets.QMainWindow):
-    def __init__(self, catalog_path, yaml_path, mapping_path, default_cmd_pv, default_qry_pv, timeout, axis_id="1", title_prefix=""):
+    def __init__(
+        self,
+        catalog_path,
+        yaml_path,
+        mapping_path,
+        default_cmd_pv,
+        default_qry_pv,
+        timeout,
+        axis_id="1",
+        title_prefix="",
+        error_db_path="",
+    ):
         super().__init__()
         self._base_title = f"ecmc Axis Configurator [{title_prefix}]" if title_prefix else "ecmc Axis Configurator"
         self.setWindowTitle(self._base_title)
@@ -323,10 +338,38 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._axis_combo_open_new_instance = False
         self._read_all_in_progress = False
         self._read_all_cancel_requested = False
+        self._error_name_by_code = self._load_error_name_map(error_db_path)
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._load_yaml_tree()
         self._log(f"Connected via backend: {self.client.backend}")
+        if self._error_name_by_code:
+            self._log(f"Loaded local error DB: {len(self._error_name_by_code)} codes")
         QtCore.QTimer.singleShot(0, self._startup_axis_presence_check)
+
+    def _load_error_name_map(self, db_path):
+        script_dir = Path(__file__).resolve().parent
+        p = Path(str(db_path).strip()) if str(db_path or "").strip() else (script_dir / LOCAL_ERROR_DB_NAME)
+        if not p.exists():
+            return {}
+        try:
+            data = json.loads(p.read_text())
+        except Exception as ex:
+            self._log(f"Failed to load error DB {p}: {ex}")
+            return {}
+        items = data.get("errors", []) if isinstance(data, dict) else []
+        out = {}
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            code = it.get("code_dec")
+            name = str(it.get("name", "") or "").strip()
+            if not name:
+                continue
+            try:
+                out[int(code)] = name
+            except Exception:
+                continue
+        return out
 
     def _load_catalog(self, path):
         p = Path(path)
@@ -943,6 +986,9 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             "status": status,
         }
         self._leaf_rows.append(row)
+        self._update_row_setpoint_match_style(row)
+        set_edit.textChanged.connect(lambda _=None, rr=row: self._update_row_setpoint_match_style(rr))
+        read_edit.textChanged.connect(lambda _=None, rr=row: self._update_row_setpoint_match_style(rr))
         set_edit.returnPressed.connect(lambda rr=row: self._write_row(rr))
 
         if matched and not blocked:
@@ -968,6 +1014,90 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
     def _axis_id(self):
         a = self.axis_edit.text().strip()
         return a if a else self.axis_id_default
+
+    def _values_match_text(self, set_txt, read_txt):
+        a = str(set_txt or "").strip()
+        b = str(read_txt or "").strip()
+        if not a or not b:
+            return False
+        return compact_float_text(a) == compact_float_text(b)
+
+    def _update_row_setpoint_match_style(self, row):
+        if not row:
+            return
+        set_edit = row.get("set_edit")
+        read_edit = row.get("read_edit")
+        if set_edit is None or read_edit is None:
+            return
+        matched = self._values_match_text(set_edit.text(), read_edit.text())
+        pal = set_edit.palette()
+        pal.setColor(QtGui.QPalette.Base, QtGui.QColor(SETPOINT_MATCH_BG if matched else SETPOINT_MISMATCH_BG))
+        set_edit.setPalette(pal)
+
+    def _set_row_phase_status(self, row, phase, ok, msg=""):
+        p = str(phase or "").strip().lower()
+        if p not in {"write", "read"}:
+            return
+        prefix = "W" if p == "write" else "R"
+        if ok:
+            short = f"{prefix}:OK"
+            full = short
+        else:
+            err = str(msg or "ERR").strip() or "ERR"
+            code = self._extract_error_code(err)
+            if code:
+                code_num = self._parse_error_code(code)
+                code_txt = str(code_num) if code_num is not None else str(code)
+                short = f"{prefix}:Error:{code_txt}"
+                err_name = self._error_name_by_code.get(code_num) if code_num is not None else ""
+                if err_name:
+                    full = f"{prefix}:ERR Error:{code_txt} ({err_name})\n{err}"
+                else:
+                    full = f"{prefix}:ERR {err}"
+            else:
+                short = f"{prefix}:ERR"
+                full = f"{prefix}:ERR {err}"
+        row[f"{p}_status_short"] = short
+        row[f"{p}_status_full"] = full
+        self._refresh_row_status(row)
+
+    def _refresh_row_status(self, row):
+        status = row.get("status")
+        if status is None:
+            return
+        parts_short = []
+        parts_full = []
+        for p in ("write", "read"):
+            s = str(row.get(f"{p}_status_short", "") or "").strip()
+            f = str(row.get(f"{p}_status_full", "") or "").strip()
+            if s:
+                parts_short.append(s)
+            if f:
+                parts_full.append(f)
+        status.setText(" | ".join(parts_short))
+        status.setToolTip("\n".join(parts_full))
+
+    def _extract_error_code(self, text):
+        s = str(text or "")
+        m = re.search(r"Error:\s*([A-Za-z0-9_.+-]+)", s, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+        m = re.search(r"\bERR(?:OR)?\s*[:=]?\s*([A-Za-z0-9_.+-]+)", s, flags=re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+        return ""
+
+    def _parse_error_code(self, text):
+        s = str(text or "").strip()
+        if not s:
+            return None
+        s = s.rstrip(".,;:)]}")
+        try:
+            if s.lower().startswith("0x"):
+                return int(s, 16)
+            return int(s, 10)
+        except Exception:
+            return None
 
     def _set_axis_id(self, axis_id):
         a = str(axis_id or "").strip()
@@ -1430,6 +1560,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         try:
             self.client.put(_proc_pv_for_readback(qp), 1, wait=(not fast_cli))
             val = self.client.get(qp, as_string=True)
+            if query_value_indicates_error(val):
+                msg = f"QRY ERROR <- {qp}: {val}"
+                if not quiet:
+                    self._log(msg)
+                return False, msg
             msg = f"QRY <- {qp}: {val}"
             if not quiet:
                 self._log(msg)
@@ -1454,8 +1589,10 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             row["status"].setText("no value")
             return
         cmd = fill_axis_command(pair["set"], self._axis_id(), value)
-        ok, msg = self.send_raw_command(cmd)
-        row["status"].setText("OK" if ok else "ERR")
+        # Validate the setter command via QRY so command-level errors are
+        # reflected in W-status (not only transport-level put errors).
+        ok, msg = self.read_raw_command(cmd)
+        self._set_row_phase_status(row, "write", ok, msg=msg)
         if ok:
             axis_id = self._axis_id()
             self._record_change(axis_id, row.get("path", ""), value)
@@ -1478,7 +1615,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             return None
         cmd = fill_axis_command(pair["get"], self._axis_id(), "")
         ok, msg = self.read_raw_command(cmd, quiet=quiet)
-        row["status"].setText("OK" if ok else "ERR")
+        self._set_row_phase_status(row, "read", ok, msg=msg)
         if ok and ": " in msg:
             val = msg.split(": ", 1)[1].strip()
             disp_val = compact_float_text(val)
@@ -1568,6 +1705,7 @@ def main():
     ap.add_argument("--qry-pv", default="")
     ap.add_argument("--axis-id", default="1")
     ap.add_argument("--timeout", type=float, default=2.0)
+    ap.add_argument("--error-db", default="")
     args = ap.parse_args()
 
     default_cmd_pv = args.cmd_pv.strip() if args.cmd_pv else _join_prefix_pv(args.prefix, "MCU-Cmd.AOUT")
@@ -1583,6 +1721,7 @@ def main():
         timeout=args.timeout,
         axis_id=args.axis_id,
         title_prefix=args.prefix,
+        error_db_path=args.error_db,
     )
     w.show()
     sys.exit(app.exec_())

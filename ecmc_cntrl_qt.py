@@ -17,7 +17,10 @@ from ecmc_stream_qt import (
     _join_prefix_pv,
     _proc_pv_for_readback,
     compact_float_text,
+    load_local_error_name_map,
     normalize_float_literals,
+    query_value_indicates_error,
+    summarize_error_text,
 )
 
 
@@ -250,7 +253,17 @@ class ImageOverlayCanvas(QtWidgets.QWidget):
 
 
 class CntrlWindow(QtWidgets.QMainWindow):
-    def __init__(self, catalog_path, default_cmd_pv, default_qry_pv, timeout, default_axis_id='1', title_prefix='', sketch_image_path=''):
+    def __init__(
+        self,
+        catalog_path,
+        default_cmd_pv,
+        default_qry_pv,
+        timeout,
+        default_axis_id='1',
+        title_prefix='',
+        sketch_image_path='',
+        error_db_path='',
+    ):
         super().__init__()
         p = str(title_prefix or '').strip()
         self._base_title = f'ecmc Axis Controller Configurator [{p}]' if p else 'ecmc Axis Controller Configurator'
@@ -262,6 +275,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.resize(920, 504)
         self.client = EpicsClient(timeout=timeout)
         self.catalog = self._load_catalog(catalog_path)
+        self.error_name_by_code = load_local_error_name_map(error_db_path)
         self.rows = _build_pairs(self.catalog.get('commands', []), include_set_only=False)
         self.rows_all = _build_pairs(self.catalog.get('commands', []), include_set_only=True)
         self._rows_all_by_name = {r['name']: r for r in self.rows_all}
@@ -285,6 +299,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._populate_table()
         self._log(f'Connected via backend: {self.client.backend}')
+        if self.error_name_by_code:
+            self._log(f'Loaded local error DB: {len(self.error_name_by_code)} codes')
         QtCore.QTimer.singleShot(0, self._startup_axis_presence_check)
 
     def _load_catalog(self, path):
@@ -2105,6 +2121,12 @@ class CntrlWindow(QtWidgets.QMainWindow):
             proc_pv = _proc_pv_for_readback(qp)
             self.client.put(proc_pv, 1, wait=(not fast_cli))
             val = self.client.get(qp, as_string=True)
+            if query_value_indicates_error(val):
+                short = summarize_error_text(val, self.error_name_by_code)
+                msg = f'QRY ERROR <- {qp}: {short}'
+                if not quiet:
+                    self._log(msg)
+                return False, msg
             msg = f'QRY <- {qp}: {val}'
             if not quiet:
                 self._log(msg)
@@ -2137,7 +2159,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
                 self._update_value_match_visual(read_edit, read_edit)
             return True
         else:
-            read_edit.setText(msg)
+            read_edit.setText(summarize_error_text(msg, self.error_name_by_code))
             self._set_sketch_value_style(read_edit, False)
             return False
 
@@ -2185,6 +2207,7 @@ def main():
     ap.add_argument('--axis-id', default='1', help='Default axis id for Axis All')
     ap.add_argument('--sketch-image', default='', help='Path to background image for Controller Sketch overlay')
     ap.add_argument('--timeout', type=float, default=2.0, help='EPICS timeout in seconds')
+    ap.add_argument('--error-db', default='', help='Path to local error DB JSON (default: ecmc_error_codes.json)')
     args = ap.parse_args()
 
     default_cmd_pv = args.cmd_pv.strip() if args.cmd_pv else _join_prefix_pv(args.prefix, 'MCU-Cmd.AOUT')
@@ -2207,6 +2230,7 @@ def main():
         default_axis_id=args.axis_id,
         title_prefix=args.prefix,
         sketch_image_path=sketch_image,
+        error_db_path=args.error_db,
     )
     w.show()
     sys.exit(app.exec_())
