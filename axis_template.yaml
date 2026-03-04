@@ -24,7 +24,9 @@ axis:
       constantVelocity: true                           # Allow constant velocity
       positioning: true                                # Allow positioning
   autoEnable:                                          # ecmc auto enable of axis (Please use this instead of motor record version..)
+    autoEnableEnable: 0
     enableTimeout: 5.0                                 # If defined, ecmc tries to auto-enable for a maximum enableTimeout seconds.
+    autoDisableEnable: 0
     disableTimeout:   5.0                              # If defined, ecmc disables axis after idle (non busy) in disableTime seconds
     # atStartup: block                                 # Auto enable axis at ioc start, default False
   tweakDist: 2.0                                       # Tweak value (both ecmc interface and motor record tweak value)

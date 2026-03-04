@@ -2,6 +2,8 @@ yaml_key,getter,setter
 axis.mode,GetAxisDrvMode(<axisIndex>),
 axis.autoEnable.disableTimeout,GetAxisAutoDisableAfterTime(<axisIndex>),"Cfg.SetAxisAutoDisableAfterTime(<axisIndex>,<timeS>)"
 axis.autoEnable.enableTimeout,GetAxisAutoEnableTimeout(<axisIndex>),"Cfg.SetAxisAutoEnableTimeout(<axisIndex>,<timeS>)"
+axis.autoEnable.autoEnableEnable,"GetAxisEnableAutoEnable(<axisIndex>)","Cfg.SetAxisEnableAutoEnable(<axisIndex>,<enable>)"
+axis.autoEnable.autoDisableEnable,GetAxisEnableAutoDisable(<axisIndex>),"Cfg.SetAxisEnableAutoDisable(<axisIndex>,<enable>)"
 axis.features.allowSrcChangeWhenEnabled,GetAxisSrcChgEn(<axisIndex>),"Cfg.SetAxisSrcChgEn(<axisIndex>,<allow>)"
 axis.features.allowedFunctions.constantVelocity,GetAxisEnableConstVel(<axisIndex>),"Cfg.SetAxisEnableConstVel(<axisIndex>,<value>)"
 axis.features.allowedFunctions.homing,GetAxisEnableHome(<axisIndex>),"Cfg.SetAxisEnableHome(<axisIndex>,<value>)"
