@@ -1055,10 +1055,20 @@ class MotionWindow(QtWidgets.QMainWindow):
         if dlg is None:
             return
         try:
+            setattr(dlg, "_ecmc_stop_on_close", False)
             dlg.close()
         except Exception:
             pass
         self._jog_stop_dialog = None
+
+    def _on_jog_stop_dialog_closed(self, _result=0):
+        dlg = getattr(self, "_jog_stop_dialog", None)
+        if dlg is not None and not getattr(dlg, "_ecmc_stop_on_close", True):
+            self._jog_stop_dialog = None
+            return
+        self._jog_stop_dialog = None
+        if self._is_local_motion_active():
+            self.stop_motion()
 
     def _show_jog_stop_dialog(self, activity_label):
         self._close_jog_stop_dialog()
@@ -1066,6 +1076,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         dlg.setWindowTitle("Motion Active")
         dlg.setModal(False)
         dlg.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint, True)
+        dlg._ecmc_stop_on_close = True
         v = QtWidgets.QVBoxLayout(dlg)
         v.setContentsMargins(10, 10, 10, 10)
         v.setSpacing(8)
@@ -1098,7 +1109,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         btn_row.addWidget(kill_btn)
         v.addWidget(msg)
         v.addLayout(btn_row)
-        dlg.finished.connect(lambda _=0: setattr(self, "_jog_stop_dialog", None))
+        dlg.finished.connect(self._on_jog_stop_dialog_closed)
         self._jog_stop_dialog = dlg
         dlg.adjustSize()
         dlg.show()
