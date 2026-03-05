@@ -1,5 +1,5 @@
 yaml_key,getter,setter
-axis.mode,GetAxisDrvMode(<axisIndex>),
+axis.actual.mode,GetAxisDrvMode(<axisIndex>),
 axis.autoEnable.disableTimeout,GetAxisAutoDisableAfterTime(<axisIndex>),"Cfg.SetAxisAutoDisableAfterTime(<axisIndex>,<timeS>)"
 axis.autoEnable.enableTimeout,GetAxisAutoEnableTimeout(<axisIndex>),"Cfg.SetAxisAutoEnableTimeout(<axisIndex>,<timeS>)"
 axis.autoEnable.autoEnableEnable,"GetAxisEnableAutoEnable(<axisIndex>)","Cfg.SetAxisEnableAutoEnable(<axisIndex>,<enable>)"

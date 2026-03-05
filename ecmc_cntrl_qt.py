@@ -429,11 +429,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.changes_toggle_btn.toggled.connect(self._toggle_changes_log_visible)
         cfg.addWidget(self.log_toggle_btn, 4, 0)
         cfg.addWidget(self.changes_toggle_btn, 4, 1)
-        self.changed_yaml_btn = QtWidgets.QPushButton('Show Changed YAML')
-        self.changed_yaml_btn.setAutoDefault(False)
-        self.changed_yaml_btn.setDefault(False)
-        self.changed_yaml_btn.clicked.connect(self._show_changed_yaml_window)
-        top_row.addWidget(self.changed_yaml_btn)
+        self.yaml_btn = QtWidgets.QPushButton('Show YAML')
+        self.yaml_btn.setAutoDefault(False)
+        self.yaml_btn.setDefault(False)
+        self.yaml_btn.clicked.connect(self._show_yaml_window)
+        top_row.addWidget(self.yaml_btn)
         self.open_motion_btn = QtWidgets.QPushButton('Motion App')
         self.open_motion_btn.setAutoDefault(False)
         self.open_motion_btn.setDefault(False)
@@ -454,7 +454,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.caqtdm_axis_btn.clicked.connect(self._open_caqtdm_axis_panel)
         for w in (
             self.pv_cfg_toggle,
-            self.changed_yaml_btn,
+            self.yaml_btn,
             self.open_motion_btn,
             self.open_axis_btn,
         ):
@@ -1093,11 +1093,32 @@ class CntrlWindow(QtWidgets.QMainWindow):
         }
         return m.get(cmd_name, f'commands.{cmd_name}')
 
-    def _build_yaml_text_from_flat(self, axis_id, flat, title, changed_paths=None):
+    def _controller_yaml_relevant_names(self):
+        names = []
+        for row_def in self.rows_all:
+            name = str(row_def.get('name', '')).strip()
+            if not name:
+                continue
+            path = self._controller_yaml_key(name)
+            if path.startswith(('controller.', 'monitoring.target.', 'drive.', 'encoder.')):
+                names.append(name)
+        return names
+
+    def _build_yaml_text_from_flat(
+        self,
+        axis_id,
+        flat,
+        title,
+        changed_paths=None,
+        motor_name=None,
+        include_axis_group_metadata=True,
+    ):
         flat = dict(flat or {})
         changed_paths = set(changed_paths or [])
         if not flat:
             return f'# No values available for axis {axis_id}\n'
+        motor_name = str(motor_name or "").strip()
+        motor_comment = f" [{motor_name}]" if motor_name else ""
         tree = {}
         for name, value in sorted(flat.items()):
             path = self._controller_yaml_key(name)
@@ -1106,7 +1127,26 @@ class CntrlWindow(QtWidgets.QMainWindow):
             for part in parts[:-1]:
                 cur = cur.setdefault(part, {})
             cur[parts[-1]] = value
-        lines = [f'# {title} for axis {axis_id}', f'axisId: {self._yaml_scalar_text(axis_id)}']
+        if include_axis_group_metadata:
+            # Ensure axis group is present as lower-case key and keep it first in output.
+            axis_key = None
+            for k in tree.keys():
+                if str(k).lower() == "axis":
+                    axis_key = k
+                    break
+            if axis_key is None:
+                axis_key = "axis"
+                new_tree = {axis_key: {}}
+                new_tree.update(tree)
+                tree = new_tree
+            axis_node = tree.get(axis_key)
+            if not isinstance(axis_node, dict):
+                axis_node = {"value": axis_node}
+                tree[axis_key] = axis_node
+            axis_node = {"id": self._yaml_scalar_text(axis_id), **{k: axis_node[k] for k in axis_node if k != "id"}}
+            tree[axis_key] = axis_node
+
+        lines = [f'# {title} for axis {axis_id}{motor_comment}']
 
         def emit(node, indent=0, prefix=''):
             pad = ' ' * indent
@@ -1124,30 +1164,49 @@ class CntrlWindow(QtWidgets.QMainWindow):
         emit(tree, 0, '')
         return '\n'.join(lines) + '\n'
 
-    def _build_changed_yaml_text(self, axis_id):
-        return self._build_yaml_text_from_flat(axis_id, self._changes_by_axis.get(str(axis_id).strip(), {}), 'Changed controller values')
-
-    def _build_all_current_yaml_text(self, axis_id):
+    def _build_changed_yaml_text(self, axis_id, motor_name=None):
         axis = str(axis_id).strip()
-        current = dict(self._current_values_by_axis.get(axis, {}))
+        allowed = set(self._controller_yaml_relevant_names())
+        current_changes = {
+            k: v for k, v in self._changes_by_axis.get(axis, {}).items() if k in allowed
+        }
+        return self._build_yaml_text_from_flat(axis, current_changes, 'Changed controller values', motor_name=motor_name, include_axis_group_metadata=False)
+
+    def _build_all_current_yaml_text(self, axis_id, motor_name=None):
+        axis = str(axis_id).strip()
+        allowed = set(self._controller_yaml_relevant_names())
+        current = {
+            k: v
+            for k, v in self._current_values_by_axis.get(axis, {}).items()
+            if k in allowed
+        }
         for k, v in self._changes_by_axis.get(axis, {}).items():
-            current.setdefault(k, v)
-        for row_def in self.rows_all:
-            name = str(row_def.get('name', '')).strip()
-            if name:
-                current.setdefault(name, 'null')
-        changed_paths = {self._controller_yaml_key(k) for k in self._changes_by_axis.get(axis, {}).keys()}
+            if k in allowed:
+                current.setdefault(k, v)
+        for name in allowed:
+            current.setdefault(name, 'null')
+        changed_paths = {
+            self._controller_yaml_key(k)
+            for k in self._changes_by_axis.get(axis, {}).keys()
+            if k in allowed
+        }
         return self._build_yaml_text_from_flat(
             axis_id,
             current,
             'Current controller values (session-known)',
+            motor_name=motor_name,
             changed_paths=changed_paths,
         )
 
     def _show_changed_yaml_window(self):
         axis_id = self.axis_all_edit.text().strip() or self.default_axis_id
+        try:
+            motor_name = str(self._resolve_motor_record_name(axis_id) or "").strip()
+        except Exception:
+            motor_name = ""
+        suffix = f" [{motor_name}]" if motor_name else ""
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle(f'Changed YAML (Axis {axis_id})')
+        dlg.setWindowTitle(f'Changed YAML (Axis {axis_id}){suffix}')
         dlg.resize(640, 520)
         lay = QtWidgets.QVBoxLayout(dlg)
         lay.addWidget(QtWidgets.QLabel(f'Session controller writes for axis: {axis_id}'))
@@ -1164,12 +1223,55 @@ class CntrlWindow(QtWidgets.QMainWindow):
 
         def refresh_text():
             if mode_combo.currentIndex() == 0:
-                txt.setPlainText(self._build_changed_yaml_text(axis_id))
+                txt.setPlainText(self._build_changed_yaml_text(axis_id, motor_name=motor_name))
             else:
-                txt.setPlainText(self._build_all_current_yaml_text(axis_id))
+                txt.setPlainText(self._build_all_current_yaml_text(axis_id, motor_name=motor_name))
 
         mode_combo.currentIndexChanged.connect(lambda _=0: refresh_text())
         refresh_text()
+        btn_row = QtWidgets.QHBoxLayout()
+        copy_btn = QtWidgets.QPushButton('Copy')
+        copy_btn.setAutoDefault(False)
+        copy_btn.setDefault(False)
+        copy_btn.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(txt.toPlainText()))
+        close_btn = QtWidgets.QPushButton('Close')
+        close_btn.setAutoDefault(False)
+        close_btn.setDefault(False)
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(copy_btn)
+        btn_row.addStretch(1)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+        dlg.exec_()
+
+    def _show_yaml_window(self):
+        axis_id = self.axis_all_edit.text().strip() or self.default_axis_id
+        try:
+            motor_name = str(self._resolve_motor_record_name(axis_id) or "").strip()
+        except Exception:
+            motor_name = ""
+        suffix = f" [{motor_name}]" if motor_name else ""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(f'YAML (Axis {axis_id}){suffix}')
+        dlg.resize(640, 520)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lay.addWidget(QtWidgets.QLabel('Current controller YAML values (session-known).'))
+        filter_row = QtWidgets.QHBoxLayout()
+        changed_only_chk = QtWidgets.QCheckBox('Show only changed values')
+        filter_row.addWidget(changed_only_chk)
+        filter_row.addStretch(1)
+        lay.addLayout(filter_row)
+        txt = QtWidgets.QPlainTextEdit()
+        txt.setReadOnly(True)
+        txt.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
+        def refresh_text():
+            if changed_only_chk.isChecked():
+                txt.setPlainText(self._build_changed_yaml_text(axis_id, motor_name=motor_name))
+            else:
+                txt.setPlainText(self._build_all_current_yaml_text(axis_id, motor_name=motor_name))
+        changed_only_chk.toggled.connect(refresh_text)
+        refresh_text()
+        lay.addWidget(txt, 1)
         btn_row = QtWidgets.QHBoxLayout()
         copy_btn = QtWidgets.QPushButton('Copy')
         copy_btn.setAutoDefault(False)

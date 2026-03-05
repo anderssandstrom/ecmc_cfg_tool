@@ -409,10 +409,10 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.changes_toggle_btn.setAutoDefault(False)
         self.changes_toggle_btn.setDefault(False)
         self.changes_toggle_btn.clicked.connect(self._toggle_changes_panel)
-        self.changed_yaml_btn = QtWidgets.QPushButton("Show Changed YAML")
-        self.changed_yaml_btn.setAutoDefault(False)
-        self.changed_yaml_btn.setDefault(False)
-        self.changed_yaml_btn.clicked.connect(self._show_changed_yaml_window)
+        self.yaml_btn = QtWidgets.QPushButton("Show YAML")
+        self.yaml_btn.setAutoDefault(False)
+        self.yaml_btn.setDefault(False)
+        self.yaml_btn.clicked.connect(self._show_yaml_window)
         self.open_cntrl_btn = QtWidgets.QPushButton("Cntrl Cfg App")
         self.open_cntrl_btn.setAutoDefault(False)
         self.open_cntrl_btn.setDefault(False)
@@ -426,7 +426,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.axis_pick_combo.setMaximumWidth(300)
         self.axis_pick_combo.activated.connect(self._on_axis_combo_activated)
         top_row.addWidget(self.cfg_toggle_btn)
-        top_row.addWidget(self.changed_yaml_btn)
+        top_row.addWidget(self.yaml_btn)
         top_row.addWidget(self.open_cntrl_btn)
         top_row.addWidget(self.open_mtn_btn)
         top_row.addStretch(1)
@@ -456,7 +456,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         axis_apply_btn = QtWidgets.QPushButton("Apply Axis")
         axis_apply_btn.setAutoDefault(False)
         axis_apply_btn.setDefault(False)
-        axis_apply_btn.clicked.connect(lambda: self._read_and_copy_current_axis(reason="apply axis"))
+        axis_apply_btn.clicked.connect(lambda: self._read_and_copy_current_axis(reason="apply axis", allow_partial_copy=True))
         self.timeout_edit = CompactDoubleSpinBox()
         self.timeout_edit.setRange(0.1, 60.0)
         self.timeout_edit.setDecimals(1)
@@ -712,12 +712,25 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             return "'" + s.replace("'", "''") + "'"
         return s
 
-    def _build_yaml_text_from_flat(self, axis_id, flat, title, changed_paths=None, original_values=None):
+    def _build_yaml_text_from_flat(
+        self,
+        axis_id,
+        flat,
+        title,
+        changed_paths=None,
+        readonly_paths=None,
+        original_values=None,
+        motor_name=None,
+        include_axis_group_metadata=True,
+    ):
         flat = dict(flat or {})
         changed_paths = set(changed_paths or [])
+        readonly_paths = set(readonly_paths or [])
         original_values = dict(original_values or {})
         if not flat:
             return f"# No values available for axis {axis_id}\n"
+        motor_name = str(motor_name or "").strip()
+        motor_comment = f" [{motor_name}]" if motor_name else ""
 
         tree = {}
         for path, value in sorted(flat.items()):
@@ -732,17 +745,57 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             if parts:
                 cur[parts[-1]] = value
 
-        lines = [f"# {title} for axis {axis_id}", "axisId: " + self._yaml_scalar_text(axis_id)]
+        if include_axis_group_metadata:
+            # Ensure axis group is present as lower-case key and keep it first in output.
+            axis_key = None
+            for k in tree.keys():
+                if str(k).lower() == "axis":
+                    axis_key = k
+                    break
+            if axis_key is None:
+                axis_key = "axis"
+                new_tree = {axis_key: {}}
+                new_tree.update(tree)
+                tree = new_tree
+            axis_node = tree.get(axis_key)
+            if not isinstance(axis_node, dict):
+                axis_node = {"value": axis_node}
+                tree[axis_key] = axis_node
+            axis_node = {"id": self._yaml_scalar_text(axis_id), **{k: axis_node[k] for k in axis_node if k != "id"}}
+            tree[axis_key] = axis_node
 
-        def emit(node, indent=0, prefix=""):
+        lines = [f"# {title} for axis {axis_id}{motor_comment}"]
+
+        def emit(node, indent=0, prefix="", depth=0):
             pad = " " * indent
+            if depth == 0:
+                for idx, (k, v) in enumerate(node.items()):
+                    if idx > 0:
+                        lines.append("")
+                    path = f"{prefix}.{k}" if prefix else k
+                    if isinstance(v, dict):
+                        lines.append(f"{pad}{k}:")
+                        emit(v, indent + 2, path, 1)
+                    else:
+                        line = f"{pad}{k}: {self._yaml_scalar_text(v)}"
+                        if path in readonly_paths:
+                            line = f"{pad}# {k}: {self._yaml_scalar_text(v)}"
+                        if path in changed_paths:
+                            line += "  # CHANGED"
+                            if path in original_values:
+                                orig_txt = str(original_values.get(path, "")).replace("\n", "\\n")
+                                line += f", was {self._yaml_scalar_text(orig_txt)}"
+                        lines.append(line)
+                return
             for k, v in node.items():
                 path = f"{prefix}.{k}" if prefix else k
                 if isinstance(v, dict):
                     lines.append(f"{pad}{k}:")
-                    emit(v, indent + 2, path)
+                    emit(v, indent + 2, path, depth + 1)
                 else:
                     line = f"{pad}{k}: {self._yaml_scalar_text(v)}"
+                    if path in readonly_paths:
+                        line = f"{pad}# {k}: {self._yaml_scalar_text(v)}"
                     if path in changed_paths:
                         line += "  # CHANGED"
                         if path in original_values:
@@ -753,17 +806,34 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         emit(tree, 0, "")
         return "\n".join(lines) + "\n"
 
-    def _build_changed_yaml_text(self, axis_id):
+    def _build_changed_yaml_text(self, axis_id, motor_name=None, readonly_paths=None):
+        readonly_paths = set(readonly_paths or [])
         axis_key = str(axis_id).strip()
         return self._build_yaml_text_from_flat(
             axis_id,
             self._changes_by_axis.get(axis_key, {}),
             "Changed values",
+            include_axis_group_metadata=False,
+            motor_name=motor_name,
             changed_paths=set(self._changes_by_axis.get(axis_key, {}).keys()),
+            readonly_paths=readonly_paths,
             original_values=self._original_values_by_axis.get(axis_key, {}),
         )
 
-    def _build_all_current_yaml_text(self, axis_id):
+    def _get_readonly_yaml_paths(self):
+        out = set()
+        for row in self._leaf_rows:
+            path = str(row.get("path", "") or "").strip()
+            if not path:
+                continue
+            pair = row.get("pair")
+            set_cmd = str(pair.get("set", "")).strip() if isinstance(pair, dict) else ""
+            if not set_cmd:
+                out.add(path)
+        return out
+
+    def _build_all_current_yaml_text(self, axis_id, motor_name=None, readonly_paths=None):
+        readonly_paths = set(readonly_paths or self._get_readonly_yaml_paths())
         axis_key = str(axis_id).strip()
         current = dict(self._current_values_by_axis.get(axis_key, {}))
         changed = self._changes_by_axis.get(axis_key, {})
@@ -775,19 +845,43 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             path = str(row.get("path", "") or "")
             if path:
                 current.setdefault(path, "null")
+        if not self._axis_is_real(axis_key):
+            current = {
+                path: value
+                for path, value in current.items()
+                if not path.startswith(("drive.", "controller.", "drive", "controller"))
+            }
         changed_paths = set((changed or {}).keys())
+        if not self._axis_is_real(axis_key):
+            changed_paths = {
+                path
+                for path in changed_paths
+                if not path.startswith(("drive.", "controller.", "drive", "controller"))
+            }
+            readonly_paths = {
+                path
+                for path in readonly_paths
+                if not path.startswith(("drive.", "controller.", "drive", "controller"))
+            }
         return self._build_yaml_text_from_flat(
             axis_id,
             current,
             "Current values (session-known)",
+            motor_name=motor_name,
             changed_paths=changed_paths,
+            readonly_paths=readonly_paths,
             original_values=self._original_values_by_axis.get(axis_key, {}),
         )
 
     def _show_changed_yaml_window(self):
         axis_id = self._axis_id()
+        try:
+            motor_name = str(self._resolve_motor_record_name(axis_id) or "").strip()
+        except Exception:
+            motor_name = ""
+        suffix = f" [{motor_name}]" if motor_name else ""
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle(f"Changed YAML (Axis {axis_id})")
+        dlg.setWindowTitle(f"Changed YAML (Axis {axis_id}){suffix}")
         dlg.resize(640, 520)
         lay = QtWidgets.QVBoxLayout(dlg)
         info = QtWidgets.QLabel(f"Session changes for selected axis: {axis_id}")
@@ -805,9 +899,9 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
 
         def refresh_text():
             if mode_combo.currentIndex() == 0:
-                edit.setPlainText(self._build_changed_yaml_text(axis_id))
+                edit.setPlainText(self._build_changed_yaml_text(axis_id, motor_name=motor_name))
             else:
-                edit.setPlainText(self._build_all_current_yaml_text(axis_id))
+                edit.setPlainText(self._build_all_current_yaml_text(axis_id, motor_name=motor_name))
 
         mode_combo.currentIndexChanged.connect(lambda _=0: refresh_text())
         refresh_text()
@@ -824,6 +918,51 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         btns.addStretch(1)
         btns.addWidget(close_btn)
         lay.addLayout(btns)
+        dlg.exec_()
+
+    def _show_yaml_window(self):
+        axis_id = self._axis_id()
+        try:
+            motor_name = str(self._resolve_motor_record_name(axis_id) or "").strip()
+        except Exception:
+            motor_name = ""
+        suffix = f" [{motor_name}]" if motor_name else ""
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(f"YAML (Axis {axis_id}){suffix}")
+        dlg.resize(640, 520)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lay.addWidget(QtWidgets.QLabel("Current YAML structure (session-known)."))
+        filter_row = QtWidgets.QHBoxLayout()
+        changed_only_chk = QtWidgets.QCheckBox("Show only changed values")
+        filter_row.addWidget(changed_only_chk)
+        filter_row.addStretch(1)
+        lay.addLayout(filter_row)
+        txt = QtWidgets.QPlainTextEdit()
+        txt.setReadOnly(True)
+        txt.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
+
+        def refresh_text():
+            if changed_only_chk.isChecked():
+                txt.setPlainText(self._build_changed_yaml_text(axis_id, motor_name=motor_name))
+            else:
+                txt.setPlainText(self._build_all_current_yaml_text(axis_id, motor_name=motor_name))
+
+        changed_only_chk.toggled.connect(refresh_text)
+        refresh_text()
+        lay.addWidget(txt, 1)
+        btn_row = QtWidgets.QHBoxLayout()
+        copy_btn = QtWidgets.QPushButton("Copy")
+        copy_btn.setAutoDefault(False)
+        copy_btn.setDefault(False)
+        copy_btn.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(txt.toPlainText()))
+        close_btn = QtWidgets.QPushButton("Close")
+        close_btn.setAutoDefault(False)
+        close_btn.setDefault(False)
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(copy_btn)
+        btn_row.addStretch(1)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
         dlg.exec_()
 
     def _reload_yaml_from_edit(self):
@@ -899,6 +1038,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         return "\n".join(lines)
 
     def _add_tree_node(self, parent_item, node):
+        if self._is_virtual_axis_hidden_path(node.path):
+            return
         item = QtWidgets.QTreeWidgetItem([node.key])
         item.setData(0, QtCore.Qt.UserRole, node.path)
         if parent_item is None:
@@ -1103,9 +1244,15 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         a = str(axis_id or "").strip()
         if not a:
             return
+        prev_axis = self._axis_id()
         self.axis_edit.setText(a)
         self._sync_axis_combo_to_axis_id(a)
         self._update_window_title_with_motor()
+        if prev_axis != a:
+            if prev_axis:
+                self._axis_is_real_cache.pop(prev_axis, None)
+            self._axis_is_real_cache.pop(a, None)
+            self._load_yaml_tree()
 
     def _sync_axis_combo_to_axis_id(self, axis_id):
         if not hasattr(self, "axis_pick_combo"):
@@ -1200,7 +1347,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             self._sync_axis_combo_to_axis_id(self._axis_id())
             return
         self._set_axis_id(axis_id)
-        self._read_and_copy_current_axis(reason="axis selection")
+        self._read_and_copy_current_axis(reason="axis selection", allow_partial_copy=True)
 
     def _prompt_axis_selection_via_combo(self, reason_msg=None):
         if reason_msg:
@@ -1426,9 +1573,9 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
                 except Exception as ex:
                     self._log(f"Failed to start new axis cfg window: {ex}")
                     return
-            else:
-                self._set_axis_id(axis_id)
-                self._read_and_copy_current_axis(reason="axis selection")
+                return
+            self._set_axis_id(axis_id)
+            self._read_and_copy_current_axis(reason="axis selection", allow_partial_copy=True)
             dlg.accept()
 
         refresh_btn.clicked.connect(populate)
@@ -1529,6 +1676,14 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         if not path.startswith(("drive.", "controller.")):
             return False
         return not self._axis_is_real(self._axis_id())
+
+    def _is_virtual_axis_hidden_path(self, path):
+        path = str(path or "").strip()
+        if not path:
+            return False
+        return (not self._axis_is_real(self._axis_id())) and (
+            path == "drive" or path == "controller" or path.startswith(("drive.", "controller."))
+        )
 
     def send_raw_command(self, cmd, quiet=False, wait=True):
         pv = self.cmd_pv.text().strip()
@@ -1662,12 +1817,29 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         except Exception as ex:
             self._log(f"Startup Read All / Copy failed: {ex}")
 
-    def _read_and_copy_current_axis(self, reason=""):
+    def _read_value_for_copy_is_valid(self, value, row=None):
+        s = str(value or "").strip()
+        if not s or s == "Blocked for virtual axis":
+            return False
+        if row is not None:
+            read_status = str(row.get("read_status_short", "") or "").strip()
+            if read_status.startswith("R:ERR"):
+                return False
+        if query_value_indicates_error(s):
+            return False
+        low = s.lower()
+        if low.startswith("err") or " error" in f" {low} " or low.startswith("error:") or low.startswith("qry error"):
+            return False
+        return True
+
+    def _read_and_copy_current_axis(self, reason="", allow_partial_copy=False):
         self._startup_axis_probe_ok = True
-        ok = self._read_all_matched(abort_on_error=True)
-        if ok:
+        ok = self._read_all_matched(abort_on_error=not bool(allow_partial_copy))
+        if ok or allow_partial_copy:
             self._copy_read_to_set()
-            return True
+            if not ok and reason:
+                self._log(f'Partial Copy Read->Set after {reason}; some rows returned error')
+            return ok
         if reason:
             self._log(f'Copy Read->Set skipped after {reason} because Read All aborted on first read error')
         return False
@@ -1688,7 +1860,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         count = 0
         for row in self._leaf_rows:
             txt = row["read_edit"].text().strip()
-            if not txt:
+            if not self._read_value_for_copy_is_valid(txt, row=row):
                 continue
             row["set_edit"].setText(txt)
             count += 1
