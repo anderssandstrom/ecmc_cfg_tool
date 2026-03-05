@@ -223,6 +223,8 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._axis_combo_open_new_instance = False
         self._ioc_connected = None
         self._scan_abort_on_reconnect = False
+        self._local_motion_started = False
+        self._ioc_connect_error_streak = 0
 
         self._build_ui(timeout)
         self._log(f"Connected via backend: {self.client.backend}")
@@ -1010,12 +1012,23 @@ class MotionWindow(QtWidgets.QMainWindow):
 
     def _set_active_motion_mode(self, mode):
         self._active_motion_mode = mode
+        if mode in {"move", "tweak", "jog", "sequence"}:
+            self._local_motion_started = True
         self._update_motion_group_enable_state()
 
     def _clear_active_motion_mode(self):
         self._active_motion_mode = None
+        self._local_motion_started = False
         self._update_motion_group_enable_state()
         self._close_jog_stop_dialog()
+
+    def _is_local_motion_active(self):
+        return bool(
+            self._local_motion_started
+            or self._seq_active
+            or self._seq_timer.isActive()
+            or self._active_motion_mode in {"move", "tweak", "jog", "sequence"}
+        )
 
     def _update_motion_group_enable_state(self):
         groups = {
@@ -1383,6 +1396,36 @@ class MotionWindow(QtWidgets.QMainWindow):
         if self.auto_refresh_status.isChecked():
             self.refresh_status()
 
+    def _looks_like_connection_error(self, ex):
+        msg = str(ex or "").lower()
+        if not msg:
+            return False
+        markers = (
+            "cannot connect",
+            "connect error",
+            "timeout",
+            "timed out",
+            "connection timed out",
+            "ca client",
+            "channel access",
+            "ca link",
+            "ca: not connected",
+            "is not connected",
+            "not connected",
+            "disconnected",
+            "connection refused",
+            "no response",
+            "caget failed for",
+            "caput failed for",
+            "error",
+            "exception",
+            # Common EPICS/CA numeric status for disconnected channel.
+            " 192",
+            "(192)",
+            "code 192",
+        )
+        return any(m in msg for m in markers)
+
     def _handle_ioc_connection_state(self, connected_now):
         connected_now = bool(connected_now)
         prev = self._ioc_connected
@@ -1392,17 +1435,21 @@ class MotionWindow(QtWidgets.QMainWindow):
 
         if not connected_now:
             self._log("IOC connection lost")
-            if self._seq_active:
-                self._log("Sequence/scan stopped due to IOC disconnect")
-                self.stop_sequence()
+            local_motion = self._is_local_motion_active()
+            if local_motion:
+                self._log("Local motion stopped due to IOC disconnect")
+                self.stop_motion()
                 self.seq_state_label.setText("Stopped (IOC disconnected)")
-                self._scan_abort_on_reconnect = True
+            self._scan_abort_on_reconnect = local_motion
             return
 
         self._log("IOC connection restored")
         if self._scan_abort_on_reconnect:
-            if self._send_reconnect_safety_stop():
-                self._scan_abort_on_reconnect = False
+            self._log("IOC reconnected; confirming scan remains stopped")
+            if self._is_local_motion_active():
+                self.stop_sequence()
+            self.seq_state_label.setText("Stopped (IOC disconnected)")
+            self._scan_abort_on_reconnect = False
 
     def _send_reconnect_safety_stop(self):
         try:
@@ -1442,6 +1489,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         vals = {}
         ok_reads = 0
         cannot_connect = False
+        critical_fields = {"VAL", "RBV", "DMOV", "CNEN"}
         for f in list(self.status_fields.keys()):
             try:
                 raw = self.client.get(self._pv(f), as_string=True)
@@ -1452,7 +1500,7 @@ class MotionWindow(QtWidgets.QMainWindow):
             except Exception as ex:
                 self.status_fields[f].setText(f"ERR: {ex}")
                 vals[f] = None
-                if "cannot connect to" in str(ex).lower():
+                if f in critical_fields or self._looks_like_connection_error(ex):
                     cannot_connect = True
         for name, suffix in (("ErrId", "-ErrId"), ("MsgTxt", "-MsgTxt")):
             w = self.status_extra_fields.get(name) if hasattr(self, "status_extra_fields") else None
@@ -1467,8 +1515,14 @@ class MotionWindow(QtWidgets.QMainWindow):
             except Exception as ex:
                 vals[name] = None
                 w.setText(f"ERR: {ex}")
-                if "cannot connect to" in str(ex).lower():
+                if self._looks_like_connection_error(ex):
                     cannot_connect = True
+        if cannot_connect:
+            self._ioc_connect_error_streak += 1
+        else:
+            self._ioc_connect_error_streak = 0
+        if self._ioc_connect_error_streak >= 1:
+            cannot_connect = True
         # Treat any explicit channel-access "cannot connect to ..." as disconnected,
         # even if some other PVs still read successfully.
         self._handle_ioc_connection_state(False if cannot_connect else (ok_reads > 0))
@@ -1862,6 +1916,7 @@ class MotionWindow(QtWidgets.QMainWindow):
         self._seq_scan_idx = 0
         self._seq_timer.stop()
         self.seq_state_label.setText("Stopped")
+        self._local_motion_started = False
         self._clear_active_motion_mode()
 
     def start_jog_forward(self):
