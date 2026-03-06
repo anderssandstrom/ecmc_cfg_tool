@@ -1948,7 +1948,10 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._update_open_controller_button_state()
 
     def _update_open_controller_button_state(self):
-        self.open_cntrl_btn.setEnabled(True)
+        try:
+            self.open_cntrl_btn.setEnabled(self._axis_is_real())
+        except Exception:
+            self.open_cntrl_btn.setEnabled(False)
 
     def _axis_is_real(self, axis_id=None):
         axis = str(axis_id or self._axis_id()).strip() or self.axis_id_default
@@ -1960,8 +1963,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             if not motor:
                 self._axis_is_real_cache[axis] = False
                 return False
-            t = str(self.client.get(f"{motor}-Type", as_string=True) or "").strip().strip('"')
-            is_real = (t.upper() == "REAL")
+            t = normalize_axis_type_text(self._get_pv_best_effort(f"{motor}-Type", as_string=True) or "")
+            is_real = (t == "REAL")
             self._axis_is_real_cache[axis] = is_real
             return is_real
         except Exception:
