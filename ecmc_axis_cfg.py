@@ -5,6 +5,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -28,6 +29,16 @@ PLACEHOLDER_RE = re.compile(r"<([^>]+)>")
 SETPOINT_MATCH_BG = "#dff5dd"
 SETPOINT_MISMATCH_BG = "#e0e0e0"
 LOCAL_ERROR_DB_NAME = "ecmc_error_codes.json"
+PLOT_COLORS = [
+    "#2563eb",
+    "#dc2626",
+    "#059669",
+    "#d97706",
+    "#7c3aed",
+    "#0891b2",
+    "#be123c",
+    "#4f46e5",
+]
 
 
 class YNode:
@@ -37,6 +48,109 @@ class YNode:
         self.value = value
         self.comment = comment
         self.children = [] if children is None else children
+
+
+class TrendPlotWidget(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._series = {}
+        self._time_window = 20.0
+        self.setMinimumHeight(180)
+
+    def set_series(self, series):
+        self._series = dict(series or {})
+        self.update()
+
+    def set_time_window(self, seconds):
+        try:
+            self._time_window = max(1.0, float(seconds))
+        except Exception:
+            self._time_window = 20.0
+        self.update()
+
+    def paintEvent(self, _event):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        rect = self.rect()
+        p.fillRect(rect, QtGui.QColor("#fbfbfc"))
+
+        margin_l = 42
+        margin_r = 16
+        margin_t = 12
+        margin_b = 24
+        plot = rect.adjusted(margin_l, margin_t, -margin_r, -margin_b)
+        if plot.width() <= 10 or plot.height() <= 10:
+            return
+
+        p.setPen(QtGui.QPen(QtGui.QColor("#d1d5db"), 1))
+        p.drawRect(plot)
+
+        visible = []
+        for name, points in self._series.items():
+            pts = [(float(t), float(v)) for t, v in points if t is not None and v is not None]
+            if pts:
+                visible.append((name, pts))
+
+        if not visible:
+            p.setPen(QtGui.QColor("#6b7280"))
+            p.drawText(plot, QtCore.Qt.AlignCenter, "Select keys below to plot")
+            return
+
+        all_t = [t for _name, pts in visible for t, _v in pts]
+        all_v = [v for _name, pts in visible for _t, v in pts]
+        t_min = min(min(all_t), -self._time_window)
+        t_max = 0.0
+        if t_max <= t_min:
+            t_min = -self._time_window
+            t_max = 0.0
+        v_min = min(all_v)
+        v_max = max(all_v)
+        if v_max <= v_min:
+            pad = max(abs(v_min) * 0.05, 1.0)
+            v_min -= pad
+            v_max += pad
+        else:
+            pad = (v_max - v_min) * 0.1
+            v_min -= pad
+            v_max += pad
+
+        def map_x(tv):
+            return plot.left() + ((tv - t_min) / (t_max - t_min)) * plot.width()
+
+        def map_y(vv):
+            return plot.bottom() - ((vv - v_min) / (v_max - v_min)) * plot.height()
+
+        grid_pen = QtGui.QPen(QtGui.QColor("#e5e7eb"), 1)
+        for i in range(1, 4):
+            y = plot.top() + (plot.height() * i) / 4.0
+            p.setPen(grid_pen)
+            p.drawLine(int(plot.left()), int(y), int(plot.right()), int(y))
+
+        p.setPen(QtGui.QColor("#374151"))
+        p.drawText(4, int(plot.top()) + 10, f"{v_max:.3g}")
+        p.drawText(4, int(plot.bottom()), f"{v_min:.3g}")
+        span_s = t_max - t_min
+        p.drawText(int(plot.left()), rect.bottom() - 6, f"-{span_s:.1f}s")
+        p.drawText(int(plot.right()) - 28, rect.bottom() - 6, "now")
+
+        for idx, (name, pts) in enumerate(visible):
+            color = QtGui.QColor(PLOT_COLORS[idx % len(PLOT_COLORS)])
+            pen = QtGui.QPen(color, 2)
+            path = QtGui.QPainterPath()
+            for j, (tt, vv) in enumerate(pts):
+                qp = QtCore.QPointF(map_x(tt), map_y(vv))
+                if j == 0:
+                    path.moveTo(qp)
+                else:
+                    path.lineTo(qp)
+            p.setPen(pen)
+            p.setBrush(QtCore.Qt.NoBrush)
+            p.drawPath(path)
+
+            last_x = map_x(pts[-1][0])
+            last_y = map_y(pts[-1][1])
+            p.setBrush(color)
+            p.drawEllipse(QtCore.QPointF(last_x, last_y), 3.0, 3.0)
 
 
 def _split_yaml_comment(line):
@@ -497,19 +611,32 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.cfg_group)
 
         self.tree = QtWidgets.QTreeWidget()
-        self.tree.setColumnCount(9)
-        self.tree.setHeaderLabels(["Field", "Set Value", "W", "", "Readback (RO)", "R", "Poll", "Command", "Status"])
+        self.tree.setColumnCount(10)
+        self.tree.setHeaderLabels(["Field", "Set Value", "W", "", "Readback (RO)", "R", "Poll", "", "Command", "Status"])
         self.tree.setAlternatingRowColors(True)
         self.tree.setUniformRowHeights(False)
+        self.tree.header().setStretchLastSection(False)
         self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
-        self.tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
-        self.tree.header().setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
-        self.tree.header().setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
-        self.tree.header().setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)
-        self.tree.header().setSectionResizeMode(5, QtWidgets.QHeaderView.ResizeToContents)
-        self.tree.header().setSectionResizeMode(6, QtWidgets.QHeaderView.ResizeToContents)
-        self.tree.header().setSectionResizeMode(7, QtWidgets.QHeaderView.Stretch)
-        self.tree.header().setSectionResizeMode(8, QtWidgets.QHeaderView.ResizeToContents)
+        self.tree.setColumnWidth(0, 280)
+        self.tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.Fixed)
+        self.tree.setColumnWidth(1, 90)
+        self.tree.header().setSectionResizeMode(2, QtWidgets.QHeaderView.Fixed)
+        self.tree.setColumnWidth(2, 38)
+        self.tree.header().setSectionResizeMode(3, QtWidgets.QHeaderView.Fixed)
+        self.tree.setColumnWidth(3, 36)
+        self.tree.header().setSectionResizeMode(4, QtWidgets.QHeaderView.Fixed)
+        self.tree.setColumnWidth(4, 105)
+        self.tree.header().setSectionResizeMode(5, QtWidgets.QHeaderView.Fixed)
+        self.tree.setColumnWidth(5, 38)
+        self.tree.header().setSectionResizeMode(6, QtWidgets.QHeaderView.Fixed)
+        self.tree.setColumnWidth(6, 64)
+        self.tree.header().setSectionResizeMode(7, QtWidgets.QHeaderView.Fixed)
+        self.tree.setColumnWidth(7, 24)
+        self.tree.header().setSectionResizeMode(8, QtWidgets.QHeaderView.Fixed)
+        self.tree.setColumnWidth(8, 150)
+        self.tree.header().setSectionResizeMode(9, QtWidgets.QHeaderView.Fixed)
+        self.tree.setColumnWidth(9, 70)
+        self.tree.setColumnHidden(8, True)
         self.tree.itemExpanded.connect(self._on_tree_visibility_changed)
         self.tree.itemCollapsed.connect(self._on_tree_visibility_changed)
         layout.addWidget(self.tree, stretch=1)
@@ -527,9 +654,20 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.copy_btn.setAutoDefault(False)
         self.copy_btn.setDefault(False)
         self.copy_btn.clicked.connect(self._copy_read_to_set)
+        self.open_selected_btn = QtWidgets.QPushButton("Open Selected")
+        self.open_selected_btn.setAutoDefault(False)
+        self.open_selected_btn.setDefault(False)
+        self.open_selected_btn.setEnabled(False)
+        self.open_selected_btn.clicked.connect(self._open_selected_rows_popup)
+        self.deselect_all_rows_btn = QtWidgets.QPushButton("Deselect All")
+        self.deselect_all_rows_btn.setAutoDefault(False)
+        self.deselect_all_rows_btn.setDefault(False)
+        self.deselect_all_rows_btn.clicked.connect(self._deselect_all_rows)
         action_row.addWidget(self.read_all_btn)
         action_row.addWidget(self.write_all_btn)
         action_row.addWidget(self.copy_btn)
+        action_row.addWidget(self.open_selected_btn)
+        action_row.addWidget(self.deselect_all_rows_btn)
         action_row.addStretch(1)
         search_row.addLayout(action_row)
         search_row.addWidget(self.caqtdm_axis_btn)
@@ -1006,6 +1144,9 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         # Start collapsed: only top-level rows are visible.
         self.tree.collapseAll()
         self._apply_tree_filter()
+        self._update_open_selected_button_state()
+        self.tree.scrollToTop()
+        self.tree.horizontalScrollBar().setValue(0)
 
     def _load_yaml_command_map(self):
         p = self.mapping_path
@@ -1059,7 +1200,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
     def _add_tree_node(self, parent_item, node):
         if self._is_virtual_axis_hidden_path(node.path):
             return
-        item = QtWidgets.QTreeWidgetItem([node.key])
+        item = QtWidgets.QTreeWidgetItem([""] * self.tree.columnCount())
+        item.setText(0, node.key)
         item.setData(0, QtCore.Qt.UserRole, node.path)
         if parent_item is None:
             self.tree.addTopLevelItem(item)
@@ -1091,10 +1233,13 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             pair = self.command_pairs.get(base) if base else None
             matched = bool(pair)
 
+        row_font = self.tree.font()
         set_edit = QtWidgets.QLineEdit("")
+        set_edit.setFont(row_font)
         set_edit.setPlaceholderText(val if val else "value")
         read_edit = QtWidgets.QLineEdit("")
         read_edit.setReadOnly(True)
+        read_edit.setFont(row_font)
         read_edit.setStyleSheet(
             "QLineEdit[readOnly=\"true\"] {"
             " background-color: #f3f6fb;"
@@ -1105,6 +1250,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         read_edit.setFocusPolicy(QtCore.Qt.NoFocus)
         read_edit.setToolTip("Readback values are read-only")
         cmd_label = QtWidgets.QLineEdit(pair["set"] if pair else "")
+        cmd_label.setFont(row_font)
         cmd_label.setReadOnly(True)
         cmd_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
         cmd_label.setCursorPosition(0)
@@ -1143,16 +1289,24 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             poll_checkbox.setChecked(False)
             poll_checkbox.setToolTip("No getter available for polling")
 
+        select_checkbox = QtWidgets.QCheckBox("")
+        select_checkbox.setToolTip("Select this row")
+        select_checkbox.setStyleSheet("QCheckBox { margin: 0px; padding: 0px; }")
+        select_checkbox.setMinimumHeight(16)
+        select_checkbox.setMinimumWidth(16)
+        self.tree.setItemWidget(item, 7, select_checkbox)
         self.tree.setItemWidget(item, 6, poll_checkbox)
 
         self.tree.setItemWidget(item, 1, set_edit)
         self.tree.setItemWidget(item, 3, copy_one_btn)
         self.tree.setItemWidget(item, 4, read_edit)
-        self.tree.setItemWidget(item, 7, cmd_label)
-        self.tree.setItemWidget(item, 8, status)
+        self.tree.setItemWidget(item, 8, cmd_label)
+        self.tree.setItemWidget(item, 9, status)
 
         row = {
             "item": item,
+            "selected_checkbox": select_checkbox,
+            "selected": False,
             "path": node.path,
             "template_value": val,
             "set_edit": set_edit,
@@ -1165,6 +1319,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             "status": status,
         }
         self._leaf_rows.append(row)
+        select_checkbox.toggled.connect(lambda checked, rr=row: self._on_row_select_toggled(rr, checked))
         poll_checkbox.toggled.connect(lambda checked, rr=row: self._on_row_poll_toggled(rr, checked))
         self._update_row_setpoint_match_style(row)
         set_edit.textChanged.connect(lambda _=None, rr=row: self._update_row_setpoint_match_style(rr))
@@ -1951,6 +2106,386 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
 
     def _visible_poll_rows(self):
         return [r for r in self._leaf_rows if r.get("poll_enabled") and self._row_is_visible_for_poll(r)]
+
+    def _selected_rows(self):
+        return [r for r in self._leaf_rows if r.get("selected_checkbox") and r["selected_checkbox"].isChecked()]
+
+    def _on_row_select_toggled(self, row, checked):
+        if row is not None:
+            row["selected"] = bool(checked)
+        self._update_open_selected_button_state()
+
+    def _update_open_selected_button_state(self):
+        if not hasattr(self, "open_selected_btn"):
+            return
+        count = len(self._selected_rows())
+        self.open_selected_btn.setEnabled(count > 0)
+        if count > 0:
+            self.open_selected_btn.setText(f"Open Selected ({count})")
+        else:
+            self.open_selected_btn.setText("Open Selected")
+
+    def _deselect_all_rows(self):
+        for row in self._leaf_rows:
+            cb = row.get("selected_checkbox")
+            if cb is None:
+                continue
+            if cb.isChecked():
+                blocked = cb.blockSignals(True)
+                cb.setChecked(False)
+                cb.blockSignals(blocked)
+            row["selected"] = False
+        self._update_open_selected_button_state()
+
+    def _open_selected_rows_popup(self):
+        selected_rows = self._selected_rows()
+        if not selected_rows:
+            self._log("No rows selected")
+            return
+
+        try:
+            motor = str(self._resolve_motor_record_name(self._axis_id()) or "").strip()
+        except Exception:
+            motor = ""
+
+        dlg = QtWidgets.QDialog(self)
+        suffix = f" [{motor}]" if motor else ""
+        dlg.setWindowTitle(f"Selected Rows Plot (Axis {self._axis_id()}){suffix}")
+        dlg.resize(860, 500)
+        lay = QtWidgets.QVBoxLayout(dlg)
+
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical, dlg)
+        lay.addWidget(splitter, 1)
+
+        tree = QtWidgets.QTreeWidget()
+        tree.setColumnCount(10)
+        tree.setHeaderLabels(["", "Field", "Set Value", "W", "", "Readback (RO)", "R", "Poll", "Command", "Status"])
+        tree.setAlternatingRowColors(True)
+        tree.setUniformRowHeights(False)
+        tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.Fixed)
+        tree.setColumnWidth(0, 8)
+        tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        tree.header().setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
+        tree.header().setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
+        tree.header().setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)
+        tree.header().setSectionResizeMode(5, QtWidgets.QHeaderView.ResizeToContents)
+        tree.header().setSectionResizeMode(6, QtWidgets.QHeaderView.ResizeToContents)
+        tree.header().setSectionResizeMode(7, QtWidgets.QHeaderView.ResizeToContents)
+        tree.header().setSectionResizeMode(8, QtWidgets.QHeaderView.Stretch)
+        tree.header().setSectionResizeMode(9, QtWidgets.QHeaderView.ResizeToContents)
+        tree.setColumnHidden(8, True)
+
+        tree_wrap = QtWidgets.QWidget()
+        tree_wrap_lay = QtWidgets.QVBoxLayout(tree_wrap)
+        tree_wrap_lay.setContentsMargins(0, 0, 0, 0)
+        tree_wrap_lay.addWidget(tree)
+        splitter.addWidget(tree_wrap)
+
+        plot_wrap = QtWidgets.QWidget()
+        plot_lay = QtWidgets.QVBoxLayout(plot_wrap)
+        plot_lay.setContentsMargins(0, 0, 0, 0)
+        plot_ctrl = QtWidgets.QHBoxLayout()
+        plot_ctrl.addWidget(QtWidgets.QLabel("Plot rate [Hz]"))
+        plot_rate_spin = CompactDoubleSpinBox()
+        plot_rate_spin.setDecimals(1)
+        plot_rate_spin.setRange(0.5, 5.0)
+        plot_rate_spin.setSingleStep(0.5)
+        plot_rate_spin.setValue(min(5.0, max(0.5, 1000.0 / float(self._poll_interval_ms))))
+        plot_ctrl.addWidget(plot_rate_spin)
+        plot_ctrl.addSpacing(12)
+        plot_ctrl.addWidget(QtWidgets.QLabel("Time [s]"))
+        plot_window_spin = CompactDoubleSpinBox()
+        plot_window_spin.setDecimals(1)
+        plot_window_spin.setRange(2.0, 600.0)
+        plot_window_spin.setSingleStep(1.0)
+        plot_window_spin.setValue(20.0)
+        plot_ctrl.addWidget(plot_window_spin)
+        plot_ctrl.addSpacing(12)
+        plot_ctrl.addWidget(QtWidgets.QLabel("Plot keys"))
+        plot_ctrl.addStretch(1)
+        pause_plot_btn = QtWidgets.QPushButton("Pause Plot")
+        pause_plot_btn.setCheckable(True)
+        pause_plot_btn.setAutoDefault(False)
+        pause_plot_btn.setDefault(False)
+        plot_ctrl.addWidget(pause_plot_btn)
+        clear_plot_btn = QtWidgets.QPushButton("Clear Plot")
+        clear_plot_btn.setAutoDefault(False)
+        clear_plot_btn.setDefault(False)
+        plot_ctrl.addWidget(clear_plot_btn)
+        plot_lay.addLayout(plot_ctrl)
+
+        plot_body = QtWidgets.QHBoxLayout()
+        plot_list = QtWidgets.QListWidget()
+        plot_list.setAlternatingRowColors(True)
+        plot_list.setMinimumWidth(260)
+        plot_body.addWidget(plot_list, 0)
+        plot_widget = TrendPlotWidget()
+        plot_widget.set_time_window(plot_window_spin.value())
+        plot_body.addWidget(plot_widget, 1)
+        plot_lay.addLayout(plot_body, 1)
+        splitter.addWidget(plot_wrap)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+
+        popup_rows = []
+        plot_paused = {"value": False}
+
+        def popup_poll_interval_ms():
+            hz = max(0.5, min(5.0, float(plot_rate_spin.value())))
+            return max(200, int(round(1000.0 / hz)))
+
+        def _coerce_plot_value(text):
+            s = str(text or "").strip()
+            if not s:
+                return None
+            try:
+                return float(s)
+            except Exception:
+                pass
+            try:
+                return float(int(s, 0))
+            except Exception:
+                return None
+
+        def append_plot_sample(row):
+            if row is None or not row.get("plot_selected") or plot_paused["value"]:
+                return
+            val = _coerce_plot_value(row.get("read_edit").text() if row.get("read_edit") else "")
+            if val is None:
+                return
+            history = row.setdefault("plot_history", [])
+            now = time.monotonic()
+            history.append((now, val))
+            min_time = now - float(plot_window_spin.value())
+            row["plot_history"] = [(t, v) for t, v in history if t >= min_time]
+
+        def refresh_plot_widget():
+            series = {}
+            now = time.monotonic()
+            plot_widget.set_time_window(plot_window_spin.value())
+            for row in popup_rows:
+                if not row.get("plot_selected"):
+                    continue
+                min_time = now - float(plot_window_spin.value())
+                hist = [(t, v) for t, v in (row.get("plot_history") or []) if t >= min_time]
+                row["plot_history"] = hist
+                pts = [(t - now, v) for t, v in hist]
+                if pts:
+                    series[row.get("path", "")] = pts
+            plot_widget.set_series(series)
+
+        def refresh_plot_list_colors():
+            active_rows = [rr for rr in popup_rows if rr.get("plot_selected")]
+            color_by_row = {}
+            for idx, rr in enumerate(active_rows):
+                color_by_row[id(rr)] = QtGui.QColor(PLOT_COLORS[idx % len(PLOT_COLORS)])
+            default_brush = QtGui.QBrush(QtGui.QColor("#111827"))
+            for rr in popup_rows:
+                item = rr.get("plot_item")
+                if item is None:
+                    continue
+                if rr.get("plot_selected"):
+                    item.setForeground(QtGui.QBrush(color_by_row.get(id(rr), QtGui.QColor("#111827"))))
+                else:
+                    item.setForeground(default_brush)
+
+        def make_copy_edit(edit_from, edit_to):
+            edit_to.setText(edit_from.text())
+
+        def make_popup_row(src):
+            item = QtWidgets.QTreeWidgetItem(["", src.get("path", ""), "", "", "", "", "", "", "", ""])
+            tree.addTopLevelItem(item)
+            pair = src.get("pair")
+            blocked = bool(src.get("blocked"))
+            val = str(src.get("template_value", ""))
+
+            matched = bool(pair) and bool(src.get("pair"))
+            row_font = tree.font()
+            set_edit = QtWidgets.QLineEdit(str(src.get("set_edit", QtWidgets.QLineEdit()).text() if hasattr(src.get("set_edit", ""), "text") else ""))
+            set_edit.setFont(row_font)
+            set_edit.setPlaceholderText(str(val) if val else "value")
+            read_edit = QtWidgets.QLineEdit(src.get("read_edit", QtWidgets.QLineEdit()).text() if hasattr(src.get("read_edit", ""), "text") else "")
+            read_edit.setReadOnly(True)
+            read_edit.setFont(row_font)
+            read_edit.setStyleSheet(
+                "QLineEdit[readOnly=\"true\"] {"
+                " background-color: #f3f6fb;"
+                " color: #111827;"
+                " selection-background-color: #dce1ee;"
+                " }"
+            )
+            read_edit.setFocusPolicy(QtCore.Qt.NoFocus)
+            read_edit.setToolTip("Readback values are read-only")
+            cmd_label = QtWidgets.QLineEdit(str(src.get("pair", {}).get("set", "") if src.get("pair") else ""))
+            cmd_label.setFont(row_font)
+            cmd_label.setReadOnly(True)
+            cmd_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
+            cmd_label.setCursorPosition(0)
+            status = QtWidgets.QLabel("")
+            status.setText(str(src.get("status", QtWidgets.QLabel()).text() if hasattr(src.get("status", None), "text") else ""))
+
+            row = {
+                "item": item,
+                "path": src.get("path", ""),
+                "template_value": val,
+                "set_edit": set_edit,
+                "read_edit": read_edit,
+                "cmd_label": cmd_label,
+                "pair": pair,
+                "blocked": blocked,
+                "poll_checkbox": None,
+                "poll_enabled": False,
+                "plot_selected": False,
+                "plot_history": [],
+                "plot_item": None,
+                "status": status,
+                "source_status": src.get("status"),
+            }
+
+            copy_btn = QtWidgets.QPushButton("<-")
+            copy_btn.setAutoDefault(False)
+            copy_btn.setDefault(False)
+            copy_btn.setMaximumWidth(36)
+            copy_btn.clicked.connect(lambda _, se=set_edit, re=read_edit: make_copy_edit(re, se))
+
+            poll_checkbox = QtWidgets.QCheckBox("2Hz")
+            poll_checkbox.setToolTip("Poll this row every 500 ms while popup is open")
+            if not (matched and not blocked and pair and pair.get("get")):
+                poll_checkbox.setEnabled(False)
+                poll_checkbox.setChecked(False)
+                poll_checkbox.setToolTip("No getter available for polling")
+            row["poll_checkbox"] = poll_checkbox
+
+            if matched and not blocked:
+                w_btn = QtWidgets.QPushButton("W")
+                r_btn = QtWidgets.QPushButton("R")
+                for b in (w_btn, r_btn):
+                    b.setAutoDefault(False)
+                    b.setDefault(False)
+                    b.setMaximumWidth(40)
+                w_btn.setEnabled(bool(pair.get("set")))
+                r_btn.setEnabled(bool(pair.get("get")))
+                w_btn.clicked.connect(lambda _=False, rr=row: self._write_row(rr))
+                r_btn.clicked.connect(lambda _=False, rr=row: self._read_row(rr))
+                tree.setItemWidget(item, 3, w_btn)
+                tree.setItemWidget(item, 6, r_btn)
+                self._update_row_setpoint_match_style(row)
+            else:
+                placeholder = QtWidgets.QLabel("")
+                tree.setItemWidget(item, 3, placeholder)
+                tree.setItemWidget(item, 6, QtWidgets.QLabel(""))
+
+            tree.setItemWidget(item, 2, set_edit)
+            tree.setItemWidget(item, 4, copy_btn)
+            tree.setItemWidget(item, 5, read_edit)
+            tree.setItemWidget(item, 7, poll_checkbox)
+            tree.setItemWidget(item, 8, cmd_label)
+            tree.setItemWidget(item, 9, status)
+            popup_rows.append(row)
+            return row
+
+        for src in selected_rows:
+            row = make_popup_row(src)
+
+        for row in popup_rows:
+            item = QtWidgets.QListWidgetItem(str(row.get("path", "")))
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            can_plot = bool(row.get("pair") and row.get("pair", {}).get("get") and not row.get("blocked"))
+            if not can_plot:
+                item.setFlags(item.flags() & ~QtCore.Qt.ItemIsEnabled)
+                item.setToolTip("No getter available for plotting")
+            else:
+                item.setToolTip("Plot this key in the lower trend view")
+            item.setCheckState(QtCore.Qt.Unchecked)
+            plot_list.addItem(item)
+            row["plot_item"] = item
+
+        poll_timer = QtCore.QTimer(dlg)
+        poll_timer.setInterval(popup_poll_interval_ms())
+
+        def row_needs_popup_poll(rr):
+            return bool(rr.get("poll_enabled") or (rr.get("plot_selected") and not plot_paused["value"]))
+
+        def refresh_popup_poll_timer():
+            if any(row_needs_popup_poll(r) for r in popup_rows):
+                if not poll_timer.isActive():
+                    poll_timer.start(popup_poll_interval_ms())
+                else:
+                    poll_timer.setInterval(popup_poll_interval_ms())
+            else:
+                poll_timer.stop()
+
+        def on_popup_poll_toggled(rr, checked):
+            if rr is None:
+                return
+            rr["poll_enabled"] = bool(checked)
+            refresh_popup_poll_timer()
+
+        def on_plot_item_changed(item):
+            for rr in popup_rows:
+                if rr.get("plot_item") is not item:
+                    continue
+                rr["plot_selected"] = item.checkState() == QtCore.Qt.Checked
+                if rr["plot_selected"]:
+                    append_plot_sample(rr)
+                else:
+                    rr["plot_history"] = []
+                break
+            refresh_plot_list_colors()
+            refresh_plot_widget()
+            refresh_popup_poll_timer()
+
+        for row in popup_rows:
+            cb = row.get("poll_checkbox")
+            if cb is None:
+                continue
+            cb.toggled.connect(lambda checked, rr=row: on_popup_poll_toggled(rr, checked))
+
+        def clear_plot_history():
+            for rr in popup_rows:
+                rr["plot_history"] = []
+            refresh_plot_widget()
+
+        def on_plot_window_changed(_value):
+            plot_widget.set_time_window(plot_window_spin.value())
+            refresh_plot_widget()
+
+        def on_pause_plot_toggled(checked):
+            plot_paused["value"] = bool(checked)
+            pause_plot_btn.setText("Resume Plot" if checked else "Pause Plot")
+            refresh_popup_poll_timer()
+
+        plot_list.itemChanged.connect(on_plot_item_changed)
+        plot_rate_spin.valueChanged.connect(lambda _v: refresh_popup_poll_timer())
+        plot_window_spin.valueChanged.connect(on_plot_window_changed)
+        pause_plot_btn.toggled.connect(on_pause_plot_toggled)
+        clear_plot_btn.clicked.connect(clear_plot_history)
+
+        def poll_popup_rows():
+            active = [r for r in popup_rows if row_needs_popup_poll(r)]
+            if not active:
+                poll_timer.stop()
+                return
+            for row in active:
+                self._read_row(row, quiet=True)
+                append_plot_sample(row)
+            refresh_plot_widget()
+
+        poll_timer.timeout.connect(poll_popup_rows)
+
+        close_btn = QtWidgets.QPushButton("Close")
+        close_btn.setAutoDefault(False)
+        close_btn.setDefault(False)
+        close_btn.clicked.connect(dlg.accept)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+
+        self._log(f"Opening popup for {len(selected_rows)} selected row(s)")
+        dlg.finished.connect(lambda _=0: poll_timer.stop())
+        dlg.exec_()
 
     def _on_row_poll_toggled(self, row, checked):
         if row is None:
