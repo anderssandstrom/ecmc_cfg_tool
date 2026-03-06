@@ -88,43 +88,6 @@ class MiniTrendWidget(QtWidgets.QWidget):
         self.setMinimumHeight(74)
         self.setMaximumHeight(92)
 
-
-class _MotionPvMixin:
-    def _cli_caget_value(self, pv):
-        try:
-            proc = subprocess.run(
-                ["caget", "-t", "-w", str(float(getattr(self.client, "timeout", 2.0))), pv],
-                universal_newlines=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-        except Exception:
-            return ""
-        if proc.returncode != 0:
-            return ""
-        s = str(proc.stdout or "").strip()
-        if not s:
-            return ""
-        if s.startswith(str(pv)):
-            s = s[len(str(pv)) :].strip()
-        if " SEVR:" in s:
-            s = s.split(" SEVR:", 1)[0].rstrip()
-        if " STAT:" in s:
-            s = s.split(" STAT:", 1)[0].rstrip()
-        if len(s) >= 2 and s[0] == s[-1] and s[0] in {'"', "'"}:
-            s = s[1:-1]
-        return s.strip()
-
-    def _get_pv_best_effort(self, pv, as_string=True):
-        try:
-            val = self.client.get(pv, as_string=as_string)
-            txt = str(val or "").strip()
-            if txt:
-                return txt
-        except Exception:
-            pass
-        return self._cli_caget_value(pv)
-
     def _axis_label_text(self, v):
         try:
             x = float(v)
@@ -242,6 +205,43 @@ class _MotionPvMixin:
             p.setPen(QtGui.QColor("#2f3e4d"))
             p.drawText(x + 13, y + 4, name)
             x += 70
+
+
+class _MotionPvMixin:
+    def _cli_caget_value(self, pv):
+        try:
+            proc = subprocess.run(
+                ["caget", "-t", "-w", str(float(getattr(self.client, "timeout", 2.0))), pv],
+                universal_newlines=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except Exception:
+            return ""
+        if proc.returncode != 0:
+            return ""
+        s = str(proc.stdout or "").strip()
+        if not s:
+            return ""
+        if s.startswith(str(pv)):
+            s = s[len(str(pv)) :].strip()
+        if " SEVR:" in s:
+            s = s.split(" SEVR:", 1)[0].rstrip()
+        if " STAT:" in s:
+            s = s.split(" STAT:", 1)[0].rstrip()
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in {'"', "'"}:
+            s = s[1:-1]
+        return s.strip()
+
+    def _get_pv_best_effort(self, pv, as_string=True):
+        try:
+            val = self.client.get(pv, as_string=as_string)
+            txt = str(val or "").strip()
+            if txt:
+                return txt
+        except Exception:
+            pass
+        return self._cli_caget_value(pv)
 
 
 class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
