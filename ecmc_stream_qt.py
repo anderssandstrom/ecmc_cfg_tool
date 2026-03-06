@@ -32,18 +32,32 @@ class EpicsClient:
         self.timeout = timeout
         self.backend = None
         self._epics = None
+        self._epicspv_mod = None
+        self._epicspv_cache = {}
         self._caput_bin = shutil.which('caput')
         self._caget_bin = shutil.which('caget')
         self._cli_available = bool(self._caput_bin and self._caget_bin)
 
         try:
+            import epicsPV  # type: ignore
+
+            self._epicspv_mod = epicsPV
+        except Exception:
+            self._epicspv_mod = None
+
+        try:
             import epics  # type: ignore
 
             self._epics = epics
+        except Exception:
+            self._epics = None
+
+        if self._epicspv_mod is not None:
+            self.backend = 'epicsPV'
+            return
+        if self._epics is not None:
             self.backend = 'pyepics'
             return
-        except Exception:
-            pass
 
         if self._cli_available:
             self.backend = 'cli'
@@ -56,11 +70,48 @@ class EpicsClient:
         return ('cannot find epics ca dll' in msg) or ('cannot load ca dll' in msg)
 
     def _fallback_to_cli_if_possible(self, ex):
-        if self.backend == 'pyepics' and self._cli_available and self._is_missing_ca_dll_error(ex):
+        if self.backend in {'pyepics', 'epicsPV'} and self._cli_available and self._is_missing_ca_dll_error(ex):
             self.backend = 'cli'
             self._epics = None
+            self._epicspv_mod = None
+            self._epicspv_cache = {}
             return True
         return False
+
+    def _fallback_from_epicspv_if_possible(self):
+        if self.backend != 'epicsPV':
+            return False
+        self._epicspv_mod = None
+        self._epicspv_cache = {}
+        if self._epics is not None:
+            self.backend = 'pyepics'
+            return True
+        if self._cli_available:
+            self.backend = 'cli'
+            return True
+        return False
+
+    def _fallback_from_pyepics_if_possible(self):
+        if self.backend != 'pyepics':
+            return False
+        self._epics = None
+        if self._cli_available:
+            self.backend = 'cli'
+            return True
+        return False
+
+    def _epicspv(self, pv):
+        cached = self._epicspv_cache.get(pv)
+        if cached is not None:
+            try:
+                cached.setTimeout(float(self.timeout))
+            except Exception:
+                pass
+            return cached
+        obj = self._epicspv_mod.epicsPV(str(pv))
+        obj.setTimeout(float(self.timeout))
+        self._epicspv_cache[pv] = obj
+        return obj
 
     def _parse_cli_caget_value(self, pv, raw_out):
         s = str(raw_out or '').strip()
@@ -107,6 +158,20 @@ class EpicsClient:
         return s
 
     def put(self, pv, value, wait=True):
+        if self.backend == 'epicsPV':
+            try:
+                obj = self._epicspv(str(pv))
+                if wait:
+                    obj.putWait(value)
+                else:
+                    obj.putw(value)
+                return
+            except Exception as ex:
+                if not self._fallback_from_epicspv_if_possible():
+                    if not self._fallback_to_cli_if_possible(ex):
+                        raise
+                return self.put(pv, value, wait=wait)
+
         if self.backend == 'pyepics':
             try:
                 ok = self._epics.caput(pv, value, wait=wait, timeout=self.timeout)
@@ -114,8 +179,10 @@ class EpicsClient:
                     raise RuntimeError(f'caput failed for {pv}')
                 return
             except Exception as ex:
-                if not self._fallback_to_cli_if_possible(ex):
-                    raise
+                if not self._fallback_from_pyepics_if_possible():
+                    if not self._fallback_to_cli_if_possible(ex):
+                        raise
+                return self.put(pv, value, wait=wait)
 
         cmd = [str(self._caput_bin or 'caput'), '-t']
         # In CLI mode, allow non-blocking puts for bulk operations.
@@ -134,6 +201,19 @@ class EpicsClient:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f'caput failed for {pv}')
 
     def get(self, pv, as_string=True):
+        if self.backend == 'epicsPV':
+            try:
+                obj = self._epicspv(str(pv))
+                val = obj.getw()
+                if val is None:
+                    raise RuntimeError(f'caget failed for {pv}')
+                return str(val)
+            except Exception as ex:
+                if not self._fallback_from_epicspv_if_possible():
+                    if not self._fallback_to_cli_if_possible(ex):
+                        raise
+                return self.get(pv, as_string=as_string)
+
         if self.backend == 'pyepics':
             try:
                 val = self._epics.caget(pv, as_string=as_string, timeout=self.timeout)
@@ -141,8 +221,10 @@ class EpicsClient:
                     raise RuntimeError(f'caget failed for {pv}')
                 return str(val)
             except Exception as ex:
-                if not self._fallback_to_cli_if_possible(ex):
-                    raise
+                if not self._fallback_from_pyepics_if_possible():
+                    if not self._fallback_to_cli_if_possible(ex):
+                        raise
+                return self.get(pv, as_string=as_string)
 
         # Prefer a clean value-only output to avoid PV/alarm text mixing
         # into application-level parsing (e.g. axis object-id discovery).

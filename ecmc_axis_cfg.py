@@ -400,6 +400,15 @@ def scalar_text(v):
     return str(v or "").strip()
 
 
+def normalize_axis_object_id(value):
+    s = str(value or "").strip().strip('"')
+    if not s:
+        return ""
+    if re.fullmatch(r"[+-]?\d+\.0+", s):
+        return s.split(".", 1)[0].lstrip("+")
+    return s.lstrip("+")
+
+
 def fill_axis_command(template, axis_id, value):
     vals = [str(axis_id).strip(), str(value).strip()]
     out = str(template or "")
@@ -1585,6 +1594,42 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         m = re.match(r"^(.*):MCU-Cmd\.AOUT$", cmd_pv)
         return m.group(1) if m else ""
 
+    def _cli_caget_value(self, pv):
+        try:
+            proc = subprocess.run(
+                ["caget", "-t", "-w", str(float(getattr(self.client, "timeout", 2.0))), pv],
+                universal_newlines=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except Exception:
+            return ""
+        if proc.returncode != 0:
+            return ""
+        s = str(proc.stdout or "").strip()
+        if not s:
+            return ""
+        if s.startswith(str(pv)):
+            s = s[len(str(pv)) :].strip()
+        if " SEVR:" in s:
+            s = s.split(" SEVR:", 1)[0].rstrip()
+        if " STAT:" in s:
+            s = s.split(" STAT:", 1)[0].rstrip()
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in {'"', "'"}:
+            s = s[1:-1]
+        return s.strip()
+
+    def _get_pv_best_effort(self, pv, as_string=True):
+        try:
+            val = self.client.get(pv, as_string=as_string)
+            txt = str(val or "").strip()
+            if txt:
+                return txt
+        except Exception:
+            pass
+        txt = self._cli_caget_value(pv)
+        return txt
+
     def _open_caqtdm_main_panel(self):
         ioc_prefix = self._ioc_prefix_for_title() or ""
         macro = f"IOC={ioc_prefix}"
@@ -1640,8 +1685,10 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             raise RuntimeError("Cannot determine IOC prefix from title/cmd PV")
 
         first_pv = _join_prefix_pv(prefix, "MCU-Cfg-AX-FrstObjId")
-        first_raw = self.client.get(first_pv, as_string=True)
-        cur = str(first_raw or "").strip().strip('"')
+        first_raw = self._get_pv_best_effort(first_pv, as_string=True)
+        if not str(first_raw or "").strip():
+            raise RuntimeError(f"failed reading {first_pv}")
+        cur = normalize_axis_object_id(first_raw)
         axes = []
         visited = set()
         steps = 0
@@ -1659,24 +1706,28 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             axis_pfx = ""
             motor_name = ""
             try:
-                axis_pfx = str(self.client.get(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-Pfx"), as_string=True) or "").strip().strip('"')
+                axis_pfx = str(self._get_pv_best_effort(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-Pfx"), as_string=True) or "").strip().strip('"')
             except Exception:
                 pass
             try:
-                motor_name = str(self.client.get(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-Nam"), as_string=True) or "").strip().strip('"')
+                motor_name = str(self._get_pv_best_effort(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-Nam"), as_string=True) or "").strip().strip('"')
             except Exception:
                 pass
             motor = self._combine_motor_record(axis_pfx, motor_name)
             axis_type = ""
             if motor:
                 try:
-                    axis_type = str(self.client.get(f"{motor}-Type", as_string=True) or "").strip().strip('"')
+                    axis_type = str(self._get_pv_best_effort(f"{motor}-Type", as_string=True) or "").strip().strip('"')
                 except Exception:
                     axis_type = ""
             axes.append({"axis_id": axis_id, "motor": motor, "axis_prefix": axis_pfx, "motor_name": motor_name, "axis_type": axis_type})
             nxt_pv = _join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-NxtObjId")
-            nxt_raw = self.client.get(nxt_pv, as_string=True)
-            cur = str(nxt_raw or "").strip().strip('"')
+            try:
+                nxt_raw = self._get_pv_best_effort(nxt_pv, as_string=True)
+                cur = normalize_axis_object_id(nxt_raw)
+            except Exception as ex:
+                self._log(f"Axis discovery: failed reading {nxt_pv}: {ex}; stopping traversal")
+                break
         return axes
 
     def _open_axis_picker_dialog(self):
@@ -1787,8 +1838,10 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._did_startup_axis_presence_check = True
         prefix = self._ioc_prefix_for_title()
         current = self._axis_id()
+        self._log(f"Startup axis check: prefix={prefix or '<none>'} axis={current or '<none>'} backend={getattr(self.client, 'backend', '')}")
 
         if not self._axis_id_was_provided:
+            self._log("Startup axis check: no axis provided, trying MCU-Cfg-AX-FrstObjId")
             first_axis = self._read_first_axis_id()
             if first_axis:
                 if first_axis != current:
@@ -1811,6 +1864,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             return
         try:
             probe_pv = _join_prefix_pv(prefix, f"MCU-Cfg-AX{current}-Pfx")
+            self._log(f"Startup axis probe: {probe_pv}")
             raw = self.client.get(probe_pv, as_string=True)
         except Exception as ex:
             self._log(f"Startup axis probe failed for axis {current}: {ex}; opening axis picker")
@@ -1831,7 +1885,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             return ""
         first_obj_pv = _join_prefix_pv(prefix, "MCU-Cfg-AX-FrstObjId")
         try:
-            first_axis = str(self.client.get(first_obj_pv, as_string=True) or "").strip().strip('"')
+            first_axis = normalize_axis_object_id(self._get_pv_best_effort(first_obj_pv, as_string=True))
             if first_axis and first_axis != "-1" and re.fullmatch(r"\d+", first_axis):
                 return first_axis
         except Exception as ex:
