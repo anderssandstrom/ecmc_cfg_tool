@@ -1813,7 +1813,9 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             return
         self._did_initial_read_copy = True
         try:
-            self._read_and_copy_current_axis(reason="startup")
+            # Start-up reads are best-effort so transient command errors do not
+            # block copying valid values into set fields.
+            self._read_and_copy_current_axis(reason="startup", allow_partial_copy=True)
         except Exception as ex:
             self._log(f"Startup Read All / Copy failed: {ex}")
 
