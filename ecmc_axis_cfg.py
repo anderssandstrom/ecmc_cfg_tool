@@ -1818,6 +1818,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             return
         if str(raw or "").strip().strip('"'):
             self._startup_axis_probe_ok = True
+            self._load_yaml_tree()
             self._update_window_title_with_motor()
             self._initial_read_all_and_copy()
             return
