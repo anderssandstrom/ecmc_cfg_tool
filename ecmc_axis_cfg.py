@@ -409,6 +409,27 @@ def normalize_axis_object_id(value):
     return s.lstrip("+")
 
 
+def normalize_axis_type_text(value):
+    s = str(value or "").strip().strip('"')
+    if not s:
+        return ""
+    up = s.upper()
+    if up == "REAL":
+        return "REAL"
+    if up == "VIRTUAL":
+        return "VIRTUAL"
+    if re.fullmatch(r"[+-]?\d+(\.0+)?", s):
+        try:
+            iv = int(float(s))
+        except Exception:
+            iv = None
+        if iv == 1:
+            return "REAL"
+        if iv == 2:
+            return "VIRTUAL"
+    return s
+
+
 def fill_axis_command(template, axis_id, value):
     vals = [str(axis_id).strip(), str(value).strip()]
     out = str(template or "")
@@ -1717,7 +1738,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             axis_type = ""
             if motor:
                 try:
-                    axis_type = str(self._get_pv_best_effort(f"{motor}-Type", as_string=True) or "").strip().strip('"')
+                    axis_type = normalize_axis_type_text(self._get_pv_best_effort(f"{motor}-Type", as_string=True) or "")
                 except Exception:
                     axis_type = ""
             axes.append({"axis_id": axis_id, "motor": motor, "axis_prefix": axis_pfx, "motor_name": motor_name, "axis_type": axis_type})

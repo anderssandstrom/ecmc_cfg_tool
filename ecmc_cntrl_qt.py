@@ -27,6 +27,36 @@ from ecmc_stream_qt import (
 PLACEHOLDER_RE = re.compile(r'<[^>]+>')
 
 
+def _normalize_axis_object_id(value):
+    s = str(value or '').strip().strip('"')
+    if not s:
+        return ''
+    if re.fullmatch(r'[+-]?\d+\.0+', s):
+        return s.split('.', 1)[0].lstrip('+')
+    return s.lstrip('+')
+
+
+def _normalize_axis_type_text(value):
+    s = str(value or '').strip().strip('"')
+    if not s:
+        return ''
+    up = s.upper()
+    if up == 'REAL':
+        return 'REAL'
+    if up == 'VIRTUAL':
+        return 'VIRTUAL'
+    if re.fullmatch(r'[+-]?\d+(\.0+)?', s):
+        try:
+            iv = int(float(s))
+        except Exception:
+            iv = None
+        if iv == 1:
+            return 'REAL'
+        if iv == 2:
+            return 'VIRTUAL'
+    return s
+
+
 def _template_args(template):
     return PLACEHOLDER_RE.findall(template or '')
 
@@ -616,6 +646,41 @@ class CntrlWindow(QtWidgets.QMainWindow):
         m = re.match(r'^(.*):MCU-Cmd\.AOUT$', cmd_pv)
         return m.group(1) if m else ''
 
+    def _cli_caget_value(self, pv):
+        try:
+            proc = subprocess.run(
+                ['caget', '-t', '-w', str(float(getattr(self.client, 'timeout', 2.0))), pv],
+                universal_newlines=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except Exception:
+            return ''
+        if proc.returncode != 0:
+            return ''
+        s = str(proc.stdout or '').strip()
+        if not s:
+            return ''
+        if s.startswith(str(pv)):
+            s = s[len(str(pv)):].strip()
+        if ' SEVR:' in s:
+            s = s.split(' SEVR:', 1)[0].rstrip()
+        if ' STAT:' in s:
+            s = s.split(' STAT:', 1)[0].rstrip()
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in {'"', "'"}:
+            s = s[1:-1]
+        return s.strip()
+
+    def _get_pv_best_effort(self, pv, as_string=True):
+        try:
+            val = self.client.get(pv, as_string=as_string)
+            txt = str(val or '').strip()
+            if txt:
+                return txt
+        except Exception:
+            pass
+        return self._cli_caget_value(pv)
+
     def _combine_motor_record(self, axis_pfx, motor_name):
         a = str(axis_pfx or '').strip()
         m = str(motor_name or '').strip()
@@ -633,11 +698,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
         axis_pfx = ''
         motor_name = ''
         try:
-            axis_pfx = str(self.client.get(_join_prefix_pv(prefix, f'MCU-Cfg-AX{a}-Pfx'), as_string=True)).strip().strip('"')
+            axis_pfx = str(self._get_pv_best_effort(_join_prefix_pv(prefix, f'MCU-Cfg-AX{a}-Pfx'), as_string=True)).strip().strip('"')
         except Exception:
             pass
         try:
-            motor_name = str(self.client.get(_join_prefix_pv(prefix, f'MCU-Cfg-AX{a}-Nam'), as_string=True)).strip().strip('"')
+            motor_name = str(self._get_pv_best_effort(_join_prefix_pv(prefix, f'MCU-Cfg-AX{a}-Nam'), as_string=True)).strip().strip('"')
         except Exception:
             pass
         return self._combine_motor_record(axis_pfx, motor_name)
@@ -646,7 +711,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         prefix = self._ioc_prefix_for_title()
         if not prefix:
             raise RuntimeError('Cannot determine IOC prefix from title/cmd PV')
-        cur = str(self.client.get(_join_prefix_pv(prefix, 'MCU-Cfg-AX-FrstObjId'), as_string=True) or '').strip().strip('"')
+        cur = _normalize_axis_object_id(self._get_pv_best_effort(_join_prefix_pv(prefix, 'MCU-Cfg-AX-FrstObjId'), as_string=True) or '')
         out = []
         seen = set()
         while cur and cur != '-1':
@@ -660,11 +725,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
             axis_pfx = ''
             motor_name = ''
             try:
-                axis_pfx = str(self.client.get(_join_prefix_pv(prefix, f'MCU-Cfg-AX{axis_id}-Pfx'), as_string=True) or '').strip().strip('"')
+                axis_pfx = str(self._get_pv_best_effort(_join_prefix_pv(prefix, f'MCU-Cfg-AX{axis_id}-Pfx'), as_string=True) or '').strip().strip('"')
             except Exception:
                 pass
             try:
-                motor_name = str(self.client.get(_join_prefix_pv(prefix, f'MCU-Cfg-AX{axis_id}-Nam'), as_string=True) or '').strip().strip('"')
+                motor_name = str(self._get_pv_best_effort(_join_prefix_pv(prefix, f'MCU-Cfg-AX{axis_id}-Nam'), as_string=True) or '').strip().strip('"')
             except Exception:
                 pass
             out.append({
@@ -675,10 +740,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
             })
             if out[-1]['motor']:
                 try:
-                    out[-1]['axis_type'] = str(self.client.get(f"{out[-1]['motor']}-Type", as_string=True) or '').strip().strip('"')
+                    raw_type = self._get_pv_best_effort(f"{out[-1]['motor']}-Type", as_string=True) or ''
+                    out[-1]['axis_type'] = _normalize_axis_type_text(raw_type)
                 except Exception:
                     out[-1]['axis_type'] = ''
-            cur = str(self.client.get(_join_prefix_pv(prefix, f'MCU-Cfg-AX{axis_id}-NxtObjId'), as_string=True) or '').strip().strip('"')
+            cur = _normalize_axis_object_id(self._get_pv_best_effort(_join_prefix_pv(prefix, f'MCU-Cfg-AX{axis_id}-NxtObjId'), as_string=True) or '')
         return out
 
     def _resolve_axis_selector_to_id(self, selector):
@@ -858,8 +924,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
             return ''
         first_obj_pv = _join_prefix_pv(prefix, 'MCU-Cfg-AX-FrstObjId')
         try:
-            raw = self.client.get(first_obj_pv, as_string=True)
-            axis_id = str(raw or '').strip().strip('"')
+            raw = self._get_pv_best_effort(first_obj_pv, as_string=True)
+            axis_id = _normalize_axis_object_id(raw)
             if axis_id and axis_id != '-1' and re.fullmatch(r'\d+', axis_id):
                 return axis_id
         except Exception as ex:
@@ -914,10 +980,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
         if not motor:
             return '', ''
         try:
-            v = self.client.get(f'{motor}-Type', as_string=True)
+            v = self._get_pv_best_effort(f'{motor}-Type', as_string=True)
         except Exception:
             v = ''
-        return motor, str(v or '').strip().strip('"')
+        typ = _normalize_axis_type_text(v)
+        return motor, typ
 
     def _ensure_axis_is_real(self, axis_id, purpose='controller command', close_on_fail=False):
         axis = str(axis_id or '').strip() or self.default_axis_id
@@ -928,9 +995,12 @@ class CntrlWindow(QtWidgets.QMainWindow):
             motor, typ = self._motor_type_for_axis(axis)
         except Exception as ex:
             self._log(f'Cannot verify axis type for axis {axis}: {ex}')
-            self._axis_is_real_cache[axis] = False
-            return False
+            self._axis_is_real_cache[axis] = True
+            return True
         if str(typ).upper() == 'REAL':
+            self._axis_is_real_cache[axis] = True
+            return True
+        if not str(typ).strip():
             self._axis_is_real_cache[axis] = True
             return True
         self._axis_is_real_cache[axis] = False
