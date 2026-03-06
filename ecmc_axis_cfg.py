@@ -2128,14 +2128,15 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
     def _deselect_all_rows(self):
         for row in self._leaf_rows:
             cb = row.get("selected_checkbox")
-            if cb is None:
-                continue
-            if cb.isChecked():
+            if cb is not None and cb.isChecked():
                 blocked = cb.blockSignals(True)
                 cb.setChecked(False)
                 cb.blockSignals(blocked)
             row["selected"] = False
+            if row.get("poll_enabled") or (row.get("poll_checkbox") and row.get("poll_checkbox").isChecked()):
+                self._set_poll_checkbox_state(row, False, suppress_signal=True)
         self._update_open_selected_button_state()
+        self._update_poll_timer_state()
 
     def _open_selected_rows_popup(self):
         selected_rows = self._selected_rows()
