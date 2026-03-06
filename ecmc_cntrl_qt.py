@@ -263,6 +263,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         title_prefix='',
         sketch_image_path='',
         error_db_path='',
+        axis_id_was_provided=True,
     ):
         super().__init__()
         p = str(title_prefix or '').strip()
@@ -285,6 +286,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._current_values_by_axis = {}
         self._axis_is_real_cache = {}
         self.default_axis_id = str(default_axis_id).strip() or '1'
+        self._axis_id_was_provided = bool(axis_id_was_provided)
         self.title_prefix = p
         self.sketch_image_path = str(sketch_image_path or '').strip()
         self._did_initial_read_all = False
@@ -814,6 +816,18 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._did_startup_axis_presence_check = True
         prefix = self._ioc_prefix_for_title()
         cur_axis = self.axis_all_edit.text().strip() or self.default_axis_id
+        if not self._axis_id_was_provided:
+            first_axis = self._read_first_axis_id()
+            if first_axis:
+                if first_axis != cur_axis:
+                    self._log(f'No startup axis provided, using first axis from IOC: {first_axis}')
+                    self.axis_all_edit.setText(first_axis)
+                    self._apply_axis_all()
+                    cur_axis = first_axis
+            else:
+                self._log('No startup axis provided and first-axis discovery failed; opening axis picker')
+                self._open_axis_picker_dialog()
+                return
         resolved_id = self._resolve_axis_selector_to_id(cur_axis)
         if resolved_id and resolved_id != cur_axis:
             self._log(f'Axis selector "{cur_axis}" resolved to axis {resolved_id}')
@@ -837,6 +851,20 @@ class CntrlWindow(QtWidgets.QMainWindow):
             return
         self._log(f'Axis {cur_axis} probe returned empty; opening axis picker')
         self._open_axis_picker_dialog()
+
+    def _read_first_axis_id(self):
+        prefix = self._ioc_prefix_for_title()
+        if not prefix:
+            return ''
+        first_obj_pv = _join_prefix_pv(prefix, 'MCU-Cfg-AX-FrstObjId')
+        try:
+            raw = self.client.get(first_obj_pv, as_string=True)
+            axis_id = str(raw or '').strip().strip('"')
+            if axis_id and axis_id != '-1' and re.fullmatch(r'\d+', axis_id):
+                return axis_id
+        except Exception as ex:
+            self._log(f'Failed reading first axis id from {first_obj_pv}: {ex}')
+        return ''
 
     def _run_startup_after_axis_probe(self):
         self._update_window_title_with_motor()
@@ -2306,7 +2334,7 @@ def main():
     ap.add_argument('--prefix', default='', help='PV prefix (e.g. IOC:ECMC)')
     ap.add_argument('--cmd-pv', default='', help='Command PV name (overrides --prefix)')
     ap.add_argument('--qry-pv', default='', help='Readback PV name (overrides --prefix)')
-    ap.add_argument('--axis-id', default='1', help='Default axis id for Axis All')
+    ap.add_argument('--axis-id', default='', help='Default axis id for Axis All')
     ap.add_argument('--sketch-image', default='', help='Path to background image for Controller Sketch overlay')
     ap.add_argument('--timeout', type=float, default=2.0, help='EPICS timeout in seconds')
     ap.add_argument('--error-db', default='', help='Path to local error DB JSON (default: ecmc_error_codes.json)')
@@ -2333,6 +2361,7 @@ def main():
         title_prefix=args.prefix,
         sketch_image_path=sketch_image,
         error_db_path=args.error_db,
+        axis_id_was_provided=bool((args.axis_id or '').strip()),
     )
     w.show()
     sys.exit(app.exec_())

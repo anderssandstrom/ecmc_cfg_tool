@@ -308,6 +308,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         axis_id="1",
         title_prefix="",
         error_db_path="",
+        axis_id_was_provided=True,
     ):
         super().__init__()
         self._base_title = f"ecmc Axis Configurator [{title_prefix}]" if title_prefix else "ecmc Axis Configurator"
@@ -324,8 +325,10 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.yaml_path = Path(yaml_path)
         self.mapping_path = Path(mapping_path) if mapping_path else Path(yaml_path).with_suffix(".command_map.csv")
         self.yaml_cmd_map = {}
-        self.axis_id_default = str(axis_id).strip() or "1"
+        provided_axis_id = str(axis_id).strip() if axis_id_was_provided else ""
+        self.axis_id_default = provided_axis_id or ""
         self.title_prefix = str(title_prefix or "").strip()
+        self._axis_id_was_provided = bool(axis_id_was_provided)
         self._leaf_rows = []
         self._changes_by_axis = {}
         self._current_values_by_axis = {}
@@ -338,6 +341,9 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._axis_combo_open_new_instance = False
         self._read_all_in_progress = False
         self._read_all_cancel_requested = False
+        self._poll_interval_ms = 500
+        self._poll_timer = QtCore.QTimer(self)
+        self._poll_timer.timeout.connect(self._poll_checked_rows_once)
         self._error_name_by_code = self._load_error_name_map(error_db_path)
         self._build_ui(default_cmd_pv, default_qry_pv, timeout)
         self._load_yaml_tree()
@@ -491,8 +497,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         layout.addWidget(self.cfg_group)
 
         self.tree = QtWidgets.QTreeWidget()
-        self.tree.setColumnCount(8)
-        self.tree.setHeaderLabels(["Field", "Set Value", "W", "", "Readback (RO)", "R", "Command", "Status"])
+        self.tree.setColumnCount(9)
+        self.tree.setHeaderLabels(["Field", "Set Value", "W", "", "Readback (RO)", "R", "Poll", "Command", "Status"])
         self.tree.setAlternatingRowColors(True)
         self.tree.setUniformRowHeights(False)
         self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
@@ -501,8 +507,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.tree.header().setSectionResizeMode(3, QtWidgets.QHeaderView.ResizeToContents)
         self.tree.header().setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)
         self.tree.header().setSectionResizeMode(5, QtWidgets.QHeaderView.ResizeToContents)
-        self.tree.header().setSectionResizeMode(6, QtWidgets.QHeaderView.Stretch)
-        self.tree.header().setSectionResizeMode(7, QtWidgets.QHeaderView.ResizeToContents)
+        self.tree.header().setSectionResizeMode(6, QtWidgets.QHeaderView.ResizeToContents)
+        self.tree.header().setSectionResizeMode(7, QtWidgets.QHeaderView.Stretch)
+        self.tree.header().setSectionResizeMode(8, QtWidgets.QHeaderView.ResizeToContents)
+        self.tree.itemExpanded.connect(self._on_tree_visibility_changed)
+        self.tree.itemCollapsed.connect(self._on_tree_visibility_changed)
         layout.addWidget(self.tree, stretch=1)
 
         action_row = QtWidgets.QHBoxLayout()
@@ -553,6 +562,14 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.cfg_group.setVisible(False)
         self.log.setVisible(False)
         self.changes_log.setVisible(False)
+        self._axis_combo_updating = True
+        self.axis_pick_combo.clear()
+        self.axis_pick_combo.addItem("Open New Instance", "__open_new__")
+        self._axis_combo_install_open_new_item()
+        if self._axis_id():
+            self.axis_pick_combo.addItem(f"Axis {self._axis_id()}", self._axis_id())
+        self._axis_combo_updating = False
+        self._sync_axis_combo_to_axis_id(self._axis_id())
         self._refresh_axis_pick_combo()
 
     def _toggle_config_panel(self):
@@ -632,6 +649,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
 
         for i in range(root.childCount()):
             visit(root.child(i))
+        self._on_tree_visibility_changed()
 
     def _log(self, msg):
         self.log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
@@ -970,6 +988,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._load_yaml_tree()
 
     def _load_yaml_tree(self):
+        self._poll_timer.stop()
         self.tree.clear()
         self._leaf_rows = []
         self.yaml_cmd_map = self._load_yaml_command_map()
@@ -1117,12 +1136,20 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         copy_one_btn.setMaximumWidth(36)
         copy_one_btn.setToolTip(tooltip)
         copy_one_btn.clicked.connect(lambda _=False, se=set_edit, re=read_edit: se.setText(re.text()))
+        poll_checkbox = QtWidgets.QCheckBox("2Hz")
+        poll_checkbox.setToolTip("Poll this row every 500 ms while visible")
+        if not (matched and not blocked and pair and pair.get("get")):
+            poll_checkbox.setEnabled(False)
+            poll_checkbox.setChecked(False)
+            poll_checkbox.setToolTip("No getter available for polling")
+
+        self.tree.setItemWidget(item, 6, poll_checkbox)
 
         self.tree.setItemWidget(item, 1, set_edit)
         self.tree.setItemWidget(item, 3, copy_one_btn)
         self.tree.setItemWidget(item, 4, read_edit)
-        self.tree.setItemWidget(item, 6, cmd_label)
-        self.tree.setItemWidget(item, 7, status)
+        self.tree.setItemWidget(item, 7, cmd_label)
+        self.tree.setItemWidget(item, 8, status)
 
         row = {
             "item": item,
@@ -1133,9 +1160,12 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             "cmd_label": cmd_label,
             "pair": pair,
             "blocked": blocked,
+            "poll_checkbox": poll_checkbox,
+            "poll_enabled": False,
             "status": status,
         }
         self._leaf_rows.append(row)
+        poll_checkbox.toggled.connect(lambda checked, rr=row: self._on_row_poll_toggled(rr, checked))
         self._update_row_setpoint_match_style(row)
         set_edit.textChanged.connect(lambda _=None, rr=row: self._update_row_setpoint_match_style(rr))
         read_edit.textChanged.connect(lambda _=None, rr=row: self._update_row_setpoint_match_style(rr))
@@ -1302,7 +1332,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.axis_pick_combo.clear()
         self.axis_pick_combo.addItem("Open New Instance", "__open_new__")
         self._axis_combo_install_open_new_item()
-        self.axis_pick_combo.addItem(f"Axis {current_axis}", current_axis)
+        if current_axis:
+            self.axis_pick_combo.addItem(f"Axis {current_axis}", current_axis)
         try:
             axes = self._discover_axes_from_ioc()
         except Exception:
@@ -1320,7 +1351,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             if motor_name:
                 label += f" | {motor_name}"
             self.axis_pick_combo.addItem(label, axis_id)
-        if self.axis_pick_combo.count() <= 1:
+        if self.axis_pick_combo.count() <= 1 and current_axis:
             self.axis_pick_combo.addItem(f"Axis {current_axis}", current_axis)
         self._axis_combo_updating = False
         self._sync_axis_combo_to_axis_id(current_axis)
@@ -1601,6 +1632,19 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._did_startup_axis_presence_check = True
         prefix = self._ioc_prefix_for_title()
         current = self._axis_id()
+
+        if not self._axis_id_was_provided:
+            first_axis = self._read_first_axis_id()
+            if first_axis:
+                if first_axis != current:
+                    self._log(f"No startup axis provided, using first axis from IOC: {first_axis}")
+                    self._set_axis_id(first_axis)
+                    current = first_axis
+            else:
+                self._log("No startup axis provided and first-axis discovery failed; opening axis picker")
+                self._open_axis_picker_dialog()
+                return
+
         resolved_id = self._resolve_axis_selector_to_id(current)
         if resolved_id and resolved_id != current:
             self._log(f'Axis selector "{current}" resolved to axis {resolved_id}')
@@ -1624,6 +1668,19 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             return
         self._log(f'Axis {current} probe returned empty; opening axis picker')
         self._open_axis_picker_dialog()
+
+    def _read_first_axis_id(self):
+        prefix = self._ioc_prefix_for_title()
+        if not prefix:
+            return ""
+        first_obj_pv = _join_prefix_pv(prefix, "MCU-Cfg-AX-FrstObjId")
+        try:
+            first_axis = str(self.client.get(first_obj_pv, as_string=True) or "").strip().strip('"')
+            if first_axis and first_axis != "-1" and re.fullmatch(r"\d+", first_axis):
+                return first_axis
+        except Exception as ex:
+            self._log(f"Failed reading first axis id from {first_obj_pv}: {ex}")
+        return ""
 
     def _combine_motor_record(self, axis_pfx, motor_name):
         a = str(axis_pfx or "").strip()
@@ -1689,6 +1746,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
     def _is_virtual_axis_hidden_path(self, path):
         path = str(path or "").strip()
         if not path:
+            return False
+        if not self._startup_axis_probe_ok:
             return False
         return (not self._axis_is_real(self._axis_id())) and (
             path == "drive" or path == "controller" or path.startswith(("drive.", "controller."))
@@ -1877,6 +1936,65 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             count += 1
         self._log(f"Copied readback to set fields: {count}")
 
+    def _row_is_visible_for_poll(self, row):
+        item = row.get("item")
+        if item is None:
+            return False
+        if item.isHidden():
+            return False
+        parent = item.parent()
+        while parent is not None:
+            if not parent.isExpanded():
+                return False
+            parent = parent.parent()
+        return True
+
+    def _visible_poll_rows(self):
+        return [r for r in self._leaf_rows if r.get("poll_enabled") and self._row_is_visible_for_poll(r)]
+
+    def _on_row_poll_toggled(self, row, checked):
+        if row is None:
+            return
+        if bool(checked) and not self._row_is_visible_for_poll(row):
+            self._set_poll_checkbox_state(row, False, suppress_signal=True)
+            return
+        row["poll_enabled"] = bool(checked)
+        self._update_poll_timer_state()
+
+    def _poll_checked_rows_once(self):
+        rows = self._visible_poll_rows()
+        if not rows:
+            self._poll_timer.stop()
+            return
+        for row in rows:
+            self._read_row(row, quiet=True)
+
+    def _update_poll_timer_state(self):
+        if self._visible_poll_rows():
+            if not self._poll_timer.isActive():
+                self._poll_timer.start(self._poll_interval_ms)
+        else:
+            self._poll_timer.stop()
+
+    def _on_tree_visibility_changed(self, _item=None):
+        for row in self._leaf_rows:
+            if not self._row_is_visible_for_poll(row) and row.get("poll_enabled"):
+                self._set_poll_checkbox_state(row, False, suppress_signal=True)
+        self._update_poll_timer_state()
+
+    def _set_poll_checkbox_state(self, row, checked, suppress_signal=False):
+        cb = row.get("poll_checkbox") if row else None
+        if row is not None:
+            row["poll_enabled"] = bool(checked)
+        if cb is None:
+            return
+        if suppress_signal:
+            blocked = cb.blockSignals(True)
+            cb.setChecked(bool(checked))
+            cb.blockSignals(blocked)
+        else:
+            cb.setChecked(bool(checked))
+
 
 def main():
     ap = argparse.ArgumentParser(description="Qt app for axis YAML template config mapped to ecmc commands")
@@ -1886,7 +2004,7 @@ def main():
     ap.add_argument("--prefix", default="")
     ap.add_argument("--cmd-pv", default="")
     ap.add_argument("--qry-pv", default="")
-    ap.add_argument("--axis-id", default="1")
+    ap.add_argument("--axis-id", default="")
     ap.add_argument("--timeout", type=float, default=2.0)
     ap.add_argument("--error-db", default="")
     args = ap.parse_args()
@@ -1905,6 +2023,7 @@ def main():
         axis_id=args.axis_id,
         title_prefix=args.prefix,
         error_db_path=args.error_db,
+        axis_id_was_provided=bool((args.axis_id or "").strip()),
     )
     w.show()
     sys.exit(app.exec_())

@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PREFIX="${1:-${PREFIX:-IOC:ECMC}}"
-AXIS_ID="${2:-${AXIS_ID:-1}}"
+AXIS_ID="${2-}"
 SKETCH_IMAGE_ARG="${3:-}"
 TIMEOUT="${TIMEOUT:-2.0}"
 SKETCH_IMAGE="${SKETCH_IMAGE_ARG:-${SKETCH_IMAGE:-}}"

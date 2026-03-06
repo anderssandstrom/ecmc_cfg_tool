@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PREFIX="${1:-${PREFIX:-IOC:ECMC}}"
-AXIS_ID="${2:-${AXIS_ID:-1}}"
+AXIS_ID="${2-}"
 YAML_FILE="${3:-${YAML_FILE:-${SCRIPT_DIR}/axis_template.yaml}}"
 TIMEOUT="${TIMEOUT:-2.0}"
 
