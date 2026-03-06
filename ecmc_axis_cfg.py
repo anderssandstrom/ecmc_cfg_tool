@@ -492,7 +492,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
 
         self.tree = QtWidgets.QTreeWidget()
         self.tree.setColumnCount(8)
-        self.tree.setHeaderLabels(["Field", "Set Value", "W", "", "Readback", "R", "Command", "Status"])
+        self.tree.setHeaderLabels(["Field", "Set Value", "W", "", "Readback (RO)", "R", "Command", "Status"])
         self.tree.setAlternatingRowColors(True)
         self.tree.setUniformRowHeights(False)
         self.tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
@@ -1076,6 +1076,15 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         set_edit.setPlaceholderText(val if val else "value")
         read_edit = QtWidgets.QLineEdit("")
         read_edit.setReadOnly(True)
+        read_edit.setStyleSheet(
+            "QLineEdit[readOnly=\"true\"] {"
+            " background-color: #f3f6fb;"
+            " color: #111827;"
+            " selection-background-color: #dce1ee;"
+            " }"
+        )
+        read_edit.setFocusPolicy(QtCore.Qt.NoFocus)
+        read_edit.setToolTip("Readback values are read-only")
         cmd_label = QtWidgets.QLineEdit(pair["set"] if pair else "")
         cmd_label.setReadOnly(True)
         cmd_label.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
