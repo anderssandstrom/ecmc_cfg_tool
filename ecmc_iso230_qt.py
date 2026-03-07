@@ -2,6 +2,7 @@
 import argparse
 import csv
 import html
+import json
 import math
 import random
 import tempfile
@@ -317,6 +318,54 @@ def _reference_pv_summary_text(settings):
     return ", ".join(f"Ref {idx + 1}={pv}" for idx, pv in enumerate(pvs))
 
 
+def _nonselected_reference_slots(settings):
+    selected_slot = settings.get("reference_slot")
+    try:
+        selected_slot = None if selected_slot is None else int(selected_slot)
+    except Exception:
+        selected_slot = None
+    out = []
+    for idx, pv in enumerate(_settings_reference_pvs(settings)):
+        if not pv or idx == selected_slot:
+            continue
+        out.append((idx, pv))
+    return out
+
+
+def _serialize_reference_stats(stats):
+    out = {}
+    for key, value in dict(stats or {}).items():
+        try:
+            slot = int(key)
+        except Exception:
+            continue
+        out[str(slot)] = {
+            "slot": value.get("slot"),
+            "pv": value.get("pv", ""),
+            "mean": value.get("mean"),
+            "std": value.get("std"),
+            "error": value.get("error"),
+        }
+    return out
+
+
+def _deserialize_reference_stats(stats):
+    out = {}
+    for key, value in dict(stats or {}).items():
+        try:
+            slot = int(key)
+        except Exception:
+            continue
+        out[slot] = {
+            "slot": value.get("slot"),
+            "pv": value.get("pv", ""),
+            "mean": value.get("mean"),
+            "std": value.get("std"),
+            "error": value.get("error"),
+        }
+    return out
+
+
 class _TargetSweepSchematic(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -522,6 +571,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.start_btn = QtWidgets.QPushButton("Start ISO 230 Test")
         self.abort_btn = QtWidgets.QPushButton("Abort")
         self.load_demo_btn = QtWidgets.QPushButton("Load Demo Data")
+        self.data_btn = QtWidgets.QToolButton()
+        self.data_btn.setText("Data")
         self.preview_report_btn = QtWidgets.QPushButton("Preview Report")
         self.export_report_btn = QtWidgets.QPushButton("Save Report (.md)")
         self.export_csv_btn = QtWidgets.QPushButton("Save CSV")
@@ -530,6 +581,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.axis_pick_combo.setMaximumWidth(_scaled_px(260))
         top_control_height = 28
         self.axis_pick_combo.setMinimumHeight(top_control_height)
+        self.data_btn.setMinimumHeight(top_control_height)
         for btn in (
             self.cfg_toggle_btn,
             self.log_toggle_btn,
@@ -543,6 +595,13 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             btn.setAutoDefault(False)
             btn.setDefault(False)
             btn.setMinimumHeight(top_control_height)
+        data_menu = QtWidgets.QMenu(self.data_btn)
+        open_data_action = data_menu.addAction("Open Data...")
+        save_data_action = data_menu.addAction("Save Data...")
+        open_data_action.triggered.connect(self.load_session_file)
+        save_data_action.triggered.connect(self.save_session_file)
+        self.data_btn.setMenu(data_menu)
+        self.data_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.abort_btn.setEnabled(False)
         self.axis_pick_combo.activated.connect(self._on_axis_combo_activated)
         self.cfg_toggle_btn.clicked.connect(self._toggle_config_panel)
@@ -554,13 +613,10 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.export_report_btn.clicked.connect(self.export_report)
         self.export_csv_btn.clicked.connect(self.export_csv)
         top_row.addWidget(self.cfg_toggle_btn)
-        top_row.addWidget(self.log_toggle_btn)
         top_row.addWidget(self.start_btn)
         top_row.addWidget(self.abort_btn)
-        top_row.addWidget(self.load_demo_btn)
         top_row.addWidget(self.preview_report_btn)
         top_row.addWidget(self.export_report_btn)
-        top_row.addWidget(self.export_csv_btn)
         top_row.addStretch(1)
         axis_col = QtWidgets.QVBoxLayout()
         axis_col.setContentsMargins(0, 0, 0, 0)
@@ -576,10 +632,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
 
         self.cfg_group = QtWidgets.QGroupBox("Run Setup")
         cfg = QtWidgets.QVBoxLayout(self.cfg_group)
-        cfg.setContentsMargins(6, 6, 6, 6)
-        cfg.setSpacing(8)
+        cfg.setContentsMargins(4, 4, 4, 4)
+        cfg.setSpacing(6)
 
         self.prefix_edit = QtWidgets.QLineEdit(self.default_prefix)
+        self.prefix_edit.setMinimumWidth(_scaled_px(180))
         self.axis_edit = QtWidgets.QLineEdit(self.default_axis_id)
         self.axis_edit.setMaximumWidth(_scaled_px(70))
         self.timeout_edit = QtWidgets.QDoubleSpinBox()
@@ -646,10 +703,14 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.motion_acc_edit = QtWidgets.QLineEdit("1")
         self.motion_vmax_edit = QtWidgets.QLineEdit("")
         self.motion_accs_edit = QtWidgets.QLineEdit("")
-        self.motion_velo_edit.setMaximumWidth(_scaled_px(90))
-        self.motion_acc_edit.setMaximumWidth(_scaled_px(90))
-        self.motion_vmax_edit.setMaximumWidth(_scaled_px(110))
-        self.motion_accs_edit.setMaximumWidth(_scaled_px(110))
+        self.motion_velo_edit.setMinimumWidth(_scaled_px(72))
+        self.motion_acc_edit.setMinimumWidth(_scaled_px(72))
+        self.motion_vmax_edit.setMinimumWidth(_scaled_px(92))
+        self.motion_accs_edit.setMinimumWidth(_scaled_px(92))
+        self.motion_velo_edit.setMaximumWidth(_scaled_px(130))
+        self.motion_acc_edit.setMaximumWidth(_scaled_px(130))
+        self.motion_vmax_edit.setMaximumWidth(_scaled_px(150))
+        self.motion_accs_edit.setMaximumWidth(_scaled_px(150))
         self.motion_vmax_edit.setPlaceholderText("optional")
         self.motion_accs_edit.setPlaceholderText("optional")
 
@@ -685,8 +746,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
 
         axis_box = QtWidgets.QWidget()
         axis_layout = QtWidgets.QHBoxLayout(axis_box)
-        axis_layout.setContentsMargins(6, 6, 6, 6)
-        axis_layout.setSpacing(10)
+        axis_layout.setContentsMargins(4, 4, 4, 4)
+        axis_layout.setSpacing(8)
 
         axis_left = QtWidgets.QWidget()
         axis_grid = QtWidgets.QGridLayout(axis_left)
@@ -708,11 +769,27 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         axis_grid.addWidget(self.motor_record_edit, 2, 1, 1, 4)
         axis_grid.addWidget(resolve_btn, 2, 5)
         axis_grid.addWidget(read_status_btn, 2, 6)
+        motion_row = QtWidgets.QHBoxLayout()
+        motion_row.setContentsMargins(0, 0, 0, 0)
+        motion_row.setSpacing(6)
+        motion_row.addWidget(QtWidgets.QLabel("VELO"))
+        motion_row.addWidget(self.motion_velo_edit)
+        motion_row.addWidget(QtWidgets.QLabel("ACCL"))
+        motion_row.addWidget(self.motion_acc_edit)
+        motion_row.addWidget(QtWidgets.QLabel("VMAX"))
+        motion_row.addWidget(self.motion_vmax_edit)
+        motion_row.addWidget(QtWidgets.QLabel("ACCS"))
+        motion_row.addWidget(self.motion_accs_edit)
+        motion_row.addStretch(1)
+        axis_grid.addLayout(motion_row, 3, 0, 1, 7)
+        axis_grid.setColumnStretch(1, 2)
+        axis_grid.setColumnStretch(4, 3)
+        axis_grid.setColumnStretch(6, 1)
 
         axis_right = QtWidgets.QWidget()
         axis_right_layout = QtWidgets.QVBoxLayout(axis_right)
         axis_right_layout.setContentsMargins(0, 0, 0, 0)
-        axis_right_layout.setSpacing(4)
+        axis_right_layout.setSpacing(2)
         ref_header = QtWidgets.QLabel("Reference PVs")
         ref_header.setStyleSheet("font-weight: 600;")
         axis_right_layout.addWidget(ref_header)
@@ -731,33 +808,14 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         ref_grid.addWidget(QtWidgets.QLabel("Use For Report"), _MAX_REFERENCE_PVS + 1, 0)
         ref_grid.addWidget(self.report_reference_combo, _MAX_REFERENCE_PVS + 1, 1, 1, 2)
         axis_right_layout.addWidget(ref_panel)
-
-        motion_header = QtWidgets.QLabel("Motor fields")
-        motion_header.setStyleSheet("font-weight: 600;")
-        axis_right_layout.addWidget(motion_header)
-        motion_panel = QtWidgets.QWidget()
-        motion_grid = QtWidgets.QGridLayout(motion_panel)
-        motion_grid.setContentsMargins(0, 0, 0, 0)
-        motion_grid.setHorizontalSpacing(6)
-        motion_grid.setVerticalSpacing(2)
-        motion_grid.addWidget(QtWidgets.QLabel("VELO"), 0, 0)
-        motion_grid.addWidget(self.motion_velo_edit, 0, 1)
-        motion_grid.addWidget(QtWidgets.QLabel("ACCL"), 0, 2)
-        motion_grid.addWidget(self.motion_acc_edit, 0, 3)
-        motion_grid.addWidget(QtWidgets.QLabel("VMAX"), 0, 4)
-        motion_grid.addWidget(self.motion_vmax_edit, 0, 5)
-        motion_grid.addWidget(QtWidgets.QLabel("ACCS"), 0, 6)
-        motion_grid.addWidget(self.motion_accs_edit, 0, 7)
-        motion_grid.setColumnStretch(8, 1)
-        axis_right_layout.addWidget(motion_panel)
         axis_right_layout.addStretch(1)
 
-        axis_layout.addWidget(axis_left, 3)
-        axis_layout.addWidget(axis_right, 2)
+        axis_layout.addWidget(axis_left, 5)
+        axis_layout.addWidget(axis_right, 3)
         plan_box = QtWidgets.QWidget()
         plan_box_layout = QtWidgets.QVBoxLayout(plan_box)
-        plan_box_layout.setContentsMargins(8, 8, 8, 8)
-        plan_box_layout.setSpacing(8)
+        plan_box_layout.setContentsMargins(6, 6, 6, 6)
+        plan_box_layout.setSpacing(6)
 
         plan_grid = QtWidgets.QGridLayout()
         plan_grid.setContentsMargins(0, 0, 0, 0)
@@ -767,10 +825,10 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         plan_grid.addWidget(self.range_min_edit, 0, 1)
         plan_grid.addWidget(QtWidgets.QLabel("Max"), 0, 2)
         plan_grid.addWidget(self.range_max_edit, 0, 3)
-        plan_grid.addWidget(QtWidgets.QLabel("Count override"), 0, 4)
-        plan_grid.addWidget(self.target_count_spin, 0, 5)
-        plan_grid.addWidget(QtWidgets.QLabel("Approach margin"), 0, 6)
-        plan_grid.addWidget(self.reversal_margin_edit, 0, 7)
+        plan_grid.addWidget(QtWidgets.QLabel("Approach margin"), 0, 4)
+        plan_grid.addWidget(self.reversal_margin_edit, 0, 5)
+        plan_grid.addWidget(QtWidgets.QLabel("Count override"), 0, 6)
+        plan_grid.addWidget(self.target_count_spin, 0, 7)
         plan_grid.addWidget(QtWidgets.QLabel("Cycles"), 1, 0)
         plan_grid.addWidget(self.cycles_spin, 1, 1)
         plan_grid.addWidget(QtWidgets.QLabel("Settle [s]"), 1, 2)
@@ -785,12 +843,32 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
 
         plan_box_layout.addLayout(plan_grid)
         self.target_schematic.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-        self.target_schematic.setFixedHeight(220)
+        self.target_schematic.setFixedHeight(200)
         plan_box_layout.addWidget(self.target_schematic)
+
+        tools_box = QtWidgets.QWidget()
+        tools_layout = QtWidgets.QVBoxLayout(tools_box)
+        tools_layout.setContentsMargins(6, 6, 6, 6)
+        tools_layout.setSpacing(6)
+        tools_grid = QtWidgets.QGridLayout()
+        tools_grid.setContentsMargins(0, 0, 0, 0)
+        tools_grid.setHorizontalSpacing(8)
+        tools_grid.setVerticalSpacing(6)
+        tools_grid.addWidget(self.log_toggle_btn, 0, 0)
+        tools_grid.addWidget(self.load_demo_btn, 0, 1)
+        tools_grid.addWidget(self.data_btn, 1, 0)
+        tools_grid.addWidget(self.export_csv_btn, 1, 1)
+        tools_grid.setColumnStretch(2, 1)
+        tools_layout.addLayout(tools_grid)
+        tools_note = QtWidgets.QLabel("Less frequently used actions.")
+        tools_note.setStyleSheet("color: #516079;")
+        tools_layout.addWidget(tools_note)
+        tools_layout.addStretch(1)
 
         self.cfg_tabs = QtWidgets.QTabWidget()
         self.cfg_tabs.addTab(axis_box, "Axis / PV")
         self.cfg_tabs.addTab(plan_box, "Range / Targets")
+        self.cfg_tabs.addTab(tools_box, "Tools")
         cfg.addWidget(self.cfg_tabs)
 
         layout.addWidget(self.cfg_group)
@@ -1423,6 +1501,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 "accs": accs,
                 "vmax": vmax,
                 "display_decimals": int(self.decimals_spin.value()),
+                "axis_prefix_cfg_pv": self.axis_pfx_cfg_pv_edit.text().strip(),
+                "motor_name_cfg_pv": self.motor_name_cfg_pv_edit.text().strip(),
             }
         )
         return settings
@@ -2689,6 +2769,37 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 f"{row.get('timestamp').strftime('%Y-%m-%d %H:%M:%S')} |"
             )
 
+        appendix_refs = _nonselected_reference_slots(settings)
+        if appendix_refs:
+            lines.extend(
+                [
+                    "",
+                    "## Appendix: Additional Reference PVs",
+                    "",
+                    "The following reference PVs were acquired during the test but were not used for the main report calculations.",
+                ]
+            )
+            for slot, pv in appendix_refs:
+                lines.extend(
+                    [
+                        "",
+                        f"### Ref {slot + 1}: `{pv}`",
+                        "",
+                        "| Cycle | Direction | Target | Ref Mean | Ref Std | Ref Err | Timestamp |",
+                        "| --- | --- | --- | --- | --- | --- | --- |",
+                    ]
+                )
+                for row in rows:
+                    stats = dict(row.get("reference_stats") or {})
+                    stat = dict(stats.get(slot) or {})
+                    if not stat:
+                        continue
+                    lines.append(
+                        f"| {row.get('cycle')} | {row.get('direction')} | {_fmt(row.get('target'))} | "
+                        f"{_fmt(stat.get('mean'))} | {_fmt(stat.get('std'))} | {_fmt(stat.get('error'))} | "
+                        f"{row.get('timestamp').strftime('%Y-%m-%d %H:%M:%S')} |"
+                    )
+
         return "\n".join(lines) + "\n"
 
     def _build_report_preview_html(self):
@@ -3073,6 +3184,96 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
                 table.setItem(r, c, _table_item(val, align_right=(c not in {1, 9})))
         return table
 
+    def _current_session_settings(self):
+        settings = dict(self._test_settings_cache or {})
+        try:
+            settings.update(self._sequence_preview_settings())
+        except Exception:
+            settings.setdefault("display_decimals", int(self.decimals_spin.value()))
+        settings["axis_prefix_cfg_pv"] = self.axis_pfx_cfg_pv_edit.text().strip()
+        settings["motor_name_cfg_pv"] = self.motor_name_cfg_pv_edit.text().strip()
+        settings["motor"] = self._committed_motor_record_text() or settings.get("motor", "")
+        settings["reference_pvs"] = self._configured_reference_pvs()
+        settings["reference_slot"] = self._selected_reference_slot(settings["reference_pvs"])
+        settings["reference_pv"] = self._selected_reference_pv(settings["reference_pvs"])
+        return settings
+
+    def _serialize_session_payload(self):
+        settings = self._current_session_settings()
+        return {
+            "file_type": "ecmc_iso230_session",
+            "version": 1,
+            "saved_at": datetime.now().isoformat(),
+            "state": (self._latest_metrics or {}).get("state", "Saved"),
+            "settings": settings,
+            "measurements": [
+                {
+                    "cycle": row.get("cycle"),
+                    "direction": row.get("direction"),
+                    "target": row.get("target"),
+                    "reference_slot": row.get("reference_slot"),
+                    "reference_pv": row.get("reference_pv", ""),
+                    "reference_mean": row.get("reference_mean"),
+                    "reference_std": row.get("reference_std"),
+                    "rbv_mean": row.get("rbv_mean"),
+                    "rbv_std": row.get("rbv_std"),
+                    "command_mean": row.get("command_mean"),
+                    "ref_error": row.get("ref_error"),
+                    "rbv_error": row.get("rbv_error"),
+                    "reference_stats": _serialize_reference_stats(row.get("reference_stats")),
+                    "timestamp": row.get("timestamp").isoformat() if row.get("timestamp") else "",
+                }
+                for row in self._measurements
+            ],
+        }
+
+    def save_session_file(self):
+        payload = self._serialize_session_payload()
+        default_name = f"iso230_session_axis_{self._axis_id_text() or 'unknown'}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        path, _flt = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save ISO 230 Session Data",
+            str(Path.cwd() / default_name),
+            "JSON Files (*.json);;All Files (*)",
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            self._log(f"Saved session data: {path}")
+        except Exception as ex:
+            self._log(f"Failed to save session data: {ex}")
+
+    def load_session_file(self):
+        if self._test_active:
+            self.abort_test()
+        path, _flt = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Open ISO 230 Session Data",
+            str(Path.cwd()),
+            "JSON Files (*.json);;All Files (*)",
+        )
+        if not path:
+            return
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+            if str(payload.get("file_type", "")) != "ecmc_iso230_session":
+                raise RuntimeError("Unsupported session file")
+            settings = dict(payload.get("settings") or {})
+            rows = []
+            for source_row in list(payload.get("measurements") or []):
+                row = dict(source_row)
+                timestamp_txt = str(row.get("timestamp") or "").strip()
+                row["timestamp"] = datetime.fromisoformat(timestamp_txt) if timestamp_txt else datetime.now().replace(microsecond=0)
+                row["reference_stats"] = _deserialize_reference_stats(row.get("reference_stats"))
+                rows.append(row)
+            state = str(payload.get("state") or "Loaded")
+            self._apply_report_dataset(settings, rows, state=state)
+            self.step_label.setText(f"Loaded session: {Path(path).name}")
+            self._log(f"Loaded session data: {path}")
+        except Exception as ex:
+            self._log(f"Failed to load session data: {ex}")
+
     def _apply_report_dataset(self, settings, rows, state="Loaded"):
         self._demo_mode = str(state).lower() == "demo"
         self._poll_failure_cache.clear()
@@ -3083,7 +3284,11 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         _set_format_decimals(decimals)
         self.prefix_edit.setText(str(settings.get("prefix", "")))
         self.axis_edit.setText(str(settings.get("axis_id", "")))
+        self.axis_pfx_cfg_pv_edit.setText(str(settings.get("axis_prefix_cfg_pv", self.axis_pfx_cfg_pv_edit.text())))
+        self.motor_name_cfg_pv_edit.setText(str(settings.get("motor_name_cfg_pv", self.motor_name_cfg_pv_edit.text())))
+        self._commit_cfg_pv_edits()
         self.motor_record_edit.setText(str(settings.get("motor", "")))
+        self._committed_motor_record = str(settings.get("motor", "") or "")
         reference_pvs = _settings_reference_pvs(settings)
         for edit in self.reference_pv_edits:
             edit.blockSignals(True)
@@ -3091,6 +3296,7 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
             edit.setText(str(reference_pvs[idx]))
         for edit in self.reference_pv_edits:
             edit.blockSignals(False)
+        self._committed_reference_pvs = list(reference_pvs)
         self._refresh_reference_selector()
         reference_slot = settings.get("reference_slot")
         try:
