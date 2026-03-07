@@ -26,6 +26,9 @@ from ecmc_mtn_qt import (
 )
 from ecmc_stream_qt import EpicsClient, _join_prefix_pv, compact_float_text
 
+_FORMAT_DECIMALS = 5
+_MAX_REFERENCE_PVS = 5
+
 
 def _mean(values):
     vals = [float(v) for v in values]
@@ -54,6 +57,11 @@ def _format_duration(seconds):
     if minutes:
         return f"{minutes}m {secs:02d}s"
     return f"{secs}s"
+
+
+def _set_format_decimals(decimals):
+    global _FORMAT_DECIMALS
+    _FORMAT_DECIMALS = max(0, int(decimals))
 
 
 def _auto_iso230_target_count(span):
@@ -120,14 +128,18 @@ def _generate_iso230_targets(range_min, range_max, requested_count=0):
     }
 
 
-def _fmt(value, sig_digits=10):
+def _fmt(value, decimals=None):
     if value is None:
         return ""
-    return compact_float_text(value, sig_digits=sig_digits)
+    num = _float_or_none(value)
+    if num is None:
+        return str(value)
+    dec = _FORMAT_DECIMALS if decimals is None else max(0, int(decimals))
+    return f"{float(num):.{dec}f}"
 
 
 def _fmt_preview(value):
-    return _fmt(value, sig_digits=7)
+    return _fmt(value)
 
 
 def _float_or_none(text):
@@ -150,11 +162,14 @@ def _float_key(value):
 
 def _demo_settings():
     targets, target_meta = _generate_iso230_targets(0.0, 1600.0, 0)
+    reference_pvs = ["SIM:LASER:MEAS", "", "", "", ""]
     return {
         "prefix": "DEMO:ECMC",
         "axis_id": "7",
         "motor": "DEMO:AXIS7",
-        "reference_pv": "SIM:LASER:MEAS",
+        "reference_pvs": reference_pvs,
+        "reference_slot": 0,
+        "reference_pv": reference_pvs[0],
         "range_min": targets[0],
         "range_max": targets[-1],
         "span": targets[-1] - targets[0],
@@ -172,6 +187,7 @@ def _demo_settings():
         "accl": 80.0,
         "accs": 120.0,
         "vmax": 40.0,
+        "display_decimals": _FORMAT_DECIMALS,
     }
 
 
@@ -202,11 +218,23 @@ def _build_demo_measurements(settings, seed=2302):
                 rbv_mean = reference_mean + rbv_bias
                 ref_std = 0.00018 + abs(rng.gauss(0.0, 0.00005))
                 rbv_std = 0.00023 + abs(rng.gauss(0.0, 0.00007))
+                reference_stats = {
+                    0: {
+                        "slot": 0,
+                        "pv": settings.get("reference_pv", ""),
+                        "mean": reference_mean,
+                        "std": ref_std,
+                        "error": reference_mean - float(target),
+                    }
+                }
                 rows.append(
                     {
                         "cycle": cycle,
                         "direction": direction,
                         "target": float(target),
+                        "reference_stats": reference_stats,
+                        "reference_slot": 0,
+                        "reference_pv": settings.get("reference_pv", ""),
                         "reference_mean": reference_mean,
                         "reference_std": ref_std,
                         "rbv_mean": rbv_mean,
@@ -224,37 +252,64 @@ def _build_demo_measurements(settings, seed=2302):
 def _write_demo_csv(path, rows):
     with open(path, "w", newline="", encoding="utf-8") as fp:
         writer = csv.writer(fp)
-        writer.writerow(
-            [
-                "cycle",
-                "direction",
-                "target",
-                "reference_mean",
-                "reference_std",
-                "rbv_mean",
-                "rbv_std",
-                "command_mean",
-                "ref_error",
-                "rbv_error",
-                "timestamp",
-            ]
-        )
+        headers = [
+            "cycle",
+            "direction",
+            "target",
+            "selected_reference_slot",
+            "selected_reference_pv",
+            "reference_mean",
+            "reference_std",
+            "rbv_mean",
+            "rbv_std",
+            "command_mean",
+            "ref_error",
+            "rbv_error",
+        ]
+        for idx in range(_MAX_REFERENCE_PVS):
+            prefix = f"ref{idx + 1}"
+            headers.extend([f"{prefix}_pv", f"{prefix}_mean", f"{prefix}_std", f"{prefix}_error"])
+        headers.append("timestamp")
+        writer.writerow(headers)
         for row in rows:
+            record = [
+                row["cycle"],
+                row["direction"],
+                row["target"],
+                row.get("reference_slot"),
+                row.get("reference_pv"),
+                row["reference_mean"],
+                row["reference_std"],
+                row["rbv_mean"],
+                row["rbv_std"],
+                row["command_mean"],
+                row["ref_error"],
+                row["rbv_error"],
+            ]
+            stats = dict(row.get("reference_stats") or {})
+            for idx in range(_MAX_REFERENCE_PVS):
+                stat = stats.get(idx, {})
+                record.extend([stat.get("pv", ""), stat.get("mean"), stat.get("std"), stat.get("error")])
+            record.append(row["timestamp"].isoformat())
             writer.writerow(
-                [
-                    row["cycle"],
-                    row["direction"],
-                    row["target"],
-                    row["reference_mean"],
-                    row["reference_std"],
-                    row["rbv_mean"],
-                    row["rbv_std"],
-                    row["command_mean"],
-                    row["ref_error"],
-                    row["rbv_error"],
-                    row["timestamp"].isoformat(),
-                ]
+                record
             )
+
+
+def _settings_reference_pvs(settings):
+    pvs = list(settings.get("reference_pvs") or [])
+    if not pvs and settings.get("reference_pv"):
+        pvs = [settings.get("reference_pv")]
+    while len(pvs) < _MAX_REFERENCE_PVS:
+        pvs.append("")
+    return pvs[:_MAX_REFERENCE_PVS]
+
+
+def _reference_pv_summary_text(settings):
+    pvs = [pv for pv in _settings_reference_pvs(settings) if pv]
+    if not pvs:
+        return ""
+    return ", ".join(f"Ref {idx + 1}={pv}" for idx, pv in enumerate(pvs))
 
 
 class _TargetSweepSchematic(QtWidgets.QWidget):
@@ -364,17 +419,17 @@ class _TargetSweepSchematic(QtWidgets.QWidget):
             painter.drawText(
                 QtCore.QRectF(x - 32, label_y, 64, 12),
                 QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter,
-                _fmt(target, 5),
+                _fmt(target),
             )
 
         range_label_y = rect.bottom() - 48
         margin_label_y = rect.bottom() - 30
         painter.setPen(QtGui.QColor("#0f172a"))
-        painter.drawText(QtCore.QRectF(x_lo - 32, range_label_y, 64, 14), QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter, f"{_fmt(lo, 5)}")
-        painter.drawText(QtCore.QRectF(x_hi - 32, range_label_y, 64, 14), QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter, f"{_fmt(hi, 5)}")
+        painter.drawText(QtCore.QRectF(x_lo - 32, range_label_y, 64, 14), QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter, f"{_fmt(lo)}")
+        painter.drawText(QtCore.QRectF(x_hi - 32, range_label_y, 64, 14), QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter, f"{_fmt(hi)}")
         painter.setPen(QtGui.QColor("#7c2d12"))
-        painter.drawText(QtCore.QRectF(x_full_lo - 32, margin_label_y, 64, 14), QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter, f"{_fmt(full_lo, 5)}")
-        painter.drawText(QtCore.QRectF(x_full_hi - 32, margin_label_y, 64, 14), QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter, f"{_fmt(full_hi, 5)}")
+        painter.drawText(QtCore.QRectF(x_full_lo - 32, margin_label_y, 64, 14), QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter, f"{_fmt(full_lo)}")
+        painter.drawText(QtCore.QRectF(x_full_hi - 32, margin_label_y, 64, 14), QtCore.Qt.AlignHCenter | QtCore.Qt.AlignVCenter, f"{_fmt(full_hi)}")
 
 
 
@@ -516,8 +571,21 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.motor_name_cfg_pv_edit = QtWidgets.QLineEdit()
         self.motor_record_edit = QtWidgets.QLineEdit("")
         self.motor_record_edit.setPlaceholderText("Resolved motor record base PV")
-        self.reference_pv_edit = QtWidgets.QLineEdit("")
-        self.reference_pv_edit.setPlaceholderText("Defaults to <motor>-PosAct")
+        self.reference_pv_edits = []
+        self.reference_value_edits = []
+        for idx in range(_MAX_REFERENCE_PVS):
+            edit = QtWidgets.QLineEdit("")
+            if idx == 0:
+                edit.setPlaceholderText("Defaults to <motor>-PosAct")
+            else:
+                edit.setPlaceholderText("Optional additional reference PV")
+            self.reference_pv_edits.append(edit)
+            value_edit = QtWidgets.QLineEdit("")
+            value_edit.setReadOnly(True)
+            value_edit.setPlaceholderText("value")
+            self.reference_value_edits.append(value_edit)
+        self.report_reference_combo = QtWidgets.QComboBox()
+        self.report_reference_combo.setMinimumWidth(220)
 
         self.range_min_edit = QtWidgets.QLineEdit("0")
         self.range_max_edit = QtWidgets.QLineEdit("10")
@@ -527,10 +595,10 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.target_count_spin.setRange(0, 41)
         self.target_count_spin.setValue(0)
         self.target_count_spin.setSpecialValueText("Auto (ISO minimum)")
-        self.target_count_spin.setMinimumWidth(170)
+        self.target_count_spin.setMinimumWidth(120)
         self.reversal_margin_edit = QtWidgets.QLineEdit("")
         self.reversal_margin_edit.setPlaceholderText("Auto (5% of range)")
-        self.reversal_margin_edit.setMaximumWidth(110)
+        self.reversal_margin_edit.setMaximumWidth(160)
         self.target_schematic = _TargetSweepSchematic()
         self.cycles_spin = QtWidgets.QSpinBox()
         self.cycles_spin.setRange(1, 20)
@@ -545,6 +613,10 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.samples_spin.setRange(1, 50)
         self.samples_spin.setValue(5)
         self.samples_spin.setMaximumWidth(80)
+        self.decimals_spin = QtWidgets.QSpinBox()
+        self.decimals_spin.setRange(0, 8)
+        self.decimals_spin.setValue(_FORMAT_DECIMALS)
+        self.decimals_spin.setMaximumWidth(80)
         self.estimated_duration_value = QtWidgets.QLabel("-")
         self.estimated_duration_value.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
 
@@ -574,6 +646,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.prefix_edit.editingFinished.connect(self._update_cfg_pv_edits)
         self.axis_edit.editingFinished.connect(self._update_cfg_pv_edits)
         self.motor_record_edit.textChanged.connect(self._sync_reference_pv_default)
+        for edit in self.reference_pv_edits:
+            edit.textChanged.connect(self._on_reference_pvs_changed)
+        self.report_reference_combo.currentIndexChanged.connect(self._on_reference_selection_changed)
         self.range_min_edit.editingFinished.connect(self._on_range_inputs_changed)
         self.range_max_edit.editingFinished.connect(self._on_range_inputs_changed)
         self.target_count_spin.valueChanged.connect(self._update_duration_estimate)
@@ -582,10 +657,16 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.settle_spin.valueChanged.connect(self._update_duration_estimate)
         self.samples_spin.valueChanged.connect(self._update_duration_estimate)
         self.motion_velo_edit.editingFinished.connect(self._update_duration_estimate)
+        self.decimals_spin.valueChanged.connect(self._on_decimals_changed)
 
         axis_box = QtWidgets.QGroupBox("1. Axis / PV Binding")
-        axis_grid = QtWidgets.QGridLayout(axis_box)
-        axis_grid.setContentsMargins(6, 6, 6, 6)
+        axis_layout = QtWidgets.QHBoxLayout(axis_box)
+        axis_layout.setContentsMargins(6, 6, 6, 6)
+        axis_layout.setSpacing(10)
+
+        axis_left = QtWidgets.QWidget()
+        axis_grid = QtWidgets.QGridLayout(axis_left)
+        axis_grid.setContentsMargins(0, 0, 0, 0)
         axis_grid.setHorizontalSpacing(8)
         axis_grid.setVerticalSpacing(4)
         axis_grid.addWidget(QtWidgets.QLabel("IOC Prefix"), 0, 0)
@@ -596,15 +677,36 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         axis_grid.addWidget(QtWidgets.QLabel("Timeout [s]"), 0, 5)
         axis_grid.addWidget(self.timeout_edit, 0, 6)
         axis_grid.addWidget(QtWidgets.QLabel("Axis Prefix PV"), 1, 0)
-        axis_grid.addWidget(self.axis_pfx_cfg_pv_edit, 1, 1, 1, 3)
-        axis_grid.addWidget(QtWidgets.QLabel("Motor Name PV"), 1, 4)
-        axis_grid.addWidget(self.motor_name_cfg_pv_edit, 1, 5, 1, 2)
-        axis_grid.addWidget(QtWidgets.QLabel("Motor Record"), 2, 0)
-        axis_grid.addWidget(self.motor_record_edit, 2, 1, 1, 3)
-        axis_grid.addWidget(resolve_btn, 2, 4)
-        axis_grid.addWidget(QtWidgets.QLabel("Reference PV"), 2, 5)
-        axis_grid.addWidget(self.reference_pv_edit, 2, 6)
-        axis_grid.addWidget(read_status_btn, 2, 7)
+        axis_grid.addWidget(self.axis_pfx_cfg_pv_edit, 1, 1, 1, 6)
+        axis_grid.addWidget(QtWidgets.QLabel("Motor Name PV"), 2, 0)
+        axis_grid.addWidget(self.motor_name_cfg_pv_edit, 2, 1, 1, 6)
+        axis_grid.addWidget(QtWidgets.QLabel("Motor Record"), 3, 0)
+        axis_grid.addWidget(self.motor_record_edit, 3, 1, 1, 5)
+        axis_grid.addWidget(resolve_btn, 3, 6)
+        axis_grid.addWidget(read_status_btn, 4, 6)
+
+        axis_right = QtWidgets.QVBoxLayout()
+        axis_right.setContentsMargins(0, 0, 0, 0)
+        axis_right.setSpacing(6)
+        ref_box = QtWidgets.QGroupBox("Reference PVs")
+        ref_grid = QtWidgets.QGridLayout(ref_box)
+        ref_grid.setContentsMargins(6, 6, 6, 6)
+        ref_grid.setHorizontalSpacing(6)
+        ref_grid.setVerticalSpacing(4)
+        ref_grid.addWidget(QtWidgets.QLabel("PV"), 0, 1)
+        ref_grid.addWidget(QtWidgets.QLabel("Value"), 0, 2)
+        for idx, edit in enumerate(self.reference_pv_edits):
+            row = idx + 1
+            ref_grid.addWidget(QtWidgets.QLabel(f"Ref {idx + 1}"), row, 0)
+            ref_grid.addWidget(edit, row, 1)
+            ref_grid.addWidget(self.reference_value_edits[idx], row, 2)
+        ref_grid.addWidget(QtWidgets.QLabel("Use For Report"), _MAX_REFERENCE_PVS + 1, 0)
+        ref_grid.addWidget(self.report_reference_combo, _MAX_REFERENCE_PVS + 1, 1, 1, 2)
+        axis_right.addWidget(ref_box)
+        axis_right.addStretch(1)
+
+        axis_layout.addWidget(axis_left, 3)
+        axis_layout.addLayout(axis_right, 2)
         cfg.addWidget(axis_box)
 
         plan_box = QtWidgets.QGroupBox("2. Test Range / Target Generation")
@@ -644,6 +746,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         plan_box_layout.addWidget(self.target_schematic)
 
         run_box = QtWidgets.QGroupBox("3. Sequence / Motion")
+        run_box.setMaximumWidth(420)
+        run_box.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Preferred)
         run_form = QtWidgets.QFormLayout(run_box)
         run_form.setContentsMargins(8, 8, 8, 8)
         run_form.setHorizontalSpacing(12)
@@ -658,11 +762,19 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         seq_row.addSpacing(10)
         seq_row.addWidget(QtWidgets.QLabel("Settle [s]"))
         seq_row.addWidget(self.settle_spin)
-        seq_row.addSpacing(10)
-        seq_row.addWidget(QtWidgets.QLabel("Samples / point"))
-        seq_row.addWidget(self.samples_spin)
         seq_row.addStretch(1)
         run_form.addRow("Sequence", seq_row)
+
+        sample_row = QtWidgets.QHBoxLayout()
+        sample_row.setContentsMargins(0, 0, 0, 0)
+        sample_row.setSpacing(6)
+        sample_row.addWidget(QtWidgets.QLabel("Samples / point"))
+        sample_row.addWidget(self.samples_spin)
+        sample_row.addSpacing(10)
+        sample_row.addWidget(QtWidgets.QLabel("Decimals"))
+        sample_row.addWidget(self.decimals_spin)
+        sample_row.addStretch(1)
+        run_form.addRow("Sampling", sample_row)
 
         estimate_row = QtWidgets.QHBoxLayout()
         estimate_row.setContentsMargins(0, 0, 0, 0)
@@ -671,22 +783,20 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         estimate_row.addStretch(1)
         run_form.addRow("Estimated duration", estimate_row)
 
-        motion_row = QtWidgets.QHBoxLayout()
-        motion_row.setContentsMargins(0, 0, 0, 0)
-        motion_row.setSpacing(6)
-        motion_row.addWidget(QtWidgets.QLabel("VELO"))
-        motion_row.addWidget(self.motion_velo_edit)
-        motion_row.addSpacing(8)
-        motion_row.addWidget(QtWidgets.QLabel("ACCL"))
-        motion_row.addWidget(self.motion_acc_edit)
-        motion_row.addSpacing(8)
-        motion_row.addWidget(QtWidgets.QLabel("VMAX"))
-        motion_row.addWidget(self.motion_vmax_edit)
-        motion_row.addSpacing(8)
-        motion_row.addWidget(QtWidgets.QLabel("ACCS"))
-        motion_row.addWidget(self.motion_accs_edit)
-        motion_row.addStretch(1)
-        run_form.addRow("Motor fields", motion_row)
+        motion_grid = QtWidgets.QGridLayout()
+        motion_grid.setContentsMargins(0, 0, 0, 0)
+        motion_grid.setHorizontalSpacing(8)
+        motion_grid.setVerticalSpacing(4)
+        motion_grid.addWidget(QtWidgets.QLabel("VELO"), 0, 0)
+        motion_grid.addWidget(self.motion_velo_edit, 0, 1)
+        motion_grid.addWidget(QtWidgets.QLabel("ACCL"), 0, 2)
+        motion_grid.addWidget(self.motion_acc_edit, 0, 3)
+        motion_grid.addWidget(QtWidgets.QLabel("VMAX"), 1, 0)
+        motion_grid.addWidget(self.motion_vmax_edit, 1, 1)
+        motion_grid.addWidget(QtWidgets.QLabel("ACCS"), 1, 2)
+        motion_grid.addWidget(self.motion_accs_edit, 1, 3)
+        motion_grid.setColumnStretch(4, 1)
+        run_form.addRow("Motor fields", motion_grid)
 
         run_note = QtWidgets.QLabel(
             "Cycles, settle time and sampling define the ISO 230 sequence. Leave optional VMAX/ACCS blank to keep the current motor settings."
@@ -698,8 +808,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         lower_setup_row = QtWidgets.QHBoxLayout()
         lower_setup_row.setContentsMargins(0, 0, 0, 0)
         lower_setup_row.setSpacing(8)
-        lower_setup_row.addWidget(plan_box, 7)
-        lower_setup_row.addWidget(run_box, 1)
+        lower_setup_row.addWidget(plan_box, 1)
+        lower_setup_row.addWidget(run_box, 0, QtCore.Qt.AlignTop)
         cfg.addLayout(lower_setup_row)
 
         layout.addWidget(self.cfg_group)
@@ -832,6 +942,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         layout.addLayout(progress_row)
 
         self._refresh_axis_pick_combo()
+        self._refresh_reference_selector()
         self._sync_reversal_margin_default()
         self.preview_targets()
         self._update_duration_estimate()
@@ -1082,13 +1193,81 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         if not self.motor_name_cfg_pv_edit.text().strip() or "MCU-Cfg-AX" in self.motor_name_cfg_pv_edit.text():
             self.motor_name_cfg_pv_edit.setText(guessed)
 
+    def _configured_reference_pvs(self):
+        return [edit.text().strip() for edit in self.reference_pv_edits]
+
+    def _selected_reference_slot(self, reference_pvs=None):
+        pvs = list(reference_pvs if reference_pvs is not None else self._configured_reference_pvs())
+        current = self.report_reference_combo.currentData(QtCore.Qt.UserRole)
+        if current is not None:
+            try:
+                slot = int(current)
+            except Exception:
+                slot = None
+            else:
+                if 0 <= slot < len(pvs) and pvs[slot]:
+                    return slot
+        for idx, pv in enumerate(pvs):
+            if pv:
+                return idx
+        return None
+
+    def _selected_reference_pv(self, reference_pvs=None):
+        pvs = list(reference_pvs if reference_pvs is not None else self._configured_reference_pvs())
+        slot = self._selected_reference_slot(pvs)
+        if slot is None:
+            return ""
+        return pvs[slot]
+
+    def _refresh_reference_selector(self):
+        pvs = self._configured_reference_pvs()
+        selected_slot = self._selected_reference_slot(pvs)
+        self.report_reference_combo.blockSignals(True)
+        self.report_reference_combo.clear()
+        for idx, pv in enumerate(pvs):
+            if not pv:
+                continue
+            self.report_reference_combo.addItem(f"Ref {idx + 1}: {pv}", idx)
+        if self.report_reference_combo.count() == 0:
+            self.report_reference_combo.addItem("No reference PV configured", -1)
+            self.report_reference_combo.setEnabled(False)
+        else:
+            self.report_reference_combo.setEnabled(True)
+            combo_index = self.report_reference_combo.findData(
+                selected_slot if selected_slot is not None else -1,
+                role=QtCore.Qt.UserRole,
+            )
+            self.report_reference_combo.setCurrentIndex(max(0, combo_index))
+        self.report_reference_combo.blockSignals(False)
+
+    def _on_reference_pvs_changed(self, _text=None):
+        self._refresh_reference_selector()
+        if self._measurements:
+            self._reproject_measurements_for_selected_reference()
+        else:
+            self.preview_targets()
+            try:
+                self.refresh_status()
+            except Exception:
+                pass
+
+    def _on_reference_selection_changed(self, _index):
+        if self._measurements:
+            self._reproject_measurements_for_selected_reference()
+        else:
+            try:
+                self.refresh_status()
+            except Exception:
+                pass
+
     def _sync_reference_pv_default(self, _text=None):
         motor = self.motor_record_edit.text().strip()
         default_ref = f"{motor}-PosAct" if motor else ""
-        current_ref = self.reference_pv_edit.text().strip()
+        current_ref = self.reference_pv_edits[0].text().strip()
         if not current_ref or current_ref == self._last_auto_reference_pv:
-            self.reference_pv_edit.setText(default_ref)
+            self.reference_pv_edits[0].setText(default_ref)
         self._last_auto_reference_pv = default_ref
+        self._refresh_reference_selector()
 
     def _sync_reversal_margin_default(self):
         try:
@@ -1108,6 +1287,23 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
     def _on_range_inputs_changed(self):
         self._sync_reversal_margin_default()
         self._update_duration_estimate()
+
+    def _on_decimals_changed(self, value):
+        _set_format_decimals(value)
+        self._refresh_formatted_outputs()
+
+    def _refresh_formatted_outputs(self):
+        self._sync_reversal_margin_default()
+        self._update_duration_estimate()
+        self._update_summary_labels(self._latest_metrics or {})
+        self._populate_summary_table((self._latest_metrics or {}).get("per_target", []))
+        self._reload_results_table()
+        if self._measurements:
+            self._latest_report_markdown = self._build_report_markdown()
+        if self._last_status:
+            for field in ("VAL", "RBV", "DMOV", "CNEN", "REF"):
+                if field in self.status_fields:
+                    self.status_fields[field].setText(_fmt(self._last_status.get(field)))
 
     def _read_motor_soft_limits(self):
         if not self.motor_record_edit.text().strip():
@@ -1201,6 +1397,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 "accl": accl,
                 "accs": accs,
                 "vmax": vmax,
+                "display_decimals": int(self.decimals_spin.value()),
             }
         )
         return settings
@@ -1389,19 +1586,19 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         if not self.motor_record_edit.text().strip():
             return
         try:
-            self.motion_velo_edit.setText(compact_float_text(self.client.get(self._pv("VELO"), as_string=True)))
+            self.motion_velo_edit.setText(_fmt(self.client.get(self._pv("VELO"), as_string=True)))
         except Exception:
             pass
         try:
-            self.motion_acc_edit.setText(compact_float_text(self.client.get(self._pv("ACCL"), as_string=True)))
+            self.motion_acc_edit.setText(_fmt(self.client.get(self._pv("ACCL"), as_string=True)))
         except Exception:
             pass
         try:
-            self.motion_vmax_edit.setText(compact_float_text(self.client.get(self._pv("VMAX"), as_string=True)))
+            self.motion_vmax_edit.setText(_fmt(self.client.get(self._pv("VMAX"), as_string=True)))
         except Exception:
             self.motion_vmax_edit.setText("")
         try:
-            self.motion_accs_edit.setText(compact_float_text(self.client.get(self._pv("ACCS"), as_string=True)))
+            self.motion_accs_edit.setText(_fmt(self.client.get(self._pv("ACCS"), as_string=True)))
         except Exception:
             self.motion_accs_edit.setText("")
         self._motor_soft_limits = self._read_motor_soft_limits()
@@ -1435,35 +1632,57 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         vals = {}
         if self._demo_mode:
             demo_row = self._measurements[-1] if self._measurements else None
+            stats = self._reference_stats_for_row(demo_row) if demo_row is not None else {}
             if demo_row is not None:
                 vals = {
-                    "VAL": compact_float_text(demo_row.get("command_mean")),
-                    "RBV": compact_float_text(demo_row.get("rbv_mean")),
+                    "VAL": _fmt(demo_row.get("command_mean")),
+                    "RBV": _fmt(demo_row.get("rbv_mean")),
                     "DMOV": "1",
                     "CNEN": "1",
-                    "REF": compact_float_text(demo_row.get("reference_mean")),
+                    "REF": _fmt(demo_row.get("reference_mean")),
                 }
             else:
                 vals = {"VAL": "", "RBV": "", "DMOV": "1", "CNEN": "1", "REF": ""}
             for field in ("VAL", "RBV", "DMOV", "CNEN", "REF"):
                 self.status_fields[field].setText(str(vals.get(field, "")))
+            for idx, value_edit in enumerate(self.reference_value_edits):
+                stat = stats.get(idx, {})
+                value_edit.setText(_fmt(stat.get("mean")))
             self._last_status = dict(vals)
             return vals
-        if not self.motor_record_edit.text().strip():
-            return vals
-        for field in ("VAL", "RBV", "DMOV", "CNEN"):
-            try:
-                vals[field] = str(self.client.get(self._pv(field), as_string=True)).strip()
-            except Exception as ex:
-                vals[field] = f"ERR: {ex}"
-            self.status_fields[field].setText(compact_float_text(vals[field]))
-        ref_pv = self.reference_pv_edit.text().strip()
+        if self.motor_record_edit.text().strip():
+            for field in ("VAL", "RBV", "DMOV", "CNEN"):
+                try:
+                    vals[field] = str(self.client.get(self._pv(field), as_string=True)).strip()
+                except Exception as ex:
+                    vals[field] = f"ERR: {ex}"
+                self.status_fields[field].setText(_fmt(vals[field]))
+        else:
+            for field in ("VAL", "RBV", "DMOV", "CNEN"):
+                vals[field] = ""
+                self.status_fields[field].setText("")
+        ref_pv = self._selected_reference_pv()
         if ref_pv:
             try:
                 vals["REF"] = str(self.client.get(ref_pv, as_string=True)).strip()
             except Exception as ex:
                 vals["REF"] = f"ERR: {ex}"
-            self.status_fields["REF"].setText(compact_float_text(vals["REF"]))
+            self.status_fields["REF"].setText(_fmt(vals["REF"]))
+        else:
+            vals["REF"] = ""
+            self.status_fields["REF"].setText("")
+        ref_values = {}
+        for idx, ref_pv in enumerate(self._configured_reference_pvs()):
+            if not ref_pv:
+                self.reference_value_edits[idx].setText("")
+                continue
+            try:
+                raw = str(self.client.get(ref_pv, as_string=True)).strip()
+                ref_values[idx] = raw
+            except Exception as ex:
+                raw = f"ERR: {ex}"
+            self.reference_value_edits[idx].setText(_fmt(raw))
+        vals["REFS"] = dict(ref_values)
         self._last_status = dict(vals)
         return vals
 
@@ -1477,7 +1696,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
 
     def _target_preview_settings(self):
         motor = self.motor_record_edit.text().strip()
-        ref_pv = self.reference_pv_edit.text().strip()
+        reference_pvs = self._configured_reference_pvs()
+        reference_slot = self._selected_reference_slot(reference_pvs)
+        ref_pv = self._selected_reference_pv(reference_pvs)
         range_min = _to_float(self.range_min_edit.text(), "Range Min")
         range_max = _to_float(self.range_max_edit.text(), "Range Max")
         if range_max <= range_min:
@@ -1497,6 +1718,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             "prefix": self.prefix_edit.text().strip() or self.default_prefix,
             "axis_id": self._axis_id_text(),
             "motor": motor,
+            "reference_pvs": reference_pvs,
+            "reference_slot": reference_slot,
             "reference_pv": ref_pv,
             "range_min": range_min,
             "range_max": range_max,
@@ -1513,9 +1736,93 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         settings = self._sequence_preview_settings()
         if not settings["motor"]:
             raise RuntimeError("Resolve a motor record before starting the test")
-        if not settings["reference_pv"]:
-            raise RuntimeError("Reference measurement PV is required")
+        if not any(settings.get("reference_pvs") or []):
+            raise RuntimeError("At least one reference measurement PV is required")
         return settings
+
+    def _reference_stats_for_row(self, row):
+        stats = dict(row.get("reference_stats") or {})
+        if stats:
+            return stats
+        pv = str(row.get("reference_pv", "") or "").strip()
+        if not pv and self._test_settings_cache:
+            pvs = list(self._test_settings_cache.get("reference_pvs") or [])
+            slot = row.get("reference_slot")
+            if slot is not None:
+                try:
+                    slot = int(slot)
+                except Exception:
+                    slot = None
+                else:
+                    if 0 <= slot < len(pvs):
+                        pv = pvs[slot]
+            if not pv:
+                pv = str(self._test_settings_cache.get("reference_pv", "") or "").strip()
+        if row.get("reference_mean") is None and row.get("reference_std") is None and row.get("ref_error") is None:
+            return {}
+        return {
+            0: {
+                "slot": 0,
+                "pv": pv,
+                "mean": row.get("reference_mean"),
+                "std": row.get("reference_std"),
+                "error": row.get("ref_error"),
+            }
+        }
+
+    def _project_row_reference(self, row, settings=None, reference_slot=None):
+        active_settings = settings or self._test_settings_cache or {}
+        reference_pvs = list(active_settings.get("reference_pvs") or [])
+        stats = self._reference_stats_for_row(row)
+        row["reference_stats"] = stats
+        slot = reference_slot
+        if slot is None:
+            slot = active_settings.get("reference_slot")
+        try:
+            slot = None if slot is None else int(slot)
+        except Exception:
+            slot = None
+        chosen = stats.get(slot) if slot is not None else None
+        if chosen is None and stats:
+            first_key = sorted(stats.keys())[0]
+            chosen = stats[first_key]
+            slot = int(first_key)
+        if chosen is None:
+            chosen = {"slot": None, "pv": "", "mean": None, "std": None, "error": None}
+            slot = None
+        pv = chosen.get("pv", "")
+        if slot is not None and not pv and 0 <= slot < len(reference_pvs):
+            pv = reference_pvs[slot]
+        row["reference_slot"] = slot
+        row["reference_pv"] = pv
+        row["reference_mean"] = chosen.get("mean")
+        row["reference_std"] = chosen.get("std")
+        row["ref_error"] = chosen.get("error")
+        return row
+
+    def _reproject_measurements_for_selected_reference(self):
+        if not self._measurements:
+            return
+        reference_pvs = self._configured_reference_pvs()
+        reference_slot = self._selected_reference_slot(reference_pvs)
+        selected_pv = self._selected_reference_pv(reference_pvs)
+        self._test_settings_cache["reference_pvs"] = reference_pvs
+        self._test_settings_cache["reference_slot"] = reference_slot
+        self._test_settings_cache["reference_pv"] = selected_pv
+        for row in self._measurements:
+            self._project_row_reference(row, self._test_settings_cache, reference_slot)
+        self._latest_metrics = self._compute_metrics(self._measurements)
+        if self._demo_mode and self._latest_metrics:
+            self._latest_metrics["state"] = "Demo"
+        self._update_summary_labels(self._latest_metrics)
+        self._populate_summary_table(self._latest_metrics.get("per_target", []))
+        self._reload_results_table()
+        self._latest_report_markdown = self._build_report_markdown()
+        self.preview_targets()
+        try:
+            self.refresh_status()
+        except Exception:
+            pass
 
     def _build_test_plan(self, settings):
         targets = list(settings["targets"])
@@ -1575,7 +1882,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         tooltip_lines = [
             f"Axis: {settings['axis_id']}",
             f"Range: {_fmt(settings['range_min'])} .. {_fmt(settings['range_max'])}",
-            f"Targets ({len(targets)}): {', '.join(_fmt(v, sig_digits=8) for v in targets)}",
+            f"Targets ({len(targets)}): {', '.join(_fmt(v) for v in targets)}",
             f"Approach margin outside targets: {_fmt(settings['reversal_margin'])}",
             f"Generation mode: {settings.get('target_mode') or 'custom'}",
         ]
@@ -1588,7 +1895,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         if not settings["motor"]:
             tooltip_lines.append("Run note: resolve the motor record before starting the sequence.")
         if not settings["reference_pv"]:
-            tooltip_lines.append("Run note: enter the reference PV before starting the sequence.")
+            tooltip_lines.append("Run note: enter at least one reference PV before starting the sequence.")
+        elif len([pv for pv in settings.get("reference_pvs", []) if pv]) > 1:
+            tooltip_lines.append(f"Report reference: {settings['reference_pv']}")
         self.target_schematic.setToolTip("\n".join(tooltip_lines))
 
     def _set_test_running_state(self, running):
@@ -1618,7 +1927,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self._update_progress_display()
             self._log(
                 "Starting ISO 230-style bidirectional positioning test: "
-                f"{len(settings['targets'])} targets, {settings['cycles']} cycle(s), reference PV={settings['reference_pv']}"
+                f"{len(settings['targets'])} targets, {settings['cycles']} cycle(s), "
+                f"{len([pv for pv in settings.get('reference_pvs', []) if pv])} reference PV(s), "
+                f"report reference={settings['reference_pv']}"
             )
             self._advance_test_step()
             self._test_timer.start()
@@ -1705,38 +2016,56 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self._fail_test(f"Test execution failed: {ex}")
 
     def _capture_sample(self, step):
-        ref_pv = self._test_settings_cache["reference_pv"]
-        ref_raw = self.client.get(ref_pv, as_string=True)
+        reference_values = {}
+        for idx, ref_pv in enumerate(self._test_settings_cache.get("reference_pvs") or []):
+            if not ref_pv:
+                continue
+            ref_raw = self.client.get(ref_pv, as_string=True)
+            reference_values[idx] = _to_float(ref_raw, f"Reference PV {idx + 1}")
         rbv_raw = self.client.get(self._pv("RBV"), as_string=True)
         val_raw = self.client.get(self._pv("VAL"), as_string=True)
         return {
             "cycle": step["cycle"],
             "direction": step["direction"],
             "target": float(step["target"]),
-            "reference": _to_float(ref_raw, "Reference PV"),
+            "references": reference_values,
             "rbv": _to_float(rbv_raw, "RBV"),
             "command": _to_float(val_raw, "VAL"),
             "timestamp": datetime.now(),
         }
 
     def _finalize_measurement(self, step, samples):
-        ref_vals = [s["reference"] for s in samples]
         rbv_vals = [s["rbv"] for s in samples]
         cmd_vals = [s["command"] for s in samples]
         target = float(step["target"])
+        reference_stats = {}
+        reference_pvs = list(self._test_settings_cache.get("reference_pvs") or [])
+        for idx, ref_pv in enumerate(reference_pvs):
+            if not ref_pv:
+                continue
+            ref_vals = [s.get("references", {}).get(idx) for s in samples if idx in s.get("references", {})]
+            if not ref_vals:
+                continue
+            ref_mean = _mean(ref_vals)
+            reference_stats[idx] = {
+                "slot": idx,
+                "pv": ref_pv,
+                "mean": ref_mean,
+                "std": _stddev(ref_vals),
+                "error": (ref_mean - target) if ref_mean is not None else None,
+            }
         row = {
             "cycle": int(step["cycle"]),
             "direction": step["direction"],
             "target": target,
-            "reference_mean": _mean(ref_vals),
-            "reference_std": _stddev(ref_vals),
+            "reference_stats": reference_stats,
             "rbv_mean": _mean(rbv_vals),
             "rbv_std": _stddev(rbv_vals),
             "command_mean": _mean(cmd_vals),
-            "ref_error": (_mean(ref_vals) - target) if _mean(ref_vals) is not None else None,
             "rbv_error": (_mean(rbv_vals) - target) if _mean(rbv_vals) is not None else None,
             "timestamp": samples[-1]["timestamp"],
         }
+        self._project_row_reference(row, self._test_settings_cache, self._test_settings_cache.get("reference_slot"))
         self._measurements.append(row)
         self._append_results_row(row)
         self._latest_metrics = self._compute_metrics(self._measurements)
@@ -2015,14 +2344,14 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             yv = y_min + (y_max - y_min) * frac
             yy = map_y(yv)
             grid.append(line(margin_l, yy, margin_l + plot_w, yy, grid_color, 1.0, dash="4 5", opacity=0.85))
-            grid.append(text(margin_l - 12, yy + 4, _fmt(yv, sig_digits=6), size=12, anchor="end", fill="#334155"))
+            grid.append(text(margin_l - 12, yy + 4, _fmt(yv), size=12, anchor="end", fill="#334155"))
         x_tick_step = max(1, int(round((len(rows) - 1) / 6.0)))
         for idx, row in enumerate(rows):
             if idx % x_tick_step != 0 and idx not in {0, len(rows) - 1}:
                 continue
             xx = map_x(row["target"])
             grid.append(line(xx, margin_t, xx, margin_t + plot_h, grid_color, 1.0, dash="4 5", opacity=0.6))
-            grid.append(text(xx, margin_t + plot_h + 24, _fmt(row["target"], sig_digits=6), size=12, anchor="middle", fill="#334155"))
+            grid.append(text(xx, margin_t + plot_h + 24, _fmt(row["target"]), size=12, anchor="middle", fill="#334155"))
 
         zero_y = map_y(0.0)
         grid.append(line(margin_l, zero_y, margin_l + plot_w, zero_y, axis_color, 1.7))
@@ -2266,13 +2595,15 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             f"- IOC prefix: `{settings.get('prefix', '')}`",
             f"- Axis ID: `{settings.get('axis_id', '')}`",
             f"- Motor record: `{settings.get('motor', '')}`",
-            f"- Reference PV: `{settings.get('reference_pv', '')}`",
+            f"- Configured reference PVs: `{_reference_pv_summary_text(settings)}`",
+            f"- Reference used for report calculations: `{settings.get('reference_pv', '')}`",
             f"- Range: `{_fmt(settings.get('range_min'))} .. {_fmt(settings.get('range_max'))}`",
             f"- Target generation mode: `{settings.get('target_mode', '')}`",
             f"- Target generation rule: `{settings.get('target_rule_note', '')}`",
             f"- Base interval: `{_fmt(settings.get('base_interval'))}`",
-            f"- Targets: `{', '.join(_fmt(v, sig_digits=8) for v in settings.get('targets', []))}`",
+            f"- Targets: `{', '.join(_fmt(v) for v in settings.get('targets', []))}`",
             f"- Cycles: `{settings.get('cycles', '')}`",
+            f"- Display decimals: `{settings.get('display_decimals', _FORMAT_DECIMALS)}`",
             f"- Settle time: `{_fmt(settings.get('settle_s'))} s`",
             f"- Samples per point: `{settings.get('samples_per_point', '')}`",
             f"- Sample interval: `{settings.get('sample_interval_ms', '')} ms`",
@@ -2316,6 +2647,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             [
                 "",
                 "## Raw Measured Points",
+                "",
+                f"Selected reference for report/error columns: `{settings.get('reference_pv', '')}`",
                 "",
                 "| Cycle | Direction | Target | Ref Mean | Ref Std | RBV Mean | RBV Std | Ref Err | RBV Err | Timestamp |",
                 "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -2402,12 +2735,14 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             ("IOC prefix", settings.get("prefix", "")),
             ("Axis ID", settings.get("axis_id", "")),
             ("Motor record", settings.get("motor", "")),
-            ("Reference PV", settings.get("reference_pv", "")),
+            ("Configured reference PVs", _reference_pv_summary_text(settings)),
+            ("Reference used for report", settings.get("reference_pv", "")),
             ("Range", f"{_fmt_preview(settings.get('range_min'))} .. {_fmt_preview(settings.get('range_max'))}"),
             ("Target generation mode", settings.get("target_mode", "")),
             ("Target generation rule", settings.get("target_rule_note", "")),
             ("Base interval", _fmt_preview(settings.get("base_interval"))),
             ("Targets", ", ".join(_fmt_preview(v) for v in settings.get("targets", []))),
+            ("Display decimals", settings.get("display_decimals", _FORMAT_DECIMALS)),
             ("Cycles", settings.get("cycles", "")),
             ("Settle time", f"{_fmt_preview(settings.get('settle_s'))} s"),
             ("Samples per point", settings.get("samples_per_point", "")),
@@ -2587,12 +2922,14 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
             ("IOC prefix", settings.get("prefix", "")),
             ("Axis ID", settings.get("axis_id", "")),
             ("Motor record", settings.get("motor", "")),
-            ("Reference PV", settings.get("reference_pv", "")),
+            ("Configured reference PVs", _reference_pv_summary_text(settings)),
+            ("Reference used for report", settings.get("reference_pv", "")),
             ("Range", f"{_fmt_preview(settings.get('range_min'))} .. {_fmt_preview(settings.get('range_max'))}"),
             ("Target generation mode", settings.get("target_mode", "")),
             ("Target generation rule", settings.get("target_rule_note", "")),
             ("Base interval", _fmt_preview(settings.get("base_interval"))),
             ("Targets", ", ".join(_fmt_preview(v) for v in settings.get("targets", []))),
+            ("Display decimals", settings.get("display_decimals", _FORMAT_DECIMALS)),
             ("Cycles", settings.get("cycles", "")),
             ("Settle time", f"{_fmt_preview(settings.get('settle_s'))} s"),
             ("Samples per point", settings.get("samples_per_point", "")),
@@ -2713,10 +3050,32 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
 
     def _apply_report_dataset(self, settings, rows, state="Loaded"):
         self._demo_mode = str(state).lower() == "demo"
+        decimals = int(settings.get("display_decimals", _FORMAT_DECIMALS))
+        self.decimals_spin.blockSignals(True)
+        self.decimals_spin.setValue(decimals)
+        self.decimals_spin.blockSignals(False)
+        _set_format_decimals(decimals)
         self.prefix_edit.setText(str(settings.get("prefix", "")))
         self.axis_edit.setText(str(settings.get("axis_id", "")))
         self.motor_record_edit.setText(str(settings.get("motor", "")))
-        self.reference_pv_edit.setText(str(settings.get("reference_pv", "")))
+        reference_pvs = _settings_reference_pvs(settings)
+        for edit in self.reference_pv_edits:
+            edit.blockSignals(True)
+        for idx, edit in enumerate(self.reference_pv_edits):
+            edit.setText(str(reference_pvs[idx]))
+        for edit in self.reference_pv_edits:
+            edit.blockSignals(False)
+        self._refresh_reference_selector()
+        reference_slot = settings.get("reference_slot")
+        try:
+            reference_slot = None if reference_slot is None else int(reference_slot)
+        except Exception:
+            reference_slot = None
+        if reference_slot is None or not (0 <= reference_slot < len(reference_pvs)) or not reference_pvs[reference_slot]:
+            reference_slot = self._selected_reference_slot(reference_pvs)
+        combo_index = self.report_reference_combo.findData(reference_slot, role=QtCore.Qt.UserRole)
+        if combo_index >= 0:
+            self.report_reference_combo.setCurrentIndex(combo_index)
         self.range_min_edit.setText(_fmt(settings.get("range_min")))
         self.range_max_edit.setText(_fmt(settings.get("range_max")))
         self._last_auto_range_min = _fmt(settings.get("range_min"))
@@ -2736,8 +3095,16 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         self.motion_vmax_edit.setText(_fmt(settings.get("vmax")))
         self.motion_accs_edit.setText(_fmt(settings.get("accs")))
 
-        self._test_settings_cache = dict(settings)
-        self._measurements = list(rows)
+        normalized_settings = dict(settings)
+        normalized_settings["reference_pvs"] = reference_pvs
+        normalized_settings["reference_slot"] = reference_slot
+        normalized_settings["reference_pv"] = self._selected_reference_pv(reference_pvs)
+        self._test_settings_cache = normalized_settings
+        self._measurements = []
+        for source_row in rows:
+            row = dict(source_row)
+            self._project_row_reference(row, self._test_settings_cache, reference_slot)
+            self._measurements.append(row)
         self._latest_metrics = self._compute_metrics(self._measurements)
         self._latest_metrics["state"] = state
         self._latest_report_markdown = self._build_report_markdown()
@@ -2746,7 +3113,7 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         self._update_summary_labels(self._latest_metrics)
         self._update_duration_estimate()
         if not self._test_active:
-            self._test_plan = self._build_test_plan(settings)
+            self._test_plan = self._build_test_plan(self._test_settings_cache)
             self._test_plan_index = len(self._test_plan) if str(state).lower() == "demo" else 0
             self._current_phase = "done" if str(state).lower() == "demo" else "idle"
         self._update_progress_display()
@@ -2823,37 +3190,46 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         try:
             with open(path, "w", newline="", encoding="utf-8") as fp:
                 writer = csv.writer(fp)
-                writer.writerow(
-                    [
-                        "cycle",
-                        "direction",
-                        "target",
-                        "reference_mean",
-                        "reference_std",
-                        "rbv_mean",
-                        "rbv_std",
-                        "command_mean",
-                        "ref_error",
-                        "rbv_error",
-                        "timestamp",
-                    ]
-                )
+                headers = [
+                    "cycle",
+                    "direction",
+                    "target",
+                    "selected_reference_slot",
+                    "selected_reference_pv",
+                    "reference_mean",
+                    "reference_std",
+                    "rbv_mean",
+                    "rbv_std",
+                    "command_mean",
+                    "ref_error",
+                    "rbv_error",
+                ]
+                for idx in range(_MAX_REFERENCE_PVS):
+                    prefix = f"ref{idx + 1}"
+                    headers.extend([f"{prefix}_pv", f"{prefix}_mean", f"{prefix}_std", f"{prefix}_error"])
+                headers.append("timestamp")
+                writer.writerow(headers)
                 for row in self._measurements:
-                    writer.writerow(
-                        [
-                            row["cycle"],
-                            row["direction"],
-                            row["target"],
-                            row["reference_mean"],
-                            row["reference_std"],
-                            row["rbv_mean"],
-                            row["rbv_std"],
-                            row["command_mean"],
-                            row["ref_error"],
-                            row["rbv_error"],
-                            row["timestamp"].isoformat(),
-                        ]
-                    )
+                    record = [
+                        row["cycle"],
+                        row["direction"],
+                        row["target"],
+                        row.get("reference_slot"),
+                        row.get("reference_pv", ""),
+                        row["reference_mean"],
+                        row["reference_std"],
+                        row["rbv_mean"],
+                        row["rbv_std"],
+                        row["command_mean"],
+                        row["ref_error"],
+                        row["rbv_error"],
+                    ]
+                    stats = dict(row.get("reference_stats") or {})
+                    for idx in range(_MAX_REFERENCE_PVS):
+                        stat = stats.get(idx, {})
+                        record.extend([stat.get("pv", ""), stat.get("mean"), stat.get("std"), stat.get("error")])
+                    record.append(row["timestamp"].isoformat())
+                    writer.writerow(record)
             self._log(f"Saved CSV: {path}")
         except Exception as ex:
             self._log(f"Failed to save CSV: {ex}")
