@@ -28,6 +28,11 @@ from ecmc_stream_qt import EpicsClient, _join_prefix_pv, compact_float_text
 
 _FORMAT_DECIMALS = 5
 _MAX_REFERENCE_PVS = 5
+_UI_SCALE = 0.7
+
+
+def _scaled_px(value):
+    return max(1, int(round(float(value) * _UI_SCALE)))
 
 
 def _mean(values):
@@ -320,7 +325,7 @@ class _TargetSweepSchematic(QtWidgets.QWidget):
         self.setMinimumHeight(220)
 
     def sizeHint(self):
-        return QtCore.QSize(640, 220)
+        return QtCore.QSize(_scaled_px(640), 220)
 
     def set_preview(self, settings=None, message=""):
         self._settings = dict(settings or {}) if settings else None
@@ -440,7 +445,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         super().__init__()
         self._base_title = "ecmc ISO 230 Bidirectional Test"
         self.setWindowTitle(self._base_title)
-        self.resize(1120, 760)
+        self._apply_ui_scale()
+        self.resize(_scaled_px(1120), _scaled_px(760))
 
         self.client = EpicsClient(timeout=timeout)
         self.default_prefix = str(prefix or "").strip()
@@ -475,6 +481,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._test_settings_cache = {}
         self._move_issued_at = 0.0
         self._demo_mode = False
+        self._committed_axis_pfx_cfg_pv = ""
+        self._committed_motor_name_cfg_pv = ""
+        self._committed_motor_record = ""
+        self._committed_reference_pvs = [""] * _MAX_REFERENCE_PVS
+        self._poll_failure_cache = {}
         self._last_auto_reference_pv = ""
         self._last_auto_reversal_margin = ""
         self._last_auto_range_min = ""
@@ -488,6 +499,15 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self._log("CLI backend detected: status polling set to 900 ms")
         self._status_timer.start()
         QtCore.QTimer.singleShot(0, self._startup_axis_presence_check)
+
+    def _apply_ui_scale(self):
+        font = QtGui.QFont(self.font())
+        point_size = font.pointSizeF()
+        if point_size <= 0:
+            point_size = float(QtGui.QFontInfo(font).pointSize())
+        if point_size > 0:
+            font.setPointSizeF(max(7.0, point_size * _UI_SCALE))
+            self.setFont(font)
 
     def _build_ui(self, timeout):
         root = QtWidgets.QWidget()
@@ -506,8 +526,10 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.export_report_btn = QtWidgets.QPushButton("Save Report (.md)")
         self.export_csv_btn = QtWidgets.QPushButton("Save CSV")
         self.axis_pick_combo = QtWidgets.QComboBox()
-        self.axis_pick_combo.setMinimumWidth(180)
-        self.axis_pick_combo.setMaximumWidth(260)
+        self.axis_pick_combo.setMinimumWidth(_scaled_px(180))
+        self.axis_pick_combo.setMaximumWidth(_scaled_px(260))
+        top_control_height = 28
+        self.axis_pick_combo.setMinimumHeight(top_control_height)
         for btn in (
             self.cfg_toggle_btn,
             self.log_toggle_btn,
@@ -520,7 +542,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         ):
             btn.setAutoDefault(False)
             btn.setDefault(False)
-            btn.setMaximumHeight(24)
+            btn.setMinimumHeight(top_control_height)
         self.abort_btn.setEnabled(False)
         self.axis_pick_combo.activated.connect(self._on_axis_combo_activated)
         self.cfg_toggle_btn.clicked.connect(self._toggle_config_panel)
@@ -559,12 +581,12 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
 
         self.prefix_edit = QtWidgets.QLineEdit(self.default_prefix)
         self.axis_edit = QtWidgets.QLineEdit(self.default_axis_id)
-        self.axis_edit.setMaximumWidth(70)
+        self.axis_edit.setMaximumWidth(_scaled_px(70))
         self.timeout_edit = QtWidgets.QDoubleSpinBox()
         self.timeout_edit.setRange(0.1, 60.0)
         self.timeout_edit.setDecimals(1)
         self.timeout_edit.setValue(float(timeout))
-        self.timeout_edit.setMaximumWidth(90)
+        self.timeout_edit.setMaximumWidth(_scaled_px(90))
         self.timeout_edit.valueChanged.connect(self._set_timeout)
 
         self.axis_pfx_cfg_pv_edit = QtWidgets.QLineEdit()
@@ -585,38 +607,38 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             value_edit.setPlaceholderText("value")
             self.reference_value_edits.append(value_edit)
         self.report_reference_combo = QtWidgets.QComboBox()
-        self.report_reference_combo.setMinimumWidth(220)
+        self.report_reference_combo.setMinimumWidth(_scaled_px(220))
 
         self.range_min_edit = QtWidgets.QLineEdit("0")
         self.range_max_edit = QtWidgets.QLineEdit("10")
-        self.range_min_edit.setMaximumWidth(110)
-        self.range_max_edit.setMaximumWidth(110)
+        self.range_min_edit.setMaximumWidth(_scaled_px(110))
+        self.range_max_edit.setMaximumWidth(_scaled_px(110))
         self.target_count_spin = QtWidgets.QSpinBox()
         self.target_count_spin.setRange(0, 41)
         self.target_count_spin.setValue(0)
         self.target_count_spin.setSpecialValueText("Auto (ISO minimum)")
-        self.target_count_spin.setMinimumWidth(120)
+        self.target_count_spin.setMinimumWidth(_scaled_px(120))
         self.reversal_margin_edit = QtWidgets.QLineEdit("")
         self.reversal_margin_edit.setPlaceholderText("Auto (5% of range)")
-        self.reversal_margin_edit.setMaximumWidth(160)
+        self.reversal_margin_edit.setMaximumWidth(_scaled_px(160))
         self.target_schematic = _TargetSweepSchematic()
         self.cycles_spin = QtWidgets.QSpinBox()
         self.cycles_spin.setRange(1, 20)
         self.cycles_spin.setValue(5)
-        self.cycles_spin.setMaximumWidth(80)
+        self.cycles_spin.setMaximumWidth(_scaled_px(80))
         self.settle_spin = QtWidgets.QDoubleSpinBox()
         self.settle_spin.setRange(0.0, 120.0)
         self.settle_spin.setDecimals(2)
         self.settle_spin.setValue(1.0)
-        self.settle_spin.setMaximumWidth(100)
+        self.settle_spin.setMaximumWidth(_scaled_px(100))
         self.samples_spin = QtWidgets.QSpinBox()
         self.samples_spin.setRange(1, 50)
         self.samples_spin.setValue(5)
-        self.samples_spin.setMaximumWidth(80)
+        self.samples_spin.setMaximumWidth(_scaled_px(80))
         self.decimals_spin = QtWidgets.QSpinBox()
         self.decimals_spin.setRange(0, 8)
         self.decimals_spin.setValue(_FORMAT_DECIMALS)
-        self.decimals_spin.setMaximumWidth(80)
+        self.decimals_spin.setMaximumWidth(_scaled_px(80))
         self.estimated_duration_value = QtWidgets.QLabel("-")
         self.estimated_duration_value.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
 
@@ -624,10 +646,10 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.motion_acc_edit = QtWidgets.QLineEdit("1")
         self.motion_vmax_edit = QtWidgets.QLineEdit("")
         self.motion_accs_edit = QtWidgets.QLineEdit("")
-        self.motion_velo_edit.setMaximumWidth(90)
-        self.motion_acc_edit.setMaximumWidth(90)
-        self.motion_vmax_edit.setMaximumWidth(110)
-        self.motion_accs_edit.setMaximumWidth(110)
+        self.motion_velo_edit.setMaximumWidth(_scaled_px(90))
+        self.motion_acc_edit.setMaximumWidth(_scaled_px(90))
+        self.motion_vmax_edit.setMaximumWidth(_scaled_px(110))
+        self.motion_accs_edit.setMaximumWidth(_scaled_px(110))
         self.motion_vmax_edit.setPlaceholderText("optional")
         self.motion_accs_edit.setPlaceholderText("optional")
 
@@ -637,7 +659,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         for btn in (axis_apply_btn, resolve_btn, read_status_btn):
             btn.setAutoDefault(False)
             btn.setDefault(False)
-            btn.setMaximumWidth(140)
+            btn.setMaximumWidth(_scaled_px(140))
         axis_apply_btn.clicked.connect(self._apply_axis_top)
         resolve_btn.clicked.connect(self.resolve_motor_record_name)
         read_status_btn.clicked.connect(self.refresh_status)
@@ -645,9 +667,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._update_cfg_pv_edits()
         self.prefix_edit.editingFinished.connect(self._update_cfg_pv_edits)
         self.axis_edit.editingFinished.connect(self._update_cfg_pv_edits)
-        self.motor_record_edit.textChanged.connect(self._sync_reference_pv_default)
+        self.axis_pfx_cfg_pv_edit.returnPressed.connect(self._commit_cfg_pv_edits)
+        self.motor_name_cfg_pv_edit.returnPressed.connect(self._commit_cfg_pv_edits)
+        self.motor_record_edit.returnPressed.connect(self._commit_motor_record_edit)
         for edit in self.reference_pv_edits:
-            edit.textChanged.connect(self._on_reference_pvs_changed)
+            edit.returnPressed.connect(self._commit_reference_pv_edits)
         self.report_reference_combo.currentIndexChanged.connect(self._on_reference_selection_changed)
         self.range_min_edit.editingFinished.connect(self._on_range_inputs_changed)
         self.range_max_edit.editingFinished.connect(self._on_range_inputs_changed)
@@ -659,7 +683,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.motion_velo_edit.editingFinished.connect(self._update_duration_estimate)
         self.decimals_spin.valueChanged.connect(self._on_decimals_changed)
 
-        axis_box = QtWidgets.QGroupBox("1. Axis / PV Binding")
+        axis_box = QtWidgets.QWidget()
         axis_layout = QtWidgets.QHBoxLayout(axis_box)
         axis_layout.setContentsMargins(6, 6, 6, 6)
         axis_layout.setSpacing(10)
@@ -667,30 +691,34 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         axis_left = QtWidgets.QWidget()
         axis_grid = QtWidgets.QGridLayout(axis_left)
         axis_grid.setContentsMargins(0, 0, 0, 0)
-        axis_grid.setHorizontalSpacing(8)
-        axis_grid.setVerticalSpacing(4)
+        axis_grid.setHorizontalSpacing(6)
+        axis_grid.setVerticalSpacing(3)
         axis_grid.addWidget(QtWidgets.QLabel("IOC Prefix"), 0, 0)
         axis_grid.addWidget(self.prefix_edit, 0, 1)
         axis_grid.addWidget(QtWidgets.QLabel("Axis ID"), 0, 2)
         axis_grid.addWidget(self.axis_edit, 0, 3)
-        axis_grid.addWidget(axis_apply_btn, 0, 4)
-        axis_grid.addWidget(QtWidgets.QLabel("Timeout [s]"), 0, 5)
-        axis_grid.addWidget(self.timeout_edit, 0, 6)
+        axis_grid.addWidget(QtWidgets.QLabel("Timeout [s]"), 0, 4)
+        axis_grid.addWidget(self.timeout_edit, 0, 5)
+        axis_grid.addWidget(axis_apply_btn, 0, 6)
         axis_grid.addWidget(QtWidgets.QLabel("Axis Prefix PV"), 1, 0)
-        axis_grid.addWidget(self.axis_pfx_cfg_pv_edit, 1, 1, 1, 6)
-        axis_grid.addWidget(QtWidgets.QLabel("Motor Name PV"), 2, 0)
-        axis_grid.addWidget(self.motor_name_cfg_pv_edit, 2, 1, 1, 6)
-        axis_grid.addWidget(QtWidgets.QLabel("Motor Record"), 3, 0)
-        axis_grid.addWidget(self.motor_record_edit, 3, 1, 1, 5)
-        axis_grid.addWidget(resolve_btn, 3, 6)
-        axis_grid.addWidget(read_status_btn, 4, 6)
+        axis_grid.addWidget(self.axis_pfx_cfg_pv_edit, 1, 1, 1, 2)
+        axis_grid.addWidget(QtWidgets.QLabel("Motor Name PV"), 1, 3)
+        axis_grid.addWidget(self.motor_name_cfg_pv_edit, 1, 4, 1, 3)
+        axis_grid.addWidget(QtWidgets.QLabel("Motor Record"), 2, 0)
+        axis_grid.addWidget(self.motor_record_edit, 2, 1, 1, 4)
+        axis_grid.addWidget(resolve_btn, 2, 5)
+        axis_grid.addWidget(read_status_btn, 2, 6)
 
-        axis_right = QtWidgets.QVBoxLayout()
-        axis_right.setContentsMargins(0, 0, 0, 0)
-        axis_right.setSpacing(6)
-        ref_box = QtWidgets.QGroupBox("Reference PVs")
-        ref_grid = QtWidgets.QGridLayout(ref_box)
-        ref_grid.setContentsMargins(6, 6, 6, 6)
+        axis_right = QtWidgets.QWidget()
+        axis_right_layout = QtWidgets.QVBoxLayout(axis_right)
+        axis_right_layout.setContentsMargins(0, 0, 0, 0)
+        axis_right_layout.setSpacing(4)
+        ref_header = QtWidgets.QLabel("Reference PVs")
+        ref_header.setStyleSheet("font-weight: 600;")
+        axis_right_layout.addWidget(ref_header)
+        ref_panel = QtWidgets.QWidget()
+        ref_grid = QtWidgets.QGridLayout(ref_panel)
+        ref_grid.setContentsMargins(0, 0, 0, 0)
         ref_grid.setHorizontalSpacing(6)
         ref_grid.setVerticalSpacing(4)
         ref_grid.addWidget(QtWidgets.QLabel("PV"), 0, 1)
@@ -702,115 +730,68 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             ref_grid.addWidget(self.reference_value_edits[idx], row, 2)
         ref_grid.addWidget(QtWidgets.QLabel("Use For Report"), _MAX_REFERENCE_PVS + 1, 0)
         ref_grid.addWidget(self.report_reference_combo, _MAX_REFERENCE_PVS + 1, 1, 1, 2)
-        axis_right.addWidget(ref_box)
-        axis_right.addStretch(1)
+        axis_right_layout.addWidget(ref_panel)
 
-        axis_layout.addWidget(axis_left, 3)
-        axis_layout.addLayout(axis_right, 2)
-        cfg.addWidget(axis_box)
-
-        plan_box = QtWidgets.QGroupBox("2. Test Range / Target Generation")
-        plan_box_layout = QtWidgets.QVBoxLayout(plan_box)
-        plan_box_layout.setContentsMargins(8, 8, 8, 8)
-        plan_box_layout.setSpacing(8)
-
-        plan_form = QtWidgets.QFormLayout()
-        plan_form.setHorizontalSpacing(12)
-        plan_form.setVerticalSpacing(6)
-        plan_form.setLabelAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignTop)
-
-        range_row = QtWidgets.QHBoxLayout()
-        range_row.setContentsMargins(0, 0, 0, 0)
-        range_row.setSpacing(6)
-        range_row.addWidget(QtWidgets.QLabel("Min"))
-        range_row.addWidget(self.range_min_edit)
-        range_row.addSpacing(12)
-        range_row.addWidget(QtWidgets.QLabel("Max"))
-        range_row.addWidget(self.range_max_edit)
-        range_row.addStretch(1)
-        plan_form.addRow("Measured range", range_row)
-
-        target_row = QtWidgets.QHBoxLayout()
-        target_row.setContentsMargins(0, 0, 0, 0)
-        target_row.setSpacing(6)
-        target_row.addWidget(QtWidgets.QLabel("Count override"))
-        target_row.addWidget(self.target_count_spin)
-        target_row.addSpacing(12)
-        target_row.addWidget(QtWidgets.QLabel("Approach margin"))
-        target_row.addWidget(self.reversal_margin_edit)
-        target_row.addStretch(1)
-        plan_form.addRow("Targets", target_row)
-        plan_box_layout.addLayout(plan_form)
-        self.target_schematic.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-        self.target_schematic.setFixedHeight(220)
-        plan_box_layout.addWidget(self.target_schematic)
-
-        run_box = QtWidgets.QGroupBox("3. Sequence / Motion")
-        run_box.setMaximumWidth(420)
-        run_box.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Preferred)
-        run_form = QtWidgets.QFormLayout(run_box)
-        run_form.setContentsMargins(8, 8, 8, 8)
-        run_form.setHorizontalSpacing(12)
-        run_form.setVerticalSpacing(6)
-        run_form.setLabelAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignTop)
-
-        seq_row = QtWidgets.QHBoxLayout()
-        seq_row.setContentsMargins(0, 0, 0, 0)
-        seq_row.setSpacing(6)
-        seq_row.addWidget(QtWidgets.QLabel("Cycles"))
-        seq_row.addWidget(self.cycles_spin)
-        seq_row.addSpacing(10)
-        seq_row.addWidget(QtWidgets.QLabel("Settle [s]"))
-        seq_row.addWidget(self.settle_spin)
-        seq_row.addStretch(1)
-        run_form.addRow("Sequence", seq_row)
-
-        sample_row = QtWidgets.QHBoxLayout()
-        sample_row.setContentsMargins(0, 0, 0, 0)
-        sample_row.setSpacing(6)
-        sample_row.addWidget(QtWidgets.QLabel("Samples / point"))
-        sample_row.addWidget(self.samples_spin)
-        sample_row.addSpacing(10)
-        sample_row.addWidget(QtWidgets.QLabel("Decimals"))
-        sample_row.addWidget(self.decimals_spin)
-        sample_row.addStretch(1)
-        run_form.addRow("Sampling", sample_row)
-
-        estimate_row = QtWidgets.QHBoxLayout()
-        estimate_row.setContentsMargins(0, 0, 0, 0)
-        estimate_row.setSpacing(6)
-        estimate_row.addWidget(self.estimated_duration_value)
-        estimate_row.addStretch(1)
-        run_form.addRow("Estimated duration", estimate_row)
-
-        motion_grid = QtWidgets.QGridLayout()
+        motion_header = QtWidgets.QLabel("Motor fields")
+        motion_header.setStyleSheet("font-weight: 600;")
+        axis_right_layout.addWidget(motion_header)
+        motion_panel = QtWidgets.QWidget()
+        motion_grid = QtWidgets.QGridLayout(motion_panel)
         motion_grid.setContentsMargins(0, 0, 0, 0)
-        motion_grid.setHorizontalSpacing(8)
-        motion_grid.setVerticalSpacing(4)
+        motion_grid.setHorizontalSpacing(6)
+        motion_grid.setVerticalSpacing(2)
         motion_grid.addWidget(QtWidgets.QLabel("VELO"), 0, 0)
         motion_grid.addWidget(self.motion_velo_edit, 0, 1)
         motion_grid.addWidget(QtWidgets.QLabel("ACCL"), 0, 2)
         motion_grid.addWidget(self.motion_acc_edit, 0, 3)
-        motion_grid.addWidget(QtWidgets.QLabel("VMAX"), 1, 0)
-        motion_grid.addWidget(self.motion_vmax_edit, 1, 1)
-        motion_grid.addWidget(QtWidgets.QLabel("ACCS"), 1, 2)
-        motion_grid.addWidget(self.motion_accs_edit, 1, 3)
-        motion_grid.setColumnStretch(4, 1)
-        run_form.addRow("Motor fields", motion_grid)
+        motion_grid.addWidget(QtWidgets.QLabel("VMAX"), 0, 4)
+        motion_grid.addWidget(self.motion_vmax_edit, 0, 5)
+        motion_grid.addWidget(QtWidgets.QLabel("ACCS"), 0, 6)
+        motion_grid.addWidget(self.motion_accs_edit, 0, 7)
+        motion_grid.setColumnStretch(8, 1)
+        axis_right_layout.addWidget(motion_panel)
+        axis_right_layout.addStretch(1)
 
-        run_note = QtWidgets.QLabel(
-            "Cycles, settle time and sampling define the ISO 230 sequence. Leave optional VMAX/ACCS blank to keep the current motor settings."
-        )
-        run_note.setWordWrap(True)
-        run_note.setStyleSheet("color: #516079;")
-        run_form.addRow("", run_note)
+        axis_layout.addWidget(axis_left, 3)
+        axis_layout.addWidget(axis_right, 2)
+        plan_box = QtWidgets.QWidget()
+        plan_box_layout = QtWidgets.QVBoxLayout(plan_box)
+        plan_box_layout.setContentsMargins(8, 8, 8, 8)
+        plan_box_layout.setSpacing(8)
 
-        lower_setup_row = QtWidgets.QHBoxLayout()
-        lower_setup_row.setContentsMargins(0, 0, 0, 0)
-        lower_setup_row.setSpacing(8)
-        lower_setup_row.addWidget(plan_box, 1)
-        lower_setup_row.addWidget(run_box, 0, QtCore.Qt.AlignTop)
-        cfg.addLayout(lower_setup_row)
+        plan_grid = QtWidgets.QGridLayout()
+        plan_grid.setContentsMargins(0, 0, 0, 0)
+        plan_grid.setHorizontalSpacing(8)
+        plan_grid.setVerticalSpacing(4)
+        plan_grid.addWidget(QtWidgets.QLabel("Min"), 0, 0)
+        plan_grid.addWidget(self.range_min_edit, 0, 1)
+        plan_grid.addWidget(QtWidgets.QLabel("Max"), 0, 2)
+        plan_grid.addWidget(self.range_max_edit, 0, 3)
+        plan_grid.addWidget(QtWidgets.QLabel("Count override"), 0, 4)
+        plan_grid.addWidget(self.target_count_spin, 0, 5)
+        plan_grid.addWidget(QtWidgets.QLabel("Approach margin"), 0, 6)
+        plan_grid.addWidget(self.reversal_margin_edit, 0, 7)
+        plan_grid.addWidget(QtWidgets.QLabel("Cycles"), 1, 0)
+        plan_grid.addWidget(self.cycles_spin, 1, 1)
+        plan_grid.addWidget(QtWidgets.QLabel("Settle [s]"), 1, 2)
+        plan_grid.addWidget(self.settle_spin, 1, 3)
+        plan_grid.addWidget(QtWidgets.QLabel("Samples / point"), 1, 4)
+        plan_grid.addWidget(self.samples_spin, 1, 5)
+        plan_grid.addWidget(QtWidgets.QLabel("Decimals"), 1, 6)
+        plan_grid.addWidget(self.decimals_spin, 1, 7)
+        plan_grid.addWidget(QtWidgets.QLabel("Estimated duration"), 2, 0)
+        plan_grid.addWidget(self.estimated_duration_value, 2, 1, 1, 7)
+        plan_grid.setColumnStretch(8, 1)
+
+        plan_box_layout.addLayout(plan_grid)
+        self.target_schematic.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        self.target_schematic.setFixedHeight(220)
+        plan_box_layout.addWidget(self.target_schematic)
+
+        self.cfg_tabs = QtWidgets.QTabWidget()
+        self.cfg_tabs.addTab(axis_box, "Axis / PV")
+        self.cfg_tabs.addTab(plan_box, "Range / Targets")
+        cfg.addWidget(self.cfg_tabs)
 
         layout.addWidget(self.cfg_group)
         self.cfg_group.setVisible(True)
@@ -823,8 +804,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         left_col.setContentsMargins(0, 0, 0, 0)
         left_col.setSpacing(8)
         self.summary_group = QtWidgets.QGroupBox("ISO 230 Summary")
-        self.summary_group.setMinimumHeight(162)
-        self.summary_group.setMaximumHeight(162)
+        self.summary_group.setMinimumHeight(_scaled_px(162))
+        self.summary_group.setMaximumHeight(_scaled_px(162))
         summary_layout = QtWidgets.QGridLayout(self.summary_group)
         summary_layout.setContentsMargins(6, 6, 6, 6)
         summary_layout.setHorizontalSpacing(8)
@@ -867,7 +848,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.summary_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.summary_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.summary_table.horizontalHeader().setStretchLastSection(True)
-        self.summary_table.horizontalHeader().setMinimumSectionSize(72)
+        self.summary_table.horizontalHeader().setMinimumSectionSize(_scaled_px(72))
         left_col.addWidget(self.summary_table, 1)
         mid_row.addLayout(left_col, 1)
 
@@ -875,8 +856,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         right_col.setContentsMargins(0, 0, 0, 0)
         right_col.setSpacing(8)
         self.status_group = QtWidgets.QGroupBox("Live Status")
-        self.status_group.setMinimumHeight(162)
-        self.status_group.setMaximumHeight(162)
+        self.status_group.setMinimumHeight(_scaled_px(162))
+        self.status_group.setMaximumHeight(_scaled_px(162))
         status_layout = QtWidgets.QGridLayout(self.status_group)
         status_layout.setContentsMargins(6, 6, 6, 6)
         status_layout.setHorizontalSpacing(4)
@@ -914,14 +895,14 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.results_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.results_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.results_table.horizontalHeader().setStretchLastSection(True)
-        self.results_table.horizontalHeader().setMinimumSectionSize(72)
+        self.results_table.horizontalHeader().setMinimumSectionSize(_scaled_px(72))
         right_col.addWidget(self.results_table, 1)
         mid_row.addLayout(right_col, 2)
         layout.addLayout(mid_row, 1)
 
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
-        self.log.setMaximumHeight(140)
+        self.log.setMaximumHeight(_scaled_px(140))
         self.log.setVisible(False)
         layout.addWidget(self.log)
 
@@ -936,7 +917,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.progress_bar.setFormat("Idle")
         progress_row.addWidget(self.progress_bar, 1)
         self.progress_label = QtWidgets.QLabel("0 / 0 steps")
-        self.progress_label.setMinimumWidth(110)
+        self.progress_label.setMinimumWidth(_scaled_px(110))
         self.progress_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
         progress_row.addWidget(self.progress_label)
         layout.addLayout(progress_row)
@@ -1192,9 +1173,49 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         guessed = _join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-Nam")
         if not self.motor_name_cfg_pv_edit.text().strip() or "MCU-Cfg-AX" in self.motor_name_cfg_pv_edit.text():
             self.motor_name_cfg_pv_edit.setText(guessed)
+        self._commit_cfg_pv_edits()
+
+    def _committed_motor_record_text(self):
+        return str(self._committed_motor_record or "").strip()
+
+    def _commit_cfg_pv_edits(self):
+        self._committed_axis_pfx_cfg_pv = self.axis_pfx_cfg_pv_edit.text().strip()
+        self._committed_motor_name_cfg_pv = self.motor_name_cfg_pv_edit.text().strip()
+        self._poll_failure_cache.clear()
+
+    def _commit_motor_record_edit(self):
+        self._committed_motor_record = self.motor_record_edit.text().strip()
+        self._poll_failure_cache.clear()
+        self._sync_reference_pv_default()
+        self._update_window_title()
+        try:
+            self.refresh_status()
+        except Exception:
+            pass
+
+    def _commit_reference_pv_edits(self):
+        self._committed_reference_pvs = [edit.text().strip() for edit in self.reference_pv_edits]
+        self._poll_failure_cache.clear()
+        self._on_reference_pvs_changed()
 
     def _configured_reference_pvs(self):
-        return [edit.text().strip() for edit in self.reference_pv_edits]
+        return list(self._committed_reference_pvs)
+
+    def _read_polled_pv(self, pv):
+        name = str(pv or "").strip()
+        if not name:
+            return "", ""
+        cached_error = self._poll_failure_cache.get(name)
+        if cached_error:
+            return "", cached_error
+        try:
+            value = str(self.client.get(name, as_string=True)).strip()
+            return value, ""
+        except Exception as ex:
+            err = f"ERR: {ex}"
+            self._poll_failure_cache[name] = err
+            self._log(f"Polling disabled for {name} after read failure. Press Enter in the PV field to retry.")
+            return "", err
 
     def _selected_reference_slot(self, reference_pvs=None):
         pvs = list(reference_pvs if reference_pvs is not None else self._configured_reference_pvs())
@@ -1261,12 +1282,16 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 pass
 
     def _sync_reference_pv_default(self, _text=None):
-        motor = self.motor_record_edit.text().strip()
+        motor = self._committed_motor_record_text()
         default_ref = f"{motor}-PosAct" if motor else ""
         current_ref = self.reference_pv_edits[0].text().strip()
+        changed = False
         if not current_ref or current_ref == self._last_auto_reference_pv:
             self.reference_pv_edits[0].setText(default_ref)
+            changed = True
         self._last_auto_reference_pv = default_ref
+        if changed:
+            self._commit_reference_pv_edits()
         self._refresh_reference_selector()
 
     def _sync_reversal_margin_default(self):
@@ -1306,7 +1331,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                     self.status_fields[field].setText(_fmt(self._last_status.get(field)))
 
     def _read_motor_soft_limits(self):
-        if not self.motor_record_edit.text().strip():
+        if not self._committed_motor_record_text():
             return None
         for low_field, high_field in (("LLM", "HLM"), ("DLLM", "DHLM")):
             try:
@@ -1518,9 +1543,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
     def resolve_motor_record_name(self):
         try:
             self._demo_mode = False
-            axis_pfx_pv = self.axis_pfx_cfg_pv_edit.text().strip()
+            axis_pfx_pv = self._committed_axis_pfx_cfg_pv
             axis_pfx = self._read_cfg_pv(axis_pfx_pv) if axis_pfx_pv else ""
-            motor_cfg_pv = self.motor_name_cfg_pv_edit.text().strip()
+            motor_cfg_pv = self._committed_motor_name_cfg_pv
             motor_name = ""
             tried = []
             for pv in [motor_cfg_pv] + self._candidate_motor_name_pvs():
@@ -1541,6 +1566,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 raise RuntimeError("Could not read axis prefix or motor name PV")
             resolved = self._combine_motor_record(axis_pfx, motor_name)
             self.motor_record_edit.setText(resolved)
+            self._committed_motor_record = resolved
+            self._sync_reference_pv_default()
             self._update_window_title()
             self._log(f"Resolved motor record: {resolved} (axis_pfx='{axis_pfx}', motor='{motor_name}')")
             self._init_motion_settings_from_pv()
@@ -1550,20 +1577,20 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self._log(f"Resolve failed: {ex}")
 
     def _update_window_title(self):
-        motor = self.motor_record_edit.text().strip()
+        motor = self._committed_motor_record_text()
         if motor:
             self.setWindowTitle(f"{self._base_title} [{motor}]")
         else:
             self.setWindowTitle(self._base_title)
 
     def _pv(self, field):
-        base = self.motor_record_edit.text().strip()
+        base = self._committed_motor_record_text()
         if not base:
             raise RuntimeError("Motor record is not resolved")
         return f"{base}.{field}"
 
     def _motor_base(self):
-        base = self.motor_record_edit.text().strip()
+        base = self._committed_motor_record_text()
         if not base:
             raise RuntimeError("Motor record is not resolved")
         return base
@@ -1583,7 +1610,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self._log(f"PUT [{mode}] {pv} = {value}")
 
     def _init_motion_settings_from_pv(self):
-        if not self.motor_record_edit.text().strip():
+        if not self._committed_motor_record_text():
             return
         try:
             self.motion_velo_edit.setText(_fmt(self.client.get(self._pv("VELO"), as_string=True)))
@@ -1650,12 +1677,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 value_edit.setText(_fmt(stat.get("mean")))
             self._last_status = dict(vals)
             return vals
-        if self.motor_record_edit.text().strip():
+        if self._committed_motor_record_text():
             for field in ("VAL", "RBV", "DMOV", "CNEN"):
-                try:
-                    vals[field] = str(self.client.get(self._pv(field), as_string=True)).strip()
-                except Exception as ex:
-                    vals[field] = f"ERR: {ex}"
+                vals[field], err = self._read_polled_pv(self._pv(field))
+                if err:
+                    vals[field] = err
                 self.status_fields[field].setText(_fmt(vals[field]))
         else:
             for field in ("VAL", "RBV", "DMOV", "CNEN"):
@@ -1663,10 +1689,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 self.status_fields[field].setText("")
         ref_pv = self._selected_reference_pv()
         if ref_pv:
-            try:
-                vals["REF"] = str(self.client.get(ref_pv, as_string=True)).strip()
-            except Exception as ex:
-                vals["REF"] = f"ERR: {ex}"
+            vals["REF"], err = self._read_polled_pv(ref_pv)
+            if err:
+                vals["REF"] = err
             self.status_fields["REF"].setText(_fmt(vals["REF"]))
         else:
             vals["REF"] = ""
@@ -1676,11 +1701,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             if not ref_pv:
                 self.reference_value_edits[idx].setText("")
                 continue
-            try:
-                raw = str(self.client.get(ref_pv, as_string=True)).strip()
+            raw, err = self._read_polled_pv(ref_pv)
+            if err:
+                raw = err
+            else:
                 ref_values[idx] = raw
-            except Exception as ex:
-                raw = f"ERR: {ex}"
             self.reference_value_edits[idx].setText(_fmt(raw))
         vals["REFS"] = dict(ref_values)
         self._last_status = dict(vals)
@@ -1695,7 +1720,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             pass
 
     def _target_preview_settings(self):
-        motor = self.motor_record_edit.text().strip()
+        motor = self._committed_motor_record_text()
         reference_pvs = self._configured_reference_pvs()
         reference_slot = self._selected_reference_slot(reference_pvs)
         ref_pv = self._selected_reference_pv(reference_pvs)
@@ -3050,6 +3075,7 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
 
     def _apply_report_dataset(self, settings, rows, state="Loaded"):
         self._demo_mode = str(state).lower() == "demo"
+        self._poll_failure_cache.clear()
         decimals = int(settings.get("display_decimals", _FORMAT_DECIMALS))
         self.decimals_spin.blockSignals(True)
         self.decimals_spin.setValue(decimals)
@@ -3134,7 +3160,7 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
             self.load_demo_data()
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("ISO 230 Report Preview")
-        dlg.resize(1220, 860)
+        dlg.resize(_scaled_px(1220), _scaled_px(860))
         layout = QtWidgets.QVBoxLayout(dlg)
         tabs = QtWidgets.QTabWidget(dlg)
         tabs.addTab(self._build_preview_summary_tab(), "Summary")
