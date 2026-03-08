@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/qt_runtime.sh"
 
 PREFIX="${1:-${PREFIX:-IOC:ECMC}}"
 AXIS_ID="${2-}"
@@ -14,6 +15,11 @@ CNTRL_CATALOG="${CNTRL_CATALOG:-${SCRIPT_DIR}/ecmc_commands_cntrl.json}"
 TMP_CNTRL_CATALOG_DEFAULT="/tmp/ecmc_commands_cntrl_${USER:-user}.json"
 
 cd "${SCRIPT_DIR}"
+
+PYTHON_BIN="$(find_qt_python)" || {
+  print_qt_python_error
+  exit 1
+}
 
 CNTRL_CATALOG_OUT="${CNTRL_CATALOG}"
 if [ ! -w "$(dirname "${CNTRL_CATALOG_OUT}")" ]; then
@@ -30,12 +36,12 @@ elif [ "${SCRIPT_DIR}/build_cntrl_command_catalog.py" -nt "${CNTRL_CATALOG_OUT}"
 fi
 
 if [ "${NEED_REBUILD}" -eq 1 ]; then
-  python3 "${SCRIPT_DIR}/build_cntrl_command_catalog.py" \
+  "${PYTHON_BIN}" "${SCRIPT_DIR}/build_cntrl_command_catalog.py" \
     --in "${BASE_CATALOG}" \
     --out "${CNTRL_CATALOG_OUT}"
 fi
 
-exec python3 ecmc_cntrl_qt.py \
+exec "${PYTHON_BIN}" ecmc_cntrl_qt.py \
   --catalog "${CNTRL_CATALOG_OUT}" \
   --prefix "${PREFIX}" \
   --axis-id "${AXIS_ID}" \

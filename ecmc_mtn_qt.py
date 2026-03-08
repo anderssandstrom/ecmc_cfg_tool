@@ -7,10 +7,7 @@ import time
 from collections import deque
 from datetime import datetime
 
-try:
-    from PyQt5 import QtCore, QtGui, QtWidgets
-except Exception:
-    from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
+from qt_compat import QtCore, QtGui, QtWidgets
 
 from ecmc_stream_qt import EpicsClient, _join_prefix_pv, compact_float_text
 

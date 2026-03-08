@@ -9,10 +9,7 @@ from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
-try:
-    from PyQt5 import QtCore, QtGui, QtWidgets
-except Exception:
-    from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
+from qt_compat import QtCore, QtGui, QtWidgets
 
 
 PLACEHOLDER_RE = re.compile(r'<([^>]+)>')

@@ -7,10 +7,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-try:
-    from PyQt5 import QtCore, QtGui, QtWidgets
-except Exception:
-    from PySide6 import QtCore, QtGui, QtWidgets  # type: ignore
+from qt_compat import QtCore, QtGui, QtWidgets
 
 from ecmc_stream_qt import (
     EpicsClient,
