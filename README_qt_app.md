@@ -2,24 +2,76 @@
 
 This folder now contains:
 
-- `ecmcCmd.proto` and `ecmcCmd.db` (generic StreamDevice records)
-- `startup_example.cmd` (IOC shell snippet)
 - `build_ecmc_command_catalog.py` (extracts commands from `ecmcCmdParser.c` + all `devEcmcSup/**/*.h` header docs)
 - `build_cntrl_command_catalog.py` (controller-focused command catalog generator)
 - `ecmc_commands.json` (generated command catalog)
 - `ecmc_commands_cntrl.json` (generated controller command catalog)
-- `ecmc_stream_qt.py` (Qt GUI to send commands to EPICS PVs)
+- `ecmc_stream_qt.py` / `start.sh` (generic command/stream GUI)
 - `ecmc_axis_cfg.py` / `start_axis.sh` (axis YAML config app)
 - `ecmc_cntrl_qt.py` / `start_cntrl.sh` (controller tuning/config app)
 - `ecmc_mtn_qt.py` / `start_mtn.sh` (motor-record motion app)
-- `ecmc_favorites.json` (saved favorites for quick command reuse)
+- `ecmc_iso230_qt.py` / `start_iso230.sh` (ISO 230-style bidirectional test app)
+
+## Applications
+
+### Stream
+
+Use the stream app when you want a generic command console against the ecmc `CMD` / `QRY` PVs.
+
+- Browses the generated command catalog and filters by command text, description, and category.
+- Sends ad-hoc commands, triggers `PROC + Read QRY`, and shows the latest readback/result.
+- Marks blocked commands from the local blocklist and can decode local error names when an error DB is present.
+- Includes a multi-command editor for repeated command sequences.
+- Opens the axis, Cntrl, and motion apps with the same IOC prefix.
+
+### Axis
+
+Use the axis app when you want to compare a YAML template with the live axis and push selected settings back to the IOC.
+
+- Loads `axis_template.yaml` plus the command-map CSV and maps YAML leaves to ecmc axis commands.
+- Reads and writes individual values, or uses `Read All`, `Write Filled`, and `Copy Read->Set` for bulk work.
+- Tracks session changes and exports either changed values or current session-known values as YAML text.
+- Opens selected rows in a popup where values can be polled and plotted over time.
+- Opens the related Cntrl and motion windows for the same axis.
+
+### Cntrl
+
+Use the Cntrl app when tuning controller-related parameters for a real axis.
+
+- Uses the filtered controller catalog so the table only shows controller-relevant command pairs.
+- Supports multiple views: `Flat`, `Schematic`, `Diagram`, and `Controller Sketch`.
+- Reads and writes paired set/read controller values and supports `Read All` plus `Copy Read->Set`.
+- Exports changed controller values or current session-known values as YAML.
+- Allows sketch-overlay calibration and layout saving for site-specific controller drawings.
+- Only supports `REAL` axes; virtual axes are rejected.
+
+### Motion
+
+Use the motion app when driving the motor record directly for quick motion checks and small test sequences.
+
+- Resolves the selected axis to its motor record and reads live motor status.
+- Provides `Move To Position`, `Tweak`, endless `Jog`, and `Sequence/Scan (A<->B)` workflows.
+- Shares VELO/ACCL/VMAX/ACCS settings across motion actions.
+- Provides `Stop` and `Kill` controls for active motion.
+- Can show compact trend graphs for `PosAct`, `PosSet`, and `PosErr`.
+
+### ISO230
+
+Use the ISO230 app when running an automated bidirectional positioning test against one or more reference PVs.
+
+- Resolves the motor record, accepts up to five reference PVs, and lets one reference be selected for report calculations.
+- Configures range, point count, cycles, settle time, samples per point, decimals, and approach margin.
+- Estimates run duration before the test starts and executes the sweep automatically.
+- Calculates ISO 230-style positioning metrics such as bidirectional accuracy, repeatability, and reversal values.
+- Previews and exports a Markdown report, exports CSV data, and saves or reloads full session files.
+- Supports demo data loading and CLI demo report generation.
 
 ## Generate/update command catalog
 
-Run from the ecmc repo root:
+Run from this repo root:
 
 ```bash
-../ecmc_cfg_stream/build_ecmc_command_catalog.py --repo-root . --out ../ecmc_cfg_stream/ecmc_commands.json
+./build_ecmc_command_catalog.py --repo-root <path-to-ecmc-repo> --out ./ecmc_commands.json
 ```
 
 ## Run GUIs
@@ -27,7 +79,6 @@ Run from the ecmc repo root:
 ### Generic stream GUI
 
 ```bash
-cd ../ecmc_cfg_stream
 ./start.sh IOC:ECMC
 ```
 
@@ -38,9 +89,9 @@ This sets:
 
 Example: `./start.sh MYIOC:SYS1` uses `MYIOC:SYS1:MCU-Cmd.AOUT` and `MYIOC:SYS1:MCU-Cmd.AINP`.
 
-### Axis / Controller / Motion apps
+### Axis / Controller / Motion / ISO230 apps
 
-All three app launchers accept:
+All four app launchers accept:
 
 - `./start_*.sh <IOC prefix> <axis id>`
 - `./start_*.sh <IOC prefix> <motor name>`
@@ -51,11 +102,12 @@ Examples:
 ./start_axis.sh IOC:ECMC 3
 ./start_cntrl.sh IOC:ECMC M1
 ./start_mtn.sh IOC:ECMC Axis1
+./start_iso230.sh IOC:ECMC 3
 ```
 
 The apps resolve axis IDs from IOC config PVs when a motor name/full motor PV is provided.
 
-## Axis selection behavior (axis / controller / motion apps)
+## Axis selection behavior (axis / controller / motion / ISO230 apps)
 
 - Top-right axis selector is a dropdown populated from IOC axis config:
   - `<prefix>:MCU-Cfg-AX-FrstObjId`
@@ -76,7 +128,7 @@ Controller app specifics:
 
 ## caQtDM buttons
 
-- `caqtdm Main` button in the config section of all three apps:
+- `caqtdm Main` button in the config section of the axis, controller, and motion apps:
   - launches `ecmcMain.ui` with macro `IOC=<IOC prefix>`
 - `caqtdm Axis` button:
   - in motion app (below axis selector)
@@ -104,5 +156,4 @@ One EPICS client backend:
 - Readback PV is read after triggering the parent record `.PROC` (works for field PVs like `.AINP`).
 - The command browser templates are extracted from `devEcmcSup/com/ecmcCmdParser.c`.
 - Descriptions are matched from all header doc blocks under `devEcmcSup/` when available.
-- Favorites are loaded at startup and saved on add/remove (or with `Save Favorites`).
 - caQtDM launchers use `bash -lc` to avoid wrapper-script `Exec format error` on some systems.
