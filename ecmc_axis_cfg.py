@@ -36,6 +36,12 @@ PLOT_COLORS = [
     "#be123c",
     "#4f46e5",
 ]
+APP_LAUNCH_PLACEHOLDER = "Open app..."
+APP_LAUNCH_AXIS = "New Axis App"
+APP_LAUNCH_CONTROLLER = "Cntrl Cfg App"
+APP_LAUNCH_MOTION = "Motion App"
+APP_LAUNCH_ISO230 = "ISO230 App"
+APP_LAUNCH_CAQTDM_AXIS = "caqtdm Axis"
 
 
 class YNode:
@@ -560,22 +566,23 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.yaml_btn.setAutoDefault(False)
         self.yaml_btn.setDefault(False)
         self.yaml_btn.clicked.connect(self._show_yaml_window)
-        self.open_cntrl_btn = QtWidgets.QPushButton("Cntrl Cfg App")
-        self.open_cntrl_btn.setAutoDefault(False)
-        self.open_cntrl_btn.setDefault(False)
-        self.open_cntrl_btn.clicked.connect(self._open_controller_window)
-        self.open_mtn_btn = QtWidgets.QPushButton("Motion App")
-        self.open_mtn_btn.setAutoDefault(False)
-        self.open_mtn_btn.setDefault(False)
-        self.open_mtn_btn.clicked.connect(self._open_motion_window)
+        self.open_app_combo = QtWidgets.QComboBox()
+        self.open_app_combo.setMinimumWidth(170)
+        self.open_app_combo.addItem(APP_LAUNCH_PLACEHOLDER, "")
+        self.open_app_combo.addItem(APP_LAUNCH_AXIS, "axis")
+        self.open_app_combo.addItem(APP_LAUNCH_CONTROLLER, "controller")
+        self.open_app_combo.addItem(APP_LAUNCH_MOTION, "motion")
+        self.open_app_combo.addItem(APP_LAUNCH_ISO230, "iso230")
+        self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_AXIS, "caqtdm_axis")
+        self.open_app_combo.activated.connect(self._on_open_app_selected)
         self.axis_pick_combo = QtWidgets.QComboBox()
         self.axis_pick_combo.setMinimumWidth(170)
         self.axis_pick_combo.setMaximumWidth(300)
         self.axis_pick_combo.activated.connect(self._on_axis_combo_activated)
         top_row.addWidget(self.cfg_toggle_btn)
         top_row.addWidget(self.yaml_btn)
-        top_row.addWidget(self.open_cntrl_btn)
-        top_row.addWidget(self.open_mtn_btn)
+        top_row.addWidget(QtWidgets.QLabel("Launch"))
+        top_row.addWidget(self.open_app_combo)
         top_row.addStretch(1)
         top_row.addWidget(QtWidgets.QLabel("Axis"))
         top_row.addWidget(self.axis_pick_combo)
@@ -585,10 +592,6 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText("Filter keys...")
         self.search.textChanged.connect(self._apply_tree_filter)
-        self.caqtdm_axis_btn = QtWidgets.QPushButton("caqtdm Axis")
-        self.caqtdm_axis_btn.setAutoDefault(False)
-        self.caqtdm_axis_btn.setDefault(False)
-        self.caqtdm_axis_btn.clicked.connect(self._open_caqtdm_axis_panel)
         search_row.addWidget(self.search, 1)
         layout.addLayout(search_row)
 
@@ -697,7 +700,6 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         action_row.addWidget(self.deselect_all_rows_btn)
         action_row.addStretch(1)
         search_row.addLayout(action_row)
-        search_row.addWidget(self.caqtdm_axis_btn)
 
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
@@ -752,6 +754,51 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.changes_log.setVisible(visible)
         self.changes_toggle_btn.setText("Hide Changes" if visible else "Show Changes")
 
+    def _reset_open_app_combo(self):
+        self.open_app_combo.blockSignals(True)
+        self.open_app_combo.setCurrentIndex(0)
+        self.open_app_combo.blockSignals(False)
+
+    def _on_open_app_selected(self, index):
+        action = str(self.open_app_combo.itemData(index) or "")
+        try:
+            if action == "axis":
+                self._open_new_axis_window()
+            elif action == "controller":
+                self._open_controller_window()
+            elif action == "motion":
+                self._open_motion_window()
+            elif action == "iso230":
+                self._open_iso230_window()
+            elif action == "caqtdm_axis":
+                self._open_caqtdm_axis_panel()
+        finally:
+            self._reset_open_app_combo()
+
+    def _open_new_axis_window(self, axis_id=None):
+        script = Path(__file__).with_name("start_axis.sh")
+        if not script.exists():
+            self._log(f"Launcher not found: {script.name}")
+            return False
+        target_axis = str(axis_id or self._axis_id()).strip() or self.axis_id_default
+        prefix = self.title_prefix or ""
+        if not prefix:
+            cmd_pv = self.cmd_pv.text().strip()
+            m = re.match(r"^(.*):MCU-Cmd\.AOUT$", cmd_pv)
+            prefix = m.group(1) if m else "IOC:ECMC"
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix), str(target_axis), str(self.yaml_path)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started new axis cfg window for axis {target_axis} (prefix {prefix})")
+            return True
+        except Exception as ex:
+            self._log(f"Failed to start new axis cfg window: {ex}")
+            return False
+
     def _open_controller_window(self):
         script = Path(__file__).with_name("start_cntrl.sh")
         if not script.exists():
@@ -795,6 +842,28 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             self._log(f"Started motion window for axis {axis_id} (prefix {prefix})")
         except Exception as ex:
             self._log(f"Failed to start motion window: {ex}")
+
+    def _open_iso230_window(self):
+        script = Path(__file__).with_name("start_iso230.sh")
+        if not script.exists():
+            self._log(f"Launcher not found: {script.name}")
+            return
+        axis_id = self._axis_id()
+        prefix = self.title_prefix or ""
+        if not prefix:
+            cmd_pv = self.cmd_pv.text().strip()
+            m = re.match(r"^(.*):MCU-Cmd\\.AOUT$", cmd_pv)
+            prefix = m.group(1) if m else "IOC:ECMC"
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix), str(axis_id)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started ISO230 window for axis {axis_id} (prefix {prefix})")
+        except Exception as ex:
+            self._log(f"Failed to start ISO230 window: {ex}")
 
     def _apply_tree_filter(self):
         needle = self.search.text().strip().lower() if hasattr(self, "search") else ""
@@ -1550,22 +1619,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         if not axis_id:
             return
         if self._axis_combo_open_new_instance:
-            script = Path(__file__).with_name("start_axis.sh")
-            prefix = self.title_prefix or ""
-            if not prefix:
-                cmd_pv = self.cmd_pv.text().strip()
-                m = re.match(r"^(.*):MCU-Cmd\.AOUT$", cmd_pv)
-                prefix = m.group(1) if m else "IOC:ECMC"
-            try:
-                subprocess.Popen(
-                    ["bash", str(script), str(prefix), str(axis_id), str(self.yaml_path)],
-                    cwd=str(script.parent),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                self._log(f"Started new axis cfg window for axis {axis_id} (prefix {prefix})")
-            except Exception as ex:
-                self._log(f"Failed to start new axis cfg window: {ex}")
+            self._open_new_axis_window(axis_id=axis_id)
             self._sync_axis_combo_to_axis_id(self._axis_id())
             return
         self._set_axis_id(axis_id)
@@ -1820,22 +1874,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
                 return
             axis_id = it.text().strip()
             if open_new_chk.isChecked():
-                script = Path(__file__).with_name("start_axis.sh")
-                prefix = self.title_prefix or ""
-                if not prefix:
-                    cmd_pv = self.cmd_pv.text().strip()
-                    m = re.match(r"^(.*):MCU-Cmd\\.AOUT$", cmd_pv)
-                    prefix = m.group(1) if m else "IOC:ECMC"
-                try:
-                    subprocess.Popen(
-                        ["bash", str(script), str(prefix), str(axis_id), str(self.yaml_path)],
-                        cwd=str(script.parent),
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                    self._log(f"Started new axis cfg window for axis {axis_id} (prefix {prefix})")
-                except Exception as ex:
-                    self._log(f"Failed to start new axis cfg window: {ex}")
+                if not self._open_new_axis_window(axis_id=axis_id):
                     return
                 return
             self._set_axis_id(axis_id)
@@ -1942,13 +1981,26 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         except Exception:
             motor = ""
         self.setWindowTitle(f"{self._base_title} [{motor}]" if motor else self._base_title)
-        self._update_open_controller_button_state()
+        self._update_open_app_combo_state()
 
-    def _update_open_controller_button_state(self):
+    def _update_open_app_combo_state(self):
+        model = self.open_app_combo.model()
+        controller_index = self.open_app_combo.findData("controller")
+        item = model.item(controller_index) if model is not None and controller_index >= 0 else None
+        if item is None:
+            return
         try:
-            self.open_cntrl_btn.setEnabled(self._axis_is_real())
+            enabled = self._axis_is_real()
         except Exception:
-            self.open_cntrl_btn.setEnabled(False)
+            enabled = False
+        flags = item.flags()
+        if enabled:
+            flags |= QtCore.Qt.ItemIsEnabled
+        else:
+            flags &= ~QtCore.Qt.ItemIsEnabled
+        item.setFlags(flags)
+        if not enabled:
+            self._reset_open_app_combo()
 
     def _axis_is_real(self, axis_id=None):
         axis = str(axis_id or self._axis_id()).strip() or self.axis_id_default

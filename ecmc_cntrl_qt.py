@@ -22,6 +22,12 @@ from ecmc_stream_qt import (
 
 
 PLACEHOLDER_RE = re.compile(r'<[^>]+>')
+APP_LAUNCH_PLACEHOLDER = 'Open app...'
+APP_LAUNCH_CONTROLLER = 'New Cntrl App'
+APP_LAUNCH_AXIS = 'Axis Cfg App'
+APP_LAUNCH_MOTION = 'Motion App'
+APP_LAUNCH_ISO230 = 'ISO230 App'
+APP_LAUNCH_CAQTDM_AXIS = 'caqtdm Axis'
 
 
 def _normalize_axis_object_id(value):
@@ -463,29 +469,25 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.yaml_btn.setDefault(False)
         self.yaml_btn.clicked.connect(self._show_yaml_window)
         top_row.addWidget(self.yaml_btn)
-        self.open_motion_btn = QtWidgets.QPushButton('Motion App')
-        self.open_motion_btn.setAutoDefault(False)
-        self.open_motion_btn.setDefault(False)
-        self.open_motion_btn.clicked.connect(self._open_motion_window)
-        top_row.addWidget(self.open_motion_btn)
-        self.open_axis_btn = QtWidgets.QPushButton('Axis Cfg App')
-        self.open_axis_btn.setAutoDefault(False)
-        self.open_axis_btn.setDefault(False)
-        self.open_axis_btn.clicked.connect(self._open_axis_window)
-        top_row.addWidget(self.open_axis_btn)
+        self.open_app_combo = QtWidgets.QComboBox()
+        self.open_app_combo.setMinimumWidth(170)
+        self.open_app_combo.addItem(APP_LAUNCH_PLACEHOLDER, '')
+        self.open_app_combo.addItem(APP_LAUNCH_CONTROLLER, 'controller')
+        self.open_app_combo.addItem(APP_LAUNCH_AXIS, 'axis')
+        self.open_app_combo.addItem(APP_LAUNCH_MOTION, 'motion')
+        self.open_app_combo.addItem(APP_LAUNCH_ISO230, 'iso230')
+        self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_AXIS, 'caqtdm_axis')
+        self.open_app_combo.activated.connect(self._on_open_app_selected)
+        top_row.addWidget(QtWidgets.QLabel('Launch'))
+        top_row.addWidget(self.open_app_combo)
         self.axis_pick_combo = QtWidgets.QComboBox()
         self.axis_pick_combo.setMinimumWidth(170)
         self.axis_pick_combo.setMaximumWidth(300)
         self.axis_pick_combo.activated.connect(self._on_axis_combo_activated)
-        self.caqtdm_axis_btn = QtWidgets.QPushButton('caqtdm Axis')
-        self.caqtdm_axis_btn.setAutoDefault(False)
-        self.caqtdm_axis_btn.setDefault(False)
-        self.caqtdm_axis_btn.clicked.connect(self._open_caqtdm_axis_panel)
         for w in (
             self.pv_cfg_toggle,
             self.yaml_btn,
-            self.open_motion_btn,
-            self.open_axis_btn,
+            self.open_app_combo,
         ):
             w.setMaximumHeight(24)
         top_row.addStretch(1)
@@ -516,14 +518,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.copy_read_to_set_btn.setDefault(False)
         self.copy_read_to_set_btn.clicked.connect(self._copy_all_read_to_set)
         search_row.addWidget(self.copy_read_to_set_btn)
-        self.caqtdm_axis_btn.setMaximumHeight(24)
-        search_row.addWidget(self.caqtdm_axis_btn)
         for w in (
             self.search,
             self.view_mode,
             self.read_all_btn,
             self.copy_read_to_set_btn,
-            self.caqtdm_axis_btn,
         ):
             try:
                 w.setMaximumHeight(24)
@@ -840,23 +839,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
                 return
             axis_id = it.text().strip()
             if open_new_chk.isChecked():
-                script = Path(__file__).with_name('start_cntrl.sh')
-                prefix = self.title_prefix or ''
-                if not prefix:
-                    cmd_pv = self.cmd_pv.text().strip()
-                    m = re.match(r'^(.*):MCU-Cmd\.AOUT$', cmd_pv)
-                    prefix = m.group(1) if m else 'IOC:ECMC'
-                sketch_image = self.sketch_image_edit.text().strip() if hasattr(self, 'sketch_image_edit') else self.sketch_image_path
-                try:
-                    subprocess.Popen(
-                        ['bash', str(script), str(prefix), str(axis_id), str(sketch_image or '')],
-                        cwd=str(script.parent),
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                    self._log(f'Started new controller window for axis {axis_id} (prefix {prefix})')
-                except Exception as ex:
-                    self._log(f'Failed to start new controller window: {ex}')
+                if not self._open_new_controller_window(axis_id=axis_id):
                     return
             else:
                 self.axis_all_edit.setText(axis_id)
@@ -971,6 +954,54 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._log('Opening axis picker because controller app started on a virtual/non-REAL axis')
         self._open_axis_picker_dialog()
 
+    def _reset_open_app_combo(self):
+        self.open_app_combo.blockSignals(True)
+        self.open_app_combo.setCurrentIndex(0)
+        self.open_app_combo.blockSignals(False)
+
+    def _on_open_app_selected(self, index):
+        action = str(self.open_app_combo.itemData(index) or '')
+        try:
+            if action == 'controller':
+                self._open_new_controller_window()
+            elif action == 'axis':
+                self._open_axis_window()
+            elif action == 'motion':
+                self._open_motion_window()
+            elif action == 'iso230':
+                self._open_iso230_window()
+            elif action == 'caqtdm_axis':
+                self._open_caqtdm_axis_panel()
+        finally:
+            self._reset_open_app_combo()
+
+    def _open_new_controller_window(self, axis_id=None):
+        target_axis = str(axis_id or self.axis_all_edit.text().strip() or self.default_axis_id).strip() or self.default_axis_id
+        if not self._ensure_axis_is_real(target_axis, purpose='open controller app', close_on_fail=False):
+            return False
+        script = Path(__file__).with_name('start_cntrl.sh')
+        if not script.exists():
+            self._log(f'Launcher not found: {script.name}')
+            return False
+        prefix = self.title_prefix or ''
+        if not prefix:
+            cmd_pv = self.cmd_pv.text().strip()
+            m = re.match(r'^(.*):MCU-Cmd\.AOUT$', cmd_pv)
+            prefix = m.group(1) if m else 'IOC:ECMC'
+        sketch_image = self.sketch_image_edit.text().strip() if hasattr(self, 'sketch_image_edit') else self.sketch_image_path
+        try:
+            subprocess.Popen(
+                ['bash', str(script), str(prefix), str(target_axis), str(sketch_image or '')],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f'Started new controller window for axis {target_axis} (prefix {prefix})')
+            return True
+        except Exception as ex:
+            self._log(f'Failed to start new controller window: {ex}')
+            return False
+
     def _motor_type_for_axis(self, axis_id):
         axis = str(axis_id or '').strip() or self.default_axis_id
         motor = self._resolve_motor_record_name(axis)
@@ -1056,6 +1087,28 @@ class CntrlWindow(QtWidgets.QMainWindow):
             self._log(f'Started axis window for axis {axis_id} (prefix {prefix})')
         except Exception as ex:
             self._log(f'Failed to start axis window: {ex}')
+
+    def _open_iso230_window(self):
+        script = Path(__file__).with_name('start_iso230.sh')
+        if not script.exists():
+            self._log(f'Launcher not found: {script.name}')
+            return
+        axis_id = self.axis_all_edit.text().strip() or self.default_axis_id
+        prefix = self.title_prefix or ''
+        if not prefix:
+            cmd_pv = self.cmd_pv.text().strip()
+            m = re.match(r'^(.*):MCU-Cmd\.AOUT$', cmd_pv)
+            prefix = m.group(1) if m else 'IOC:ECMC'
+        try:
+            subprocess.Popen(
+                ['bash', str(script), str(prefix), str(axis_id)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f'Started ISO230 window for axis {axis_id} (prefix {prefix})')
+        except Exception as ex:
+            self._log(f'Failed to start ISO230 window: {ex}')
 
     def _open_caqtdm_axis_panel(self):
         axis_id = self.axis_all_edit.text().strip() or self.default_axis_id
@@ -2097,23 +2150,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
             self._sync_axis_combo_to_axis_id(self.axis_all_edit.text().strip() or self.default_axis_id)
             return
         if self._axis_combo_open_new_instance:
-            script = Path(__file__).with_name('start_cntrl.sh')
-            prefix = self.title_prefix or ''
-            if not prefix:
-                cmd_pv = self.cmd_pv.text().strip()
-                m = re.match(r'^(.*):MCU-Cmd\.AOUT$', cmd_pv)
-                prefix = m.group(1) if m else 'IOC:ECMC'
-            sketch_image = self.sketch_image_edit.text().strip() if hasattr(self, 'sketch_image_edit') else self.sketch_image_path
-            try:
-                subprocess.Popen(
-                    ['bash', str(script), str(prefix), str(axis_id), str(sketch_image or '')],
-                    cwd=str(script.parent),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                self._log(f'Started new controller window for axis {axis_id} (prefix {prefix})')
-            except Exception as ex:
-                self._log(f'Failed to start new controller window: {ex}')
+            self._open_new_controller_window(axis_id=axis_id)
             self._sync_axis_combo_to_axis_id(self.axis_all_edit.text().strip() or self.default_axis_id)
             return
         self.axis_all_edit.setText(axis_id)

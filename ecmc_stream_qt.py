@@ -22,6 +22,12 @@ QRY_ERROR_PREFIX_RE = re.compile(
 )
 ERROR_CODE_RE = re.compile(r'Error:\s*([A-Za-z0-9_.+-]+)', flags=re.IGNORECASE)
 LOCAL_ERROR_DB_NAME = 'ecmc_error_codes.json'
+APP_LAUNCH_PLACEHOLDER = 'Open app...'
+APP_LAUNCH_STREAM = 'New Stream App'
+APP_LAUNCH_AXIS = 'Axis Cfg App'
+APP_LAUNCH_CONTROLLER = 'Cntrl Cfg App'
+APP_LAUNCH_MOTION = 'Motion App'
+APP_LAUNCH_ISO230 = 'ISO230 App'
 
 
 class EpicsClient:
@@ -1141,21 +1147,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.log_toggle_btn.setAutoDefault(False)
         self.log_toggle_btn.setDefault(False)
         top_row.addWidget(self.log_toggle_btn)
-        self.open_cntrl_btn = QtWidgets.QPushButton('Cntrl Cfg App')
-        self.open_cntrl_btn.setAutoDefault(False)
-        self.open_cntrl_btn.setDefault(False)
-        self.open_cntrl_btn.clicked.connect(self._open_cntrl_window)
-        top_row.addWidget(self.open_cntrl_btn)
-        self.open_mtn_btn = QtWidgets.QPushButton('Motion App')
-        self.open_mtn_btn.setAutoDefault(False)
-        self.open_mtn_btn.setDefault(False)
-        self.open_mtn_btn.clicked.connect(self._open_motion_window)
-        top_row.addWidget(self.open_mtn_btn)
-        self.open_axis_btn = QtWidgets.QPushButton('Axis Cfg App')
-        self.open_axis_btn.setAutoDefault(False)
-        self.open_axis_btn.setDefault(False)
-        self.open_axis_btn.clicked.connect(self._open_axis_window)
-        top_row.addWidget(self.open_axis_btn)
+        self.open_app_combo = QtWidgets.QComboBox()
+        self.open_app_combo.setMinimumWidth(170)
+        self.open_app_combo.addItem(APP_LAUNCH_PLACEHOLDER, '')
+        self.open_app_combo.addItem(APP_LAUNCH_STREAM, 'stream')
+        self.open_app_combo.addItem(APP_LAUNCH_AXIS, 'axis')
+        self.open_app_combo.addItem(APP_LAUNCH_CONTROLLER, 'controller')
+        self.open_app_combo.addItem(APP_LAUNCH_MOTION, 'motion')
+        self.open_app_combo.addItem(APP_LAUNCH_ISO230, 'iso230')
+        self.open_app_combo.activated.connect(self._on_open_app_selected)
+        top_row.addWidget(QtWidgets.QLabel('Launch'))
+        top_row.addWidget(self.open_app_combo)
         top_row.addStretch(1)
         self.caqtdm_main_btn = QtWidgets.QPushButton('caqtdm Main')
         self.caqtdm_main_btn.setAutoDefault(False)
@@ -1313,6 +1315,44 @@ class MainWindow(QtWidgets.QMainWindow):
         except Exception as ex:
             self._log(f'Failed to start caQtDM main panel: {ex}')
 
+    def _reset_open_app_combo(self):
+        self.open_app_combo.blockSignals(True)
+        self.open_app_combo.setCurrentIndex(0)
+        self.open_app_combo.blockSignals(False)
+
+    def _on_open_app_selected(self, index):
+        action = str(self.open_app_combo.itemData(index) or '')
+        try:
+            if action == 'stream':
+                self._open_stream_window()
+            elif action == 'axis':
+                self._open_axis_window()
+            elif action == 'controller':
+                self._open_cntrl_window()
+            elif action == 'motion':
+                self._open_motion_window()
+            elif action == 'iso230':
+                self._open_iso230_window()
+        finally:
+            self._reset_open_app_combo()
+
+    def _open_stream_window(self):
+        script = Path(__file__).with_name('start.sh')
+        if not script.exists():
+            self._log(f'Launcher not found: {script.name}')
+            return
+        prefix = self._ioc_prefix_for_title() or 'IOC:ECMC'
+        try:
+            subprocess.Popen(
+                ['bash', str(script), str(prefix)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f'Started stream window (prefix {prefix})')
+        except Exception as ex:
+            self._log(f'Failed to start stream window: {ex}')
+
     def _open_script_window(self, script_name, label, axis_id='1'):
         script = Path(__file__).with_name(script_name)
         if not script.exists():
@@ -1338,6 +1378,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _open_axis_window(self):
         self._open_script_window('start_axis.sh', 'axis')
+
+    def _open_iso230_window(self):
+        self._open_script_window('start_iso230.sh', 'ISO230')
 
     def _is_config_only_command(self, cmd):
         return str(cmd or '').strip().startswith('Cfg.')

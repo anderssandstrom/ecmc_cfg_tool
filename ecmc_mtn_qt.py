@@ -11,6 +11,13 @@ from qt_compat import QtCore, QtGui, QtWidgets
 
 from ecmc_stream_qt import EpicsClient, _join_prefix_pv, compact_float_text
 
+APP_LAUNCH_PLACEHOLDER = "Open app..."
+APP_LAUNCH_MOTION = "New Motion App"
+APP_LAUNCH_AXIS = "Axis Cfg App"
+APP_LAUNCH_CONTROLLER = "Cntrl Cfg App"
+APP_LAUNCH_ISO230 = "ISO230 App"
+APP_LAUNCH_CAQTDM_AXIS = "caqtdm Axis"
+
 
 def _to_float(text, name):
     s = str(text).strip()
@@ -321,14 +328,15 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
         self.graphs_toggle_btn.setAutoDefault(False)
         self.graphs_toggle_btn.setDefault(False)
         self.graphs_toggle_btn.clicked.connect(self._toggle_graphs_panel)
-        self.open_cntrl_btn = QtWidgets.QPushButton("Cntrl Cfg App")
-        self.open_cntrl_btn.setAutoDefault(False)
-        self.open_cntrl_btn.setDefault(False)
-        self.open_cntrl_btn.clicked.connect(self._open_controller_window)
-        self.open_axis_btn = QtWidgets.QPushButton("Axis Cfg App")
-        self.open_axis_btn.setAutoDefault(False)
-        self.open_axis_btn.setDefault(False)
-        self.open_axis_btn.clicked.connect(self._open_axis_window)
+        self.open_app_combo = QtWidgets.QComboBox()
+        self.open_app_combo.setMinimumWidth(160)
+        self.open_app_combo.addItem(APP_LAUNCH_PLACEHOLDER, "")
+        self.open_app_combo.addItem(APP_LAUNCH_MOTION, "motion")
+        self.open_app_combo.addItem(APP_LAUNCH_AXIS, "axis")
+        self.open_app_combo.addItem(APP_LAUNCH_CONTROLLER, "controller")
+        self.open_app_combo.addItem(APP_LAUNCH_ISO230, "iso230")
+        self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_AXIS, "caqtdm_axis")
+        self.open_app_combo.activated.connect(self._on_open_app_selected)
         self.axis_pick_combo = QtWidgets.QComboBox()
         self.axis_pick_combo.setMinimumWidth(150)
         self.axis_pick_combo.setMaximumWidth(220)
@@ -337,8 +345,7 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
             self.cfg_toggle_btn,
             self.log_toggle_btn,
             self.graphs_toggle_btn,
-            self.open_cntrl_btn,
-            self.open_axis_btn,
+            self.open_app_combo,
             self.axis_pick_combo,
         ):
             try:
@@ -348,8 +355,8 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
         top_row.addWidget(self.cfg_toggle_btn)
         top_row.addWidget(self.log_toggle_btn)
         top_row.addWidget(self.graphs_toggle_btn)
-        top_row.addWidget(self.open_cntrl_btn)
-        top_row.addWidget(self.open_axis_btn)
+        top_row.addWidget(QtWidgets.QLabel("Launch"))
+        top_row.addWidget(self.open_app_combo)
         top_row.addStretch(1)
         axis_sel_col = QtWidgets.QVBoxLayout()
         axis_sel_col.setContentsMargins(0, 0, 0, 0)
@@ -360,12 +367,6 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
         axis_sel_row.addWidget(QtWidgets.QLabel("Axis"))
         axis_sel_row.addWidget(self.axis_pick_combo)
         axis_sel_col.addLayout(axis_sel_row)
-        self.caqtdm_axis_btn = QtWidgets.QPushButton("caqtdm Axis")
-        self.caqtdm_axis_btn.setAutoDefault(False)
-        self.caqtdm_axis_btn.setDefault(False)
-        self.caqtdm_axis_btn.setMaximumHeight(22)
-        self.caqtdm_axis_btn.clicked.connect(self._open_caqtdm_axis_panel)
-        axis_sel_col.addWidget(self.caqtdm_axis_btn)
         top_row.addLayout(axis_sel_col)
         layout.addLayout(top_row)
 
@@ -578,22 +579,52 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
         if not axis_id:
             return
         if self._axis_combo_open_new_instance:
-            script = QtCore.QFileInfo(__file__).dir().filePath("start_mtn.sh")
-            prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
-            try:
-                subprocess.Popen(
-                    ["bash", str(script), str(prefix), str(axis_id)],
-                    cwd=str(QtCore.QFileInfo(script).absolutePath()),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                self._log(f"Started new motion window for axis {axis_id} (prefix {prefix})")
-            except Exception as ex:
-                self._log(f"Failed to start new motion window: {ex}")
+            self._open_new_motion_window(axis_id=axis_id)
             self._sync_axis_combo_to_axis_id(self._axis_id_text())
             return
         self.axis_edit.setText(axis_id)
         self._apply_axis_top()
+
+    def _reset_open_app_combo(self):
+        self.open_app_combo.blockSignals(True)
+        self.open_app_combo.setCurrentIndex(0)
+        self.open_app_combo.blockSignals(False)
+
+    def _on_open_app_selected(self, index):
+        action = str(self.open_app_combo.itemData(index) or "")
+        try:
+            if action == "motion":
+                self._open_new_motion_window()
+            elif action == "axis":
+                self._open_axis_window()
+            elif action == "controller":
+                self._open_controller_window()
+            elif action == "iso230":
+                self._open_iso230_window()
+            elif action == "caqtdm_axis":
+                self._open_caqtdm_axis_panel()
+        finally:
+            self._reset_open_app_combo()
+
+    def _open_new_motion_window(self, axis_id=None):
+        script = QtCore.QFileInfo(__file__).dir().filePath("start_mtn.sh")
+        if not QtCore.QFileInfo(script).exists():
+            self._log("Launcher not found: start_mtn.sh")
+            return False
+        target_axis = str(axis_id or self._axis_id_text()).strip() or self.default_axis_id
+        prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix), str(target_axis)],
+                cwd=str(QtCore.QFileInfo(script).absolutePath()),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started new motion window for axis {target_axis} (prefix {prefix})")
+            return True
+        except Exception as ex:
+            self._log(f"Failed to start new motion window: {ex}")
+            return False
 
     def _prompt_axis_selection_via_combo(self, reason_msg=None):
         if reason_msg:
@@ -736,18 +767,7 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
                 return
             axis_id = it.text().strip()
             if open_new_chk.isChecked():
-                script = QtCore.QFileInfo(__file__).dir().filePath("start_mtn.sh")
-                prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
-                try:
-                    subprocess.Popen(
-                        ["bash", str(script), str(prefix), str(axis_id)],
-                        cwd=str(QtCore.QFileInfo(script).absolutePath()),
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                    self._log(f"Started new motion window for axis {axis_id} (prefix {prefix})")
-                except Exception as ex:
-                    self._log(f"Failed to start new motion window: {ex}")
+                if not self._open_new_motion_window(axis_id=axis_id):
                     return
             else:
                 self.axis_edit.setText(axis_id)
@@ -1241,6 +1261,24 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
         except Exception as ex:
             self._log(f"Failed to start axis window: {ex}")
 
+    def _open_iso230_window(self):
+        script = QtCore.QFileInfo(__file__).dir().filePath("start_iso230.sh")
+        if not QtCore.QFileInfo(script).exists():
+            self._log("Launcher not found: start_iso230.sh")
+            return
+        axis_id = self._axis_id_text()
+        prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix), str(axis_id)],
+                cwd=str(QtCore.QFileInfo(script).absolutePath()),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started ISO230 window for axis {axis_id} (prefix {prefix})")
+        except Exception as ex:
+            self._log(f"Failed to start ISO230 window: {ex}")
+
     def _open_caqtdm_axis_panel(self):
         ioc_prefix = self.prefix_edit.text().strip() or self.default_prefix or ""
         axis_id = self._axis_id_text()
@@ -1298,10 +1336,15 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
             self.setWindowTitle(f"{self._base_title} [{motor}]")
         else:
             self.setWindowTitle(self._base_title)
-        self._update_open_controller_button_state()
+        self._update_open_app_combo_state()
 
-    def _update_open_controller_button_state(self):
-        self.open_cntrl_btn.setEnabled(True)
+    def _update_open_app_combo_state(self):
+        model = self.open_app_combo.model()
+        controller_index = self.open_app_combo.findData("controller")
+        item = model.item(controller_index) if model is not None and controller_index >= 0 else None
+        if item is None:
+            return
+        item.setFlags(item.flags() | QtCore.Qt.ItemIsEnabled)
 
     def _update_cfg_pv_edits(self):
         prefix = self.prefix_edit.text().strip()

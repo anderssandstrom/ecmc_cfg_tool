@@ -27,6 +27,12 @@ from ecmc_stream_qt import EpicsClient, _join_prefix_pv, compact_float_text
 _FORMAT_DECIMALS = 5
 _MAX_REFERENCE_PVS = 5
 _UI_SCALE = 0.7
+APP_LAUNCH_PLACEHOLDER = "Open app..."
+APP_LAUNCH_ISO230 = "New ISO230 App"
+APP_LAUNCH_AXIS = "Axis Cfg App"
+APP_LAUNCH_CONTROLLER = "Cntrl Cfg App"
+APP_LAUNCH_MOTION = "Motion App"
+APP_LAUNCH_CAQTDM_AXIS = "caqtdm Axis"
 
 
 def _scaled_px(value):
@@ -573,12 +579,21 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.preview_report_btn = QtWidgets.QPushButton("Preview Report")
         self.export_report_btn = QtWidgets.QPushButton("Save Report (.md)")
         self.export_csv_btn = QtWidgets.QPushButton("Save CSV")
+        self.open_app_combo = QtWidgets.QComboBox()
+        self.open_app_combo.setMinimumWidth(_scaled_px(180))
         self.axis_pick_combo = QtWidgets.QComboBox()
         self.axis_pick_combo.setMinimumWidth(_scaled_px(180))
         self.axis_pick_combo.setMaximumWidth(_scaled_px(260))
         top_control_height = 28
+        self.open_app_combo.setMinimumHeight(top_control_height)
         self.axis_pick_combo.setMinimumHeight(top_control_height)
         self.data_btn.setMinimumHeight(top_control_height)
+        self.open_app_combo.addItem(APP_LAUNCH_PLACEHOLDER, "")
+        self.open_app_combo.addItem(APP_LAUNCH_ISO230, "iso230")
+        self.open_app_combo.addItem(APP_LAUNCH_AXIS, "axis")
+        self.open_app_combo.addItem(APP_LAUNCH_CONTROLLER, "controller")
+        self.open_app_combo.addItem(APP_LAUNCH_MOTION, "motion")
+        self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_AXIS, "caqtdm_axis")
         for btn in (
             self.cfg_toggle_btn,
             self.log_toggle_btn,
@@ -600,6 +615,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.data_btn.setMenu(data_menu)
         self.data_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.abort_btn.setEnabled(False)
+        self.open_app_combo.activated.connect(self._on_open_app_selected)
         self.axis_pick_combo.activated.connect(self._on_axis_combo_activated)
         self.cfg_toggle_btn.clicked.connect(self._toggle_config_panel)
         self.log_toggle_btn.clicked.connect(self._toggle_log_panel)
@@ -614,6 +630,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         top_row.addWidget(self.abort_btn)
         top_row.addWidget(self.preview_report_btn)
         top_row.addWidget(self.export_report_btn)
+        top_row.addWidget(QtWidgets.QLabel("Launch"))
+        top_row.addWidget(self.open_app_combo)
         top_row.addStretch(1)
         axis_col = QtWidgets.QVBoxLayout()
         axis_col.setContentsMargins(0, 0, 0, 0)
@@ -1021,6 +1039,27 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
     def _log(self, msg):
         self.log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
+    def _reset_open_app_combo(self):
+        self.open_app_combo.blockSignals(True)
+        self.open_app_combo.setCurrentIndex(0)
+        self.open_app_combo.blockSignals(False)
+
+    def _on_open_app_selected(self, index):
+        action = str(self.open_app_combo.itemData(index) or "")
+        try:
+            if action == "iso230":
+                self._open_new_iso230_window()
+            elif action == "axis":
+                self._open_axis_window()
+            elif action == "controller":
+                self._open_controller_window()
+            elif action == "motion":
+                self._open_motion_window()
+            elif action == "caqtdm_axis":
+                self._open_caqtdm_axis_panel()
+        finally:
+            self._reset_open_app_combo()
+
     def _axis_id_text(self):
         return self.axis_edit.text().strip() or self.default_axis_id
 
@@ -1097,22 +1136,96 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         if not axis_id:
             return
         if self._axis_combo_open_new_instance:
-            script = QtCore.QFileInfo(__file__).dir().filePath("start_iso230.sh")
-            prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
-            try:
-                subprocess.Popen(
-                    ["bash", str(script), str(prefix), str(axis_id)],
-                    cwd=str(QtCore.QFileInfo(script).absolutePath()),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                self._log(f"Started new ISO 230 window for axis {axis_id} (prefix {prefix})")
-            except Exception as ex:
-                self._log(f"Failed to start new ISO 230 window: {ex}")
+            self._open_new_iso230_window(axis_id=axis_id)
             self._sync_axis_combo_to_axis_id(self._axis_id_text())
             return
         self.axis_edit.setText(axis_id)
         self._apply_axis_top()
+
+    def _open_new_iso230_window(self, axis_id=None):
+        script = QtCore.QFileInfo(__file__).dir().filePath("start_iso230.sh")
+        if not QtCore.QFileInfo(script).exists():
+            self._log("Launcher not found: start_iso230.sh")
+            return False
+        target_axis = str(axis_id or self._axis_id_text()).strip() or self.default_axis_id
+        prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix), str(target_axis)],
+                cwd=str(QtCore.QFileInfo(script).absolutePath()),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started new ISO 230 window for axis {target_axis} (prefix {prefix})")
+            return True
+        except Exception as ex:
+            self._log(f"Failed to start new ISO 230 window: {ex}")
+            return False
+
+    def _open_script_window(self, script_name, label):
+        script = Path(__file__).with_name(script_name)
+        if not script.exists():
+            self._log(f"Launcher not found: {script.name}")
+            return
+        axis_id = self._axis_id_text()
+        prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix), str(axis_id)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started {label} window for axis {axis_id} (prefix {prefix})")
+        except Exception as ex:
+            self._log(f"Failed to start {label} window: {ex}")
+
+    def _open_axis_window(self):
+        self._open_script_window("start_axis.sh", "axis")
+
+    def _open_controller_window(self):
+        self._open_script_window("start_cntrl.sh", "controller")
+
+    def _open_motion_window(self):
+        self._open_script_window("start_mtn.sh", "motion")
+
+    def _open_caqtdm_axis_panel(self):
+        axis_id = self._axis_id_text()
+        ioc_prefix = self.prefix_edit.text().strip() or self.default_prefix or ""
+        motor_prefix = ""
+        axis_name = ""
+        try:
+            pfx_pv = self.axis_pfx_cfg_pv_edit.text().strip() if hasattr(self, "axis_pfx_cfg_pv_edit") else ""
+            if pfx_pv:
+                raw = self._get_pv_best_effort(pfx_pv, as_string=True)
+                motor_prefix = str(raw or "").strip().strip('"')
+        except Exception:
+            motor_prefix = ""
+        try:
+            nam_pv = self.motor_name_cfg_pv_edit.text().strip() if hasattr(self, "motor_name_cfg_pv_edit") else ""
+            if nam_pv:
+                raw = self._get_pv_best_effort(nam_pv, as_string=True)
+                axis_name = str(raw or "").strip().strip('"')
+        except Exception:
+            axis_name = ""
+        motor_base = self.motor_record_edit.text().strip() if hasattr(self, "motor_record_edit") else ""
+        if not motor_prefix and motor_base and ":" in motor_base:
+            motor_prefix = motor_base.rsplit(":", 1)[0]
+        if not axis_name and motor_base:
+            axis_name = motor_base.rsplit(":", 1)[-1]
+        motor_prefix = str(motor_prefix or "").rstrip(":")
+        macro = f"DEV={motor_prefix},IOC={ioc_prefix},Axis={axis_name},AX_ID={axis_id}"
+        try:
+            cmd = f'caqtdm -macro "{macro}" ecmcAxis.ui'
+            subprocess.Popen(
+                ["bash", "-lc", cmd],
+                cwd=str(Path(__file__).resolve().parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started caQtDM axis panel ({macro})")
+        except Exception as ex:
+            self._log(f"Failed to start caQtDM axis panel: {ex}")
 
     def _discover_axes_from_ioc(self):
         prefix = self.prefix_edit.text().strip() or self.default_prefix
