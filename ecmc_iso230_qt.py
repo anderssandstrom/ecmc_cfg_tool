@@ -528,6 +528,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._next_sample_at = 0.0
         self._latest_metrics = {}
         self._latest_report_markdown = ""
+        self._operator_comments = ""
         self._last_status = {}
         self._measurements = []
         self._test_settings_cache = {}
@@ -579,6 +580,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.preview_report_btn = QtWidgets.QPushButton("Preview Report")
         self.export_report_btn = QtWidgets.QPushButton("Save Report (.md)")
         self.export_csv_btn = QtWidgets.QPushButton("Save CSV")
+        self.help_btn = QtWidgets.QPushButton("Calc Help")
         self.open_app_combo = QtWidgets.QComboBox()
         self.open_app_combo.setMinimumWidth(_scaled_px(180))
         self.axis_pick_combo = QtWidgets.QComboBox()
@@ -603,6 +605,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self.preview_report_btn,
             self.export_report_btn,
             self.export_csv_btn,
+            self.help_btn,
         ):
             btn.setAutoDefault(False)
             btn.setDefault(False)
@@ -625,11 +628,13 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.preview_report_btn.clicked.connect(self.preview_report)
         self.export_report_btn.clicked.connect(self.export_report)
         self.export_csv_btn.clicked.connect(self.export_csv)
+        self.help_btn.clicked.connect(self._show_calculation_help)
         top_row.addWidget(self.cfg_toggle_btn)
         top_row.addWidget(self.start_btn)
         top_row.addWidget(self.abort_btn)
         top_row.addWidget(self.preview_report_btn)
         top_row.addWidget(self.export_report_btn)
+        top_row.addWidget(self.help_btn)
         top_row.addWidget(QtWidgets.QLabel("Launch"))
         top_row.addWidget(self.open_app_combo)
         top_row.addStretch(1)
@@ -2343,8 +2348,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         max_abs_error = None
         mean_bidirectional_values = []
         reversal_values = []
+        directional_mean_values = []
         bidirectional_upper = []
         bidirectional_lower = []
+        forward_axis_repeatability = None
+        reverse_axis_repeatability = None
         overall_unidirectional_repeatability = None
         overall_bidirectional_repeatability = None
         for key in sorted(grouped.keys(), key=lambda k: grouped[k]["target"]):
@@ -2354,11 +2362,17 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             both = list(fwd) + list(rev)
             fwd_mean = _mean(fwd)
             rev_mean = _mean(rev)
-            fwd_repeat = (max(fwd) - min(fwd)) if fwd else None
-            rev_repeat = (max(rev) - min(rev)) if rev else None
+            fwd_std = _stddev(fwd)
+            rev_std = _stddev(rev)
+            fwd_repeat = (4.0 * float(fwd_std)) if fwd_std is not None else None
+            rev_repeat = (4.0 * float(rev_std)) if rev_std is not None else None
+            if fwd_mean is not None:
+                directional_mean_values.append(float(fwd_mean))
+            if rev_mean is not None:
+                directional_mean_values.append(float(rev_mean))
             if fwd_mean is not None and rev_mean is not None:
                 mean_bidir = 0.5 * (float(fwd_mean) + float(rev_mean))
-                reversal = abs(float(fwd_mean) - float(rev_mean))
+                reversal = float(fwd_mean) - float(rev_mean)
             else:
                 mean_bidir = fwd_mean if fwd_mean is not None else rev_mean
                 reversal = None
@@ -2375,7 +2389,14 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 lower_candidates.append(float(rev_mean) - r_half)
             bidir_upper = max(upper_candidates) if upper_candidates else None
             bidir_lower = min(lower_candidates) if lower_candidates else None
-            bidir_repeat = (bidir_upper - bidir_lower) if (bidir_upper is not None and bidir_lower is not None) else None
+            if fwd_std is not None and rev_std is not None and reversal is not None:
+                bidir_repeat = max(
+                    math.sqrt((2.0 * float(fwd_std) * float(fwd_std)) + (2.0 * float(rev_std) * float(rev_std)) + (float(reversal) * float(reversal))),
+                    float(fwd_repeat or 0.0),
+                    float(rev_repeat or 0.0),
+                )
+            else:
+                bidir_repeat = None
             point_max_abs = max((abs(v) for v in both), default=None)
             if point_max_abs is not None:
                 max_abs_error = point_max_abs if max_abs_error is None else max(max_abs_error, point_max_abs)
@@ -2387,6 +2408,18 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 bidirectional_upper.append(float(bidir_upper))
             if bidir_lower is not None:
                 bidirectional_lower.append(float(bidir_lower))
+            if fwd_repeat is not None:
+                forward_axis_repeatability = (
+                    float(fwd_repeat)
+                    if forward_axis_repeatability is None
+                    else max(forward_axis_repeatability, float(fwd_repeat))
+                )
+            if rev_repeat is not None:
+                reverse_axis_repeatability = (
+                    float(rev_repeat)
+                    if reverse_axis_repeatability is None
+                    else max(reverse_axis_repeatability, float(rev_repeat))
+                )
             if unidir_repeat is not None:
                 overall_unidirectional_repeatability = (
                     unidir_repeat
@@ -2405,6 +2438,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                     "forward_mean": fwd_mean,
                     "reverse_mean": rev_mean,
                     "mean_bidirectional_deviation": mean_bidir,
+                    "forward_std": fwd_std,
+                    "reverse_std": rev_std,
                     "forward_min": min(fwd) if fwd else None,
                     "forward_max": max(fwd) if fwd else None,
                     "reverse_min": min(rev) if rev else None,
@@ -2412,10 +2447,15 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                     "forward_count": len(fwd),
                     "reverse_count": len(rev),
                     "reversal_value": reversal,
+                    "reversal_magnitude": abs(float(reversal)) if reversal is not None else None,
                     "forward_repeatability": fwd_repeat,
                     "reverse_repeatability": rev_repeat,
                     "unidirectional_repeatability": unidir_repeat,
                     "bidirectional_repeatability": bidir_repeat,
+                    "forward_lower_limit": (float(fwd_mean) - (0.5 * float(fwd_repeat))) if (fwd_mean is not None and fwd_repeat is not None) else None,
+                    "forward_upper_limit": (float(fwd_mean) + (0.5 * float(fwd_repeat))) if (fwd_mean is not None and fwd_repeat is not None) else None,
+                    "reverse_lower_limit": (float(rev_mean) - (0.5 * float(rev_repeat))) if (rev_mean is not None and rev_repeat is not None) else None,
+                    "reverse_upper_limit": (float(rev_mean) + (0.5 * float(rev_repeat))) if (rev_mean is not None and rev_repeat is not None) else None,
                     "bidirectional_upper_limit": bidir_upper,
                     "bidirectional_lower_limit": bidir_lower,
                     "max_abs_error": point_max_abs,
@@ -2430,10 +2470,12 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             else None
         )
         mean_reversal_value = _mean(reversal_values)
-        maximum_reversal_value = max(reversal_values) if reversal_values else None
-        bidirectional_systematic_deviation = None
-        if range_mean_bidirectional is not None and mean_reversal_value is not None:
-            bidirectional_systematic_deviation = range_mean_bidirectional + mean_reversal_value
+        maximum_reversal_value = max((abs(v) for v in reversal_values), default=None)
+        bidirectional_systematic_deviation = (
+            max(directional_mean_values) - min(directional_mean_values)
+            if len(directional_mean_values) >= 2
+            else None
+        )
         bidirectional_accuracy = (
             max(bidirectional_upper) - min(bidirectional_lower)
             if bidirectional_upper and bidirectional_lower
@@ -2447,6 +2489,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             "range_mean_bidirectional_deviation": range_mean_bidirectional,
             "mean_reversal_value": mean_reversal_value,
             "maximum_reversal_value": maximum_reversal_value,
+            "forward_axis_repeatability": forward_axis_repeatability,
+            "reverse_axis_repeatability": reverse_axis_repeatability,
             "unidirectional_repeatability": overall_unidirectional_repeatability,
             "bidirectional_repeatability": overall_bidirectional_repeatability,
             "bidirectional_systematic_deviation": bidirectional_systematic_deviation,
@@ -2475,7 +2519,14 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         x_vals = [float(r["target"]) for r in rows]
         y_candidates = []
         for row in rows:
-            for key in ("forward_min", "forward_max", "reverse_min", "reverse_max", "forward_mean", "reverse_mean"):
+            for key in (
+                "forward_lower_limit",
+                "forward_upper_limit",
+                "reverse_lower_limit",
+                "reverse_upper_limit",
+                "forward_mean",
+                "reverse_mean",
+            ):
                 value = row.get(key)
                 if value is not None:
                     y_candidates.append(float(value))
@@ -2579,10 +2630,10 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             x_base = map_x(row["target"])
             x_f = x_base - 8.0
             x_r = x_base + 8.0
-            fmin = row.get("forward_min")
-            fmax = row.get("forward_max")
-            rmin = row.get("reverse_min")
-            rmax = row.get("reverse_max")
+            fmin = row.get("forward_lower_limit")
+            fmax = row.get("forward_upper_limit")
+            rmin = row.get("reverse_lower_limit")
+            rmax = row.get("reverse_upper_limit")
             fmean = row.get("forward_mean")
             rmean = row.get("reverse_mean")
             if fmin is not None and fmax is not None:
@@ -2783,6 +2834,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         rows = list(self._measurements or [])
         if not settings:
             return "# ISO 230 Report\n\nNo report data available.\n"
+        operator_comments = str(self._operator_comments or "").strip()
 
         graph_svg = self._build_iso230_svg(settings, metrics)
         lines = [
@@ -2833,7 +2885,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             "",
             "## Graph",
             "",
-            "Bidirectional positioning error relative to commanded target. Forward mean error is shown in blue, reverse mean error in amber, repeatability ranges as vertical bars, and reversal value as the dashed violet segment at each target.",
+            "Bidirectional positioning error relative to commanded target. Forward mean error is shown in blue, reverse mean error in amber, ISO repeatability intervals are shown as vertical bars, and the reversal value is the dashed violet segment at each target.",
             "",
             graph_svg,
             "",
@@ -2841,12 +2893,13 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             "",
             "- This workflow uses ISO 230-style bidirectional positioning terminology derived from the supplied reference document and is not presented as certified ISO 230-2 compliance evidence.",
             "- Mean bidirectional positional deviation is calculated as the average of the forward and reverse mean reference errors at each target.",
-            "- Reversal value is calculated as the absolute difference between forward and reverse mean reference errors at each target.",
-            "- Bidirectional repeatability is calculated from the combined forward and reverse error band at each target.",
-            "",
-            "## Per-Target Results",
-            "",
-            "| Target | Mean BiDir Dev | Reversal | Uni Repeat | BiDir Repeat | Fwd Mean Err | Rev Mean Err | Max Abs Err |",
+            "- Reversal value at a target is calculated as forward mean error minus reverse mean error; the axis reversal value is the maximum absolute reversal over all targets.",
+            "- Unidirectional repeatability is calculated as 4 times the sample standard deviation for each direction at each target.",
+                "- Bidirectional repeatability is calculated as max(sqrt(2*s_f^2 + 2*s_r^2 + B_i^2), R_i^+, R_i^-).",
+                "",
+                "## Per-Target Results",
+                "",
+                "| Target | Mean BiDir Dev | Reversal | Uni Repeat | BiDir Repeat | Fwd Mean Err | Rev Mean Err | Max Abs Err |",
             "| --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
 
@@ -2856,7 +2909,17 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 f"{_fmt(row.get('unidirectional_repeatability'))} | {_fmt(row.get('bidirectional_repeatability'))} | "
                 f"{_fmt(row.get('forward_mean'))} | {_fmt(row.get('reverse_mean'))} | "
                 f"{_fmt(row.get('max_abs_error'))} |"
+                    )
+
+        if operator_comments:
+            lines.extend(
+                [
+                    "",
+                    "## Operator Comments",
+                    "",
+                ]
             )
+            lines.extend(operator_comments.splitlines())
 
         lines.extend(
             [
@@ -3188,6 +3251,19 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
             v.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
             cfg_form.addRow(label, v)
         layout.addWidget(cfg_box)
+
+        comments_box = QtWidgets.QGroupBox("Operator Comments")
+        comments_layout = QtWidgets.QVBoxLayout(comments_box)
+        comments_note = QtWidgets.QLabel("These comments are included in the exported report and saved in session files.")
+        comments_note.setWordWrap(True)
+        comments_note.setStyleSheet("color: #516079;")
+        comments_edit = QtWidgets.QPlainTextEdit()
+        comments_edit.setPlaceholderText("Enter operator observations, setup notes, exceptions, or environmental comments...")
+        comments_edit.setPlainText(self._operator_comments)
+        comments_edit.textChanged.connect(lambda: self._set_operator_comments(comments_edit.toPlainText()))
+        comments_layout.addWidget(comments_note)
+        comments_layout.addWidget(comments_edit)
+        layout.addWidget(comments_box)
         layout.addStretch(1)
         return root
 
@@ -3308,6 +3384,11 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         settings["reference_pv"] = self._selected_reference_pv(settings["reference_pvs"])
         return settings
 
+    def _set_operator_comments(self, text):
+        self._operator_comments = str(text or "")
+        if self._test_settings_cache:
+            self._latest_report_markdown = self._build_report_markdown()
+
     def _serialize_session_payload(self):
         settings = self._current_session_settings()
         return {
@@ -3315,6 +3396,7 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
             "version": 1,
             "saved_at": datetime.now().isoformat(),
             "state": (self._latest_metrics or {}).get("state", "Saved"),
+            "operator_comments": self._operator_comments,
             "settings": settings,
             "measurements": [
                 {
@@ -3379,6 +3461,7 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
                 rows.append(row)
             state = str(payload.get("state") or "Loaded")
             self._apply_report_dataset(settings, rows, state=state)
+            self._set_operator_comments(payload.get("operator_comments", ""))
             self.step_label.setText(f"Loaded session: {Path(path).name}")
             self._log(f"Loaded session data: {path}")
         except Exception as ex:
@@ -3494,6 +3577,102 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         close_btn.clicked.connect(dlg.accept)
         btn_row.addStretch(1)
         btn_row.addWidget(save_btn)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+        dlg.exec_()
+
+    def _show_calculation_help(self):
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("ISO 230 Calculation Help")
+        dlg.resize(_scaled_px(980), _scaled_px(760))
+        layout = QtWidgets.QVBoxLayout(dlg)
+
+        intro = QtWidgets.QLabel(
+            "This dialog summarizes the formulas currently used by the ISO 230 app for the reported metrics."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet("color: #516079;")
+        layout.addWidget(intro)
+
+        browser = QtWidgets.QTextBrowser(dlg)
+        browser.setStyleSheet("background: white; border: 1px solid #d7e0eb; border-radius: 8px;")
+        browser.setHtml(
+            """
+            <html><body style="font-family: Helvetica, Arial, sans-serif; color: #1f2937; margin: 14px;">
+            <h2 style="margin-top: 0;">Implemented calculation summary</h2>
+            <p>
+            The app groups measured reference errors by target position and by approach direction.
+            Forward means positive-direction approach. Reverse means negative-direction approach.
+            The ISO metrics are based on the selected reference PV, not the motor RBV field.
+            </p>
+            <h3>Per-sample quantity</h3>
+            <pre style="background:#f8fafc;border:1px solid #d7e0eb;padding:10px;border-radius:8px;">x_ij = P_ij - P_i</pre>
+            <p>In the app this is the selected reference reading minus the commanded target.</p>
+            <h3>Per-target means and spread</h3>
+            <pre style="background:#f8fafc;border:1px solid #d7e0eb;padding:10px;border-radius:8px;">
+xbar_i^+ = mean(forward errors at target i)
+xbar_i^- = mean(reverse errors at target i)
+xbar_i   = 0.5 * (xbar_i^+ + xbar_i^-)
+B_i      = xbar_i^+ - xbar_i^-
+s_i^+    = sample stddev(forward errors at target i)
+s_i^-    = sample stddev(reverse errors at target i)
+R_i^+    = 4 * s_i^+
+R_i^-    = 4 * s_i^-
+            </pre>
+            <h3>Per-target bidirectional repeatability</h3>
+            <pre style="background:#f8fafc;border:1px solid #d7e0eb;padding:10px;border-radius:8px;">
+R_i = max(
+    sqrt(2*s_i^+*s_i^+ + 2*s_i^-*s_i^- + B_i*B_i),
+    R_i^+,
+    R_i^-
+)
+            </pre>
+            <p>
+            The graph draws directional repeatability intervals as
+            <code>xbar_i^+ +/- 2*s_i^+</code> and <code>xbar_i^- +/- 2*s_i^-</code>.
+            </p>
+            <h3>Axis-level metrics</h3>
+            <pre style="background:#f8fafc;border:1px solid #d7e0eb;padding:10px;border-radius:8px;">
+R^+ = max_i(R_i^+)
+R^- = max_i(R_i^-)
+R   = max_i(R_i)
+
+M = max_i(xbar_i) - min_i(xbar_i)
+
+E = max_i(xbar_i^+, xbar_i^-) - min_i(xbar_i^+, xbar_i^-)
+
+B_mean = mean_i(B_i)
+B_max  = max_i(abs(B_i))
+
+A = max_i(xbar_i^+ + 2*s_i^+, xbar_i^- + 2*s_i^-)
+  - min_i(xbar_i^+ - 2*s_i^+, xbar_i^- - 2*s_i^-)
+            </pre>
+            <h3>How the UI labels map</h3>
+            <ul>
+            <li><b>BiDir Accuracy</b> = A</li>
+            <li><b>BiDir Systematic</b> = E</li>
+            <li><b>BiDir Repeatability</b> = R</li>
+            <li><b>Uni Repeat</b> = max(R^+, R^-)</li>
+            <li><b>Mean Reversal</b> = B_mean</li>
+            <li><b>Maximum Reversal</b> in the report = B_max</li>
+            <li><b>Range of mean bidirectional positional deviation</b> in the report = M</li>
+            </ul>
+            <h3>Notes</h3>
+            <ul>
+            <li>The linear-fit values in the report are convenience diagnostics, not ISO 230 core metrics.</li>
+            <li>This popup documents the current app implementation and is not a substitute for the standard itself.</li>
+            </ul>
+            </body></html>
+            """
+        )
+        layout.addWidget(browser, 1)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        close_btn = QtWidgets.QPushButton("Close")
+        close_btn.setAutoDefault(False)
+        close_btn.setDefault(False)
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addStretch(1)
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
         dlg.exec_()
