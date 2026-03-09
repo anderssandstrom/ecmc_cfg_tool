@@ -5,6 +5,7 @@ import html
 import json
 import math
 import random
+import re
 import tempfile
 import subprocess
 import sys
@@ -13,7 +14,7 @@ import urllib.parse
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from qt_compat import QtCore, QtGui, QtWidgets
+from qt_compat import QSvgWidget, QtCore, QtGui, QtWidgets
 
 from ecmc_mtn_qt import (
     _MotionPvMixin,
@@ -189,7 +190,7 @@ def _demo_settings():
         "base_interval": target_meta.get("base_interval"),
         "reversal_margin": 80.0,
         "cycles": 5,
-        "settle_s": 1.0,
+        "settle_s": 0.0,
         "samples_per_point": 5,
         "sample_interval_ms": 150,
         "velo": 25.0,
@@ -374,6 +375,9 @@ class _TargetSweepSchematic(QtWidgets.QWidget):
         super().__init__(parent)
         self._settings = None
         self._message = "Enter range and approach margin to visualize the sweep."
+        self._live_actual = None
+        self._live_target = None
+        self._live_phase = ""
         self.setMinimumHeight(220)
 
     def sizeHint(self):
@@ -382,6 +386,12 @@ class _TargetSweepSchematic(QtWidgets.QWidget):
     def set_preview(self, settings=None, message=""):
         self._settings = dict(settings or {}) if settings else None
         self._message = str(message or "")
+        self.update()
+
+    def set_live_state(self, actual=None, target=None, phase=""):
+        self._live_actual = actual
+        self._live_target = target
+        self._live_phase = str(phase or "")
         self.update()
 
     def paintEvent(self, _event):
@@ -453,6 +463,42 @@ class _TargetSweepSchematic(QtWidgets.QWidget):
         for x in (x_full_lo, x_full_hi):
             painter.drawEllipse(QtCore.QPointF(x, bar_y), 4.0, 4.0)
 
+        live_actual = None
+        try:
+            if self._live_actual is not None:
+                live_actual = float(self._live_actual)
+        except Exception:
+            live_actual = None
+        live_target = None
+        try:
+            if self._live_target is not None:
+                live_target = float(self._live_target)
+        except Exception:
+            live_target = None
+
+        if live_target is not None:
+            xt = map_x(max(full_lo, min(full_hi, live_target)))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#7c3aed"), 2.0, QtCore.Qt.DashLine))
+            painter.drawLine(QtCore.QPointF(xt, top + 10), QtCore.QPointF(xt, rect.bottom() - 56))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#7c3aed"), 1.8))
+            painter.setBrush(QtGui.QColor("#ede9fe"))
+            painter.drawEllipse(QtCore.QPointF(xt, bar_y), 5.0, 5.0)
+
+        if live_actual is not None:
+            xa = map_x(max(full_lo, min(full_hi, live_actual)))
+            phase = str(self._live_phase or "").lower()
+            live_color = QtGui.QColor("#0f766e")
+            if "settl" in phase:
+                live_color = QtGui.QColor("#d97706")
+            elif "sampl" in phase:
+                live_color = QtGui.QColor("#2563eb")
+            elif "abort" in phase or "error" in phase:
+                live_color = QtGui.QColor("#b91c1c")
+            painter.setPen(QtGui.QPen(live_color, 2.4))
+            painter.drawLine(QtCore.QPointF(xa, top + 6), QtCore.QPointF(xa, rect.bottom() - 52))
+            painter.setBrush(live_color)
+            painter.drawEllipse(QtCore.QPointF(xa, bar_y), 5.8, 5.8)
+
         painter.setPen(QtGui.QColor("#1e293b"))
         title_font = painter.font()
         title_font.setPointSize(max(9, title_font.pointSize()))
@@ -465,7 +511,14 @@ class _TargetSweepSchematic(QtWidgets.QWidget):
         body_font.setPointSize(max(8, body_font.pointSize() - 1))
         painter.setFont(body_font)
         painter.setPen(QtGui.QColor("#475569"))
-        painter.drawText(QtCore.QRectF(left, top + 14, right - left, 16), QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, "blue=tested span, red=approach margin")
+        live_note = ""
+        if live_actual is not None:
+            live_note = f", teal/orange marker=actual motion ({self._live_phase or 'live'})"
+        painter.drawText(
+            QtCore.QRectF(left, top + 14, right - left, 16),
+            QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter,
+            "blue=tested span, red=approach margin, violet=current target" + live_note,
+        )
 
         target_label_font = painter.font()
         target_label_font.setPointSize(max(7, target_label_font.pointSize() - 1))
@@ -706,7 +759,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.settle_spin = QtWidgets.QDoubleSpinBox()
         self.settle_spin.setRange(0.0, 120.0)
         self.settle_spin.setDecimals(2)
-        self.settle_spin.setValue(1.0)
+        self.settle_spin.setValue(0.0)
         self.settle_spin.setMaximumWidth(_scaled_px(100))
         self.samples_spin = QtWidgets.QSpinBox()
         self.samples_spin.setRange(1, 50)
@@ -898,7 +951,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         mid_row.setContentsMargins(0, 0, 0, 0)
         mid_row.setSpacing(8)
 
-        left_col = QtWidgets.QVBoxLayout()
+        self.lower_tabs = QtWidgets.QTabWidget()
+
+        summary_tab = QtWidgets.QWidget()
+        summary_tab.setMinimumHeight(_scaled_px(430))
+        left_col = QtWidgets.QVBoxLayout(summary_tab)
         left_col.setContentsMargins(0, 0, 0, 0)
         left_col.setSpacing(8)
         self.summary_group = QtWidgets.QGroupBox("ISO 230 Summary")
@@ -948,9 +1005,36 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.summary_table.horizontalHeader().setStretchLastSection(True)
         self.summary_table.horizontalHeader().setMinimumSectionSize(_scaled_px(72))
         left_col.addWidget(self.summary_table, 1)
-        mid_row.addLayout(left_col, 1)
+        graph_tab = QtWidgets.QWidget()
+        graph_tab.setMinimumHeight(_scaled_px(430))
+        live_graph_layout = QtWidgets.QVBoxLayout(graph_tab)
+        live_graph_layout.setContentsMargins(6, 6, 6, 6)
+        live_graph_layout.setSpacing(6)
+        self.live_graph_note = QtWidgets.QLabel("Step: Idle")
+        self.live_graph_note.setWordWrap(True)
+        self.live_graph_note.setStyleSheet("color: #516079; font-weight: 600;")
+        live_graph_layout.addWidget(self.live_graph_note)
+        self.live_graph_frame = QtWidgets.QFrame()
+        self.live_graph_frame.setStyleSheet("background: white; border: 1px solid #d7e0eb; border-radius: 8px;")
+        self.live_graph_frame.setMinimumHeight(_scaled_px(250))
+        self.live_graph_frame_layout = QtWidgets.QVBoxLayout(self.live_graph_frame)
+        self.live_graph_frame_layout.setContentsMargins(4, 4, 4, 4)
+        self.live_graph_svg = QSvgWidget()
+        self.live_graph_svg.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        self.live_graph_placeholder = QtWidgets.QLabel()
+        self.live_graph_placeholder.setAlignment(QtCore.Qt.AlignCenter)
+        self.live_graph_placeholder.setWordWrap(True)
+        self.live_graph_placeholder.setStyleSheet("color: #516079; background: transparent; border: none;")
+        self.live_graph_frame_layout.addWidget(self.live_graph_svg, 1)
+        self.live_graph_frame_layout.addWidget(self.live_graph_placeholder, 1)
+        live_graph_layout.addWidget(self.live_graph_frame, 1)
+        self.lower_tabs.addTab(graph_tab, "Live graph progress")
 
-        right_col = QtWidgets.QVBoxLayout()
+        self.lower_tabs.addTab(summary_tab, "ISO230 summary")
+
+        status_tab = QtWidgets.QWidget()
+        status_tab.setMinimumHeight(_scaled_px(430))
+        right_col = QtWidgets.QVBoxLayout(status_tab)
         right_col.setContentsMargins(0, 0, 0, 0)
         right_col.setSpacing(8)
         self.status_group = QtWidgets.QGroupBox("Live Status")
@@ -995,7 +1079,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.results_table.horizontalHeader().setStretchLastSection(True)
         self.results_table.horizontalHeader().setMinimumSectionSize(_scaled_px(72))
         right_col.addWidget(self.results_table, 1)
-        mid_row.addLayout(right_col, 2)
+        self.lower_tabs.addTab(status_tab, "Live status")
+
+        mid_row.addWidget(self.lower_tabs, 1)
         layout.addLayout(mid_row, 1)
 
         self.log = QtWidgets.QPlainTextEdit()
@@ -1026,6 +1112,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.preview_targets()
         self._update_duration_estimate()
         self._update_summary_labels({})
+        self._update_live_graph()
         self._update_progress_display()
 
     def _set_timeout(self, value):
@@ -1043,6 +1130,27 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
 
     def _log(self, msg):
         self.log.appendPlainText(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
+    def _update_live_graph(self):
+        if not hasattr(self, "live_graph_svg"):
+            return
+        settings = getattr(self, "_test_settings_cache", None) or {}
+        metrics = dict(self._latest_metrics or {})
+        if not settings:
+            self.live_graph_svg.hide()
+            self.live_graph_placeholder.setText("Configure an axis and start or load data to see the live graph.")
+            self.live_graph_placeholder.show()
+            return
+        graph_svg = self._build_iso230_svg(settings, metrics, width=760, height=340, compact=True)
+        if str(graph_svg).lstrip().startswith("<svg"):
+            self.live_graph_placeholder.hide()
+            self.live_graph_svg.load(QtCore.QByteArray(graph_svg.encode("utf-8")))
+            self.live_graph_svg.show()
+            return
+        self.live_graph_svg.hide()
+        msg = re.sub(r"<[^>]+>", "", str(graph_svg)).strip() or "Live graph unavailable."
+        self.live_graph_placeholder.setText(msg)
+        self.live_graph_placeholder.show()
 
     def _reset_open_app_combo(self):
         self.open_app_combo.blockSignals(True)
@@ -1516,6 +1624,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._update_summary_labels(self._latest_metrics or {})
         self._populate_summary_table((self._latest_metrics or {}).get("per_target", []))
         self._reload_results_table()
+        self._update_live_graph()
         if self._measurements:
             self._latest_report_markdown = self._build_report_markdown()
         if self._last_status:
@@ -1678,8 +1787,33 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self.target_schematic.set_preview(self._target_preview_settings(), "")
         except Exception as ex:
             self.target_schematic.set_preview(None, f"Sweep schematic unavailable: {ex}")
+        self._update_target_schematic_live_state()
+
+    def _update_target_schematic_live_state(self):
+        if not hasattr(self, "target_schematic"):
+            return
+        actual = None
+        target = None
+        try:
+            actual = _float_or_none((self._last_status or {}).get("RBV"))
+        except Exception:
+            actual = None
+        try:
+            if self._current_step:
+                target = _float_or_none(self._current_step.get("target"))
+        except Exception:
+            target = None
+        phase = str(getattr(self, "_current_phase", "") or "")
+        self.target_schematic.set_live_state(actual=actual, target=target, phase=phase)
 
     def _update_progress_display(self):
+        if hasattr(self, "live_graph_note"):
+            step_text = ""
+            try:
+                step_text = str(self.step_label.text() or "").strip()
+            except Exception:
+                step_text = ""
+            self.live_graph_note.setText(f"Step: {step_text or 'Idle'}")
         total_steps = max(0, len(self._test_plan or []))
         if self._test_active and total_steps > 0:
             completed_steps = min(total_steps, max(0, self._test_plan_index))
@@ -1871,6 +2005,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 stat = stats.get(idx, {})
                 value_edit.setText(_fmt(stat.get("mean")))
             self._last_status = dict(vals)
+            self._update_target_schematic_live_state()
             return vals
         if self._committed_motor_record_text():
             for field in ("VAL", "RBV", "DMOV", "CNEN"):
@@ -1904,6 +2039,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self.reference_value_edits[idx].setText(_fmt(raw))
         vals["REFS"] = dict(ref_values)
         self._last_status = dict(vals)
+        self._update_target_schematic_live_state()
         return vals
 
     def _periodic_status_tick(self):
@@ -2037,6 +2173,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._update_summary_labels(self._latest_metrics)
         self._populate_summary_table(self._latest_metrics.get("per_target", []))
         self._reload_results_table()
+        self._update_live_graph()
         self._latest_report_markdown = self._build_report_markdown()
         self.preview_targets()
         try:
@@ -2138,12 +2275,15 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self.results_table.setRowCount(0)
             self.summary_table.setRowCount(0)
             self._update_summary_labels({"state": "Running"})
+            self._update_live_graph()
             self._test_plan = self._build_test_plan(settings)
             self._test_plan_index = -1
             self._current_step = None
             self._current_phase = "idle"
             self._test_settings_cache = settings
             self._set_test_running_state(True)
+            if hasattr(self, "lower_tabs"):
+                self.lower_tabs.setCurrentIndex(0)
             self._update_progress_display()
             self._log(
                 "Starting ISO 230-style bidirectional positioning test: "
@@ -2291,6 +2431,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._latest_metrics = self._compute_metrics(self._measurements)
         self._update_summary_labels(self._latest_metrics)
         self._populate_summary_table(self._latest_metrics.get("per_target", []))
+        self._update_live_graph()
         self._latest_report_markdown = self._build_report_markdown()
         self._log(
             f"Measured {row['direction']} target {_fmt(target)}: "
@@ -2502,17 +2643,45 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             "per_target": per_target,
         }
 
-    def _build_iso230_svg(self, settings, metrics):
+    def _build_iso230_svg(self, settings, metrics, width=980, height=520, compact=False):
         rows = list(metrics.get("per_target", []) or [])
         if len(rows) < 2:
             return "<p><em>Graph unavailable: at least two measured target positions are required.</em></p>"
 
-        width = 980
-        height = 520
-        margin_l = 90
-        margin_r = 26
-        margin_t = 26
-        margin_b = 70
+        if compact:
+            width = int(width or 760)
+            height = int(height or 360)
+            margin_l = 68
+            margin_r = 18
+            margin_t = 18
+            margin_b = 52
+            tick_font = 10
+            label_font = 11
+            title_font = 13
+            axis_font = 11
+            legend_font = 10
+            point_radius = 3.6
+            square_size = 7.0
+            line_width = 2.2
+            stats_box_w = 210
+            stats_box_h = 82
+        else:
+            width = int(width or 980)
+            height = int(height or 520)
+            margin_l = 90
+            margin_r = 26
+            margin_t = 26
+            margin_b = 70
+            tick_font = 12
+            label_font = 12
+            title_font = 16
+            axis_font = 13
+            legend_font = 12
+            point_radius = 4.8
+            square_size = 9.0
+            line_width = 2.8
+            stats_box_w = 244
+            stats_box_h = 92
         plot_w = width - margin_l - margin_r
         plot_h = height - margin_t - margin_b
 
@@ -2610,18 +2779,18 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             yv = y_min + (y_max - y_min) * frac
             yy = map_y(yv)
             grid.append(line(margin_l, yy, margin_l + plot_w, yy, grid_color, 1.0, dash="4 5", opacity=0.85))
-            grid.append(text(margin_l - 12, yy + 4, _fmt(yv), size=12, anchor="end", fill="#334155"))
+            grid.append(text(margin_l - 12, yy + 4, _fmt(yv), size=tick_font, anchor="end", fill="#334155"))
         x_tick_step = max(1, int(round((len(rows) - 1) / 6.0)))
         for idx, row in enumerate(rows):
             if idx % x_tick_step != 0 and idx not in {0, len(rows) - 1}:
                 continue
             xx = map_x(row["target"])
             grid.append(line(xx, margin_t, xx, margin_t + plot_h, grid_color, 1.0, dash="4 5", opacity=0.6))
-            grid.append(text(xx, margin_t + plot_h + 24, _fmt(row["target"]), size=12, anchor="middle", fill="#334155"))
+            grid.append(text(xx, margin_t + plot_h + (20 if compact else 24), _fmt(row["target"]), size=tick_font, anchor="middle", fill="#334155"))
 
         zero_y = map_y(0.0)
         grid.append(line(margin_l, zero_y, margin_l + plot_w, zero_y, axis_color, 1.7))
-        grid.append(text(margin_l + plot_w - 4, zero_y - 8, "zero error", size=11, anchor="end", fill="#0f172a", weight="600"))
+        grid.append(text(margin_l + plot_w - 4, zero_y - 8, "zero error", size=legend_font, anchor="end", fill="#0f172a", weight="600"))
 
         forward_points = []
         reverse_points = []
@@ -2649,7 +2818,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
 
         def polyline(points, stroke):
             pts = " ".join(f"{x:.2f},{y:.2f}" for x, y in points)
-            return f'<polyline fill="none" stroke="{stroke}" stroke-width="2.8" points="{pts}" />'
+            return f'<polyline fill="none" stroke="{stroke}" stroke-width="{line_width:.1f}" points="{pts}" />'
 
         series = []
         if len(forward_points) >= 2:
@@ -2657,45 +2826,44 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         if len(reverse_points) >= 2:
             series.append(polyline(reverse_points, reverse_color))
         for x, y in forward_points:
-            series.append(circle(x, y, 4.8, forward_color))
+            series.append(circle(x, y, point_radius, forward_color))
         for x, y in reverse_points:
-            series.append(square(x, y, 9.0, reverse_color))
+            series.append(square(x, y, square_size, reverse_color))
 
         legend_x = margin_l + 10
         legend_y = margin_t + 14
         legend = [
             line(legend_x, legend_y, legend_x + 22, legend_y, forward_color, 3.0),
-            circle(legend_x + 11, legend_y, 4.8, forward_color),
-            text(legend_x + 30, legend_y + 4, "Forward mean error", size=12, anchor="start"),
+            circle(legend_x + 11, legend_y, point_radius, forward_color),
+            text(legend_x + 30, legend_y + 4, "Forward mean error", size=legend_font, anchor="start"),
             line(legend_x + 210, legend_y, legend_x + 232, legend_y, reverse_color, 3.0),
-            square(legend_x + 221, legend_y, 9.0, reverse_color),
-            text(legend_x + 240, legend_y + 4, "Reverse mean error", size=12, anchor="start"),
+            square(legend_x + 221, legend_y, square_size, reverse_color),
+            text(legend_x + 240, legend_y + 4, "Reverse mean error", size=legend_font, anchor="start"),
             line(legend_x + 460, legend_y - 6, legend_x + 460, legend_y + 12, backlash_color, 2.0, dash="5 4"),
-            text(legend_x + 472, legend_y + 4, "Reversal gap", size=12, anchor="start"),
+            text(legend_x + 472, legend_y + 4, "Reversal gap", size=legend_font, anchor="start"),
         ]
 
         annotations = []
         bidir_accuracy = metrics.get("bidirectional_accuracy")
         bidir_systematic = metrics.get("bidirectional_systematic_deviation")
         bidir_repeat = metrics.get("bidirectional_repeatability")
-        stats_box_w = 244
-        stats_box_h = 92
-        stats_box_x = margin_l + plot_w - stats_box_w - 20
-        stats_box_y = margin_t + 14
-        annotations.append(
-            f'<rect x="{stats_box_x}" y="{stats_box_y}" width="{stats_box_w}" height="{stats_box_h}" fill="#ffffff" stroke="#94a3b8" stroke-width="1.2" rx="8" ry="8" />'
-        )
-        annotations.append(text(stats_box_x + 14, stats_box_y + 24, "Summary metrics", size=12, anchor="start", weight="700"))
-        annotations.append(text(stats_box_x + 14, stats_box_y + 48, f"BiDir accuracy: {_fmt(bidir_accuracy)}", size=12, anchor="start"))
-        annotations.append(text(stats_box_x + 14, stats_box_y + 68, f"BiDir systematic: {_fmt(bidir_systematic)}", size=12, anchor="start"))
-        annotations.append(text(stats_box_x + 14, stats_box_y + 88, f"BiDir repeatability: {_fmt(bidir_repeat)}", size=12, anchor="start"))
+        if not compact:
+            stats_box_x = margin_l + plot_w - stats_box_w - 20
+            stats_box_y = margin_t + 14
+            annotations.append(
+                f'<rect x="{stats_box_x}" y="{stats_box_y}" width="{stats_box_w}" height="{stats_box_h}" fill="#ffffff" stroke="#94a3b8" stroke-width="1.2" rx="8" ry="8" />'
+            )
+            annotations.append(text(stats_box_x + 14, stats_box_y + 22, "Summary metrics", size=legend_font, anchor="start", weight="700"))
+            annotations.append(text(stats_box_x + 14, stats_box_y + 42, f"BiDir accuracy: {_fmt(bidir_accuracy)}", size=legend_font, anchor="start"))
+            annotations.append(text(stats_box_x + 14, stats_box_y + 60, f"BiDir systematic: {_fmt(bidir_systematic)}", size=legend_font, anchor="start"))
+            annotations.append(text(stats_box_x + 14, stats_box_y + 78, f"BiDir repeatability: {_fmt(bidir_repeat)}", size=legend_font, anchor="start"))
 
         title = [
-            text(width / 2.0, 18, "Bidirectional Positioning Error Graph", size=16, anchor="middle", weight="700"),
-            text(width / 2.0, height - 18, f"Target position on axis {settings.get('axis_id', '')}", size=13, anchor="middle", weight="600"),
+            text(width / 2.0, 18, "Bidirectional Positioning Error Graph", size=title_font, anchor="middle", weight="700"),
+            text(width / 2.0, height - 18, f"Target position on axis {settings.get('axis_id', '')}", size=axis_font, anchor="middle", weight="600"),
             (
                 f'<g transform="translate(24 {margin_t + (plot_h / 2.0):.2f}) rotate(-90)">'
-                + text(0, 0, "Reference error relative to commanded target", size=13, anchor="middle", weight="600")
+                + text(0, 0, "Reference error relative to commanded target", size=axis_font, anchor="middle", weight="600")
                 + "</g>"
             ),
         ]
@@ -2769,6 +2937,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._latest_metrics["state"] = "Complete"
         self._update_summary_labels(self._latest_metrics)
         self._populate_summary_table(self._latest_metrics.get("per_target", []))
+        self._update_live_graph()
         self._latest_report_markdown = self._build_report_markdown()
         self._log(f"ISO 230 test complete with {len(self._measurements)} measured points")
         self._update_progress_display()
@@ -2782,6 +2951,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._latest_metrics = self._compute_metrics(self._measurements)
         self._latest_metrics["state"] = f"Error: {message}"
         self._update_summary_labels(self._latest_metrics)
+        self._update_live_graph()
         self._update_progress_display()
 
     def abort_test(self):
@@ -2799,6 +2969,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._latest_metrics = self._compute_metrics(self._measurements)
         self._latest_metrics["state"] = "Aborted"
         self._update_summary_labels(self._latest_metrics)
+        self._update_live_graph()
         self._update_progress_display()
 
     def stop_motion(self):
@@ -2836,7 +3007,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             return "# ISO 230 Report\n\nNo report data available.\n"
         operator_comments = str(self._operator_comments or "").strip()
 
-        graph_svg = self._build_iso230_svg(settings, metrics)
+        graph_svg = self._build_iso230_svg(settings, metrics, width=760, height=340, compact=True)
         lines = [
             "# ecmc ISO 230 Bidirectional Positioning Report",
             "",
@@ -3028,6 +3199,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             ("Unidirectional repeatability", _fmt_preview(metrics.get("unidirectional_repeatability"))),
             ("Mean reversal value", _fmt_preview(metrics.get("mean_reversal_value"))),
             ("Maximum reversal value", _fmt_preview(metrics.get("maximum_reversal_value"))),
+            ("Linear fit slope", _fmt_preview(metrics.get("fit_slope"))),
+            ("Linear fit offset", _fmt_preview(metrics.get("fit_intercept"))),
         ]
         metric_rows_html = []
         for idx in range(0, len(metrics_rows), 2):
@@ -3202,9 +3375,15 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         layout.addWidget(title)
         layout.addWidget(subtitle)
 
+        top_row = QtWidgets.QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(12)
+
         status_box = QtWidgets.QGroupBox("Status")
         status_form = QtWidgets.QFormLayout(status_box)
         status_form.setLabelAlignment(QtCore.Qt.AlignRight)
+        status_form.setHorizontalSpacing(10)
+        status_form.setVerticalSpacing(6)
         status_rows = [
             ("State", metrics.get("state", "")),
             ("Bidirectional accuracy", _fmt_preview(metrics.get("bidirectional_accuracy"))),
@@ -3214,6 +3393,8 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
             ("Unidirectional repeatability", _fmt_preview(metrics.get("unidirectional_repeatability"))),
             ("Mean reversal value", _fmt_preview(metrics.get("mean_reversal_value"))),
             ("Maximum reversal value", _fmt_preview(metrics.get("maximum_reversal_value"))),
+            ("Linear fit slope", _fmt_preview(metrics.get("fit_slope"))),
+            ("Linear fit offset", _fmt_preview(metrics.get("fit_intercept"))),
             ("Measured points", str(len(rows))),
         ]
         for label, value in status_rows:
@@ -3222,11 +3403,13 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
                 v.setStyleSheet("font-weight: 700; color: #102046;")
             v.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
             status_form.addRow(label, v)
-        layout.addWidget(status_box)
+        top_row.addWidget(status_box, 4)
 
         cfg_box = QtWidgets.QGroupBox("Configuration")
         cfg_form = QtWidgets.QFormLayout(cfg_box)
         cfg_form.setLabelAlignment(QtCore.Qt.AlignRight)
+        cfg_form.setHorizontalSpacing(10)
+        cfg_form.setVerticalSpacing(6)
         cfg_rows = [
             ("IOC prefix", settings.get("prefix", "")),
             ("Axis ID", settings.get("axis_id", "")),
@@ -3250,16 +3433,20 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
             v.setWordWrap(True)
             v.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
             cfg_form.addRow(label, v)
-        layout.addWidget(cfg_box)
+        top_row.addWidget(cfg_box, 6)
+        layout.addLayout(top_row)
 
         comments_box = QtWidgets.QGroupBox("Operator Comments")
         comments_layout = QtWidgets.QVBoxLayout(comments_box)
+        comments_layout.setContentsMargins(8, 8, 8, 8)
+        comments_layout.setSpacing(6)
         comments_note = QtWidgets.QLabel("These comments are included in the exported report and saved in session files.")
         comments_note.setWordWrap(True)
         comments_note.setStyleSheet("color: #516079;")
         comments_edit = QtWidgets.QPlainTextEdit()
         comments_edit.setPlaceholderText("Enter operator observations, setup notes, exceptions, or environmental comments...")
         comments_edit.setPlainText(self._operator_comments)
+        comments_edit.setFixedHeight(_scaled_px(120))
         comments_edit.textChanged.connect(lambda: self._set_operator_comments(comments_edit.toPlainText()))
         comments_layout.addWidget(comments_note)
         comments_layout.addWidget(comments_edit)
@@ -3284,16 +3471,28 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         note.setStyleSheet("color: #516079;")
         layout.addWidget(note)
 
-        browser = QtWidgets.QTextBrowser(root)
-        browser.setOpenExternalLinks(True)
-        browser.setStyleSheet("background: white; border: 1px solid #d7e0eb; border-radius: 8px;")
-        graph_uri = "data:image/svg+xml;utf8," + urllib.parse.quote(graph_svg)
-        browser.setHtml(
-            "<html><body style='margin:12px;background:#ffffff;'>"
-            f"<img src='{graph_uri}' style='width:100%;height:auto;' alt='Bidirectional positioning error graph'>"
-            "</body></html>"
-        )
-        layout.addWidget(browser, 1)
+        frame = QtWidgets.QFrame(root)
+        frame.setStyleSheet("background: white; border: 1px solid #d7e0eb; border-radius: 8px;")
+        frame_layout = QtWidgets.QVBoxLayout(frame)
+        frame_layout.setContentsMargins(4, 4, 4, 4)
+        graph_svg_widget = QSvgWidget(frame)
+        graph_svg_widget.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        graph_placeholder = QtWidgets.QLabel(frame)
+        graph_placeholder.setAlignment(QtCore.Qt.AlignCenter)
+        graph_placeholder.setWordWrap(True)
+        graph_placeholder.setStyleSheet("color: #516079; background: transparent; border: none;")
+        frame_layout.addWidget(graph_svg_widget, 1)
+        frame_layout.addWidget(graph_placeholder, 1)
+        if str(graph_svg).lstrip().startswith("<svg"):
+            graph_placeholder.hide()
+            graph_svg_widget.load(QtCore.QByteArray(graph_svg.encode("utf-8")))
+            graph_svg_widget.show()
+        else:
+            graph_svg_widget.hide()
+            msg = re.sub(r"<[^>]+>", "", str(graph_svg)).strip() or "Graph unavailable."
+            graph_placeholder.setText(msg)
+            graph_placeholder.show()
+        layout.addWidget(frame, 1)
         return root
 
     def _build_preview_per_target_tab(self):
@@ -3536,6 +3735,7 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         self._reload_results_table()
         self._populate_summary_table(self._latest_metrics.get("per_target", []))
         self._update_summary_labels(self._latest_metrics)
+        self._update_live_graph()
         self._update_duration_estimate()
         if not self._test_active:
             self._test_plan = self._build_test_plan(self._test_settings_cache)
@@ -3555,8 +3755,6 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         self._log(f"Loaded synthetic ISO 230 demo data with {len(rows)} measured points")
 
     def preview_report(self):
-        if not self._measurements:
-            self.load_demo_data()
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("ISO 230 Report Preview")
         dlg.resize(_scaled_px(1220), _scaled_px(860))
