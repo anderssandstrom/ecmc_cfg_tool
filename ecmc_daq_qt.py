@@ -1462,7 +1462,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         self._refresh_views()
 
     def save_session(self):
-        suggested = self._last_session_dir / "fft_capture.json"
+        suggested = Path.home() / "fft_capture.json"
         path, _filter = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "Save FFT Session",
@@ -1500,7 +1500,7 @@ class DaqWindow(QtWidgets.QMainWindow):
 
     def _save_plot_image(self, widget, kind):
         suffix = "time" if str(kind) == "time" else "fft"
-        suggested = self._last_image_dir / f"fft_{suffix}.png"
+        suggested = Path.home() / f"fft_{suffix}.png"
         path, _filter = QtWidgets.QFileDialog.getSaveFileName(
             self,
             f"Save {suffix.upper()} Plot",
