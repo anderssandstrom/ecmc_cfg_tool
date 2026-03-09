@@ -370,6 +370,24 @@ def _deserialize_reference_stats(stats):
     return out
 
 
+def _parse_saved_timestamp(text):
+    s = str(text or "").strip()
+    if not s:
+        return datetime.now().replace(microsecond=0)
+    try:
+        return datetime.strptime(s, "%Y-%m-%dT%H:%M:%S.%f")
+    except Exception:
+        pass
+    try:
+        return datetime.strptime(s, "%Y-%m-%dT%H:%M:%S")
+    except Exception:
+        pass
+    try:
+        return datetime.strptime(s.replace("Z", ""), "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return datetime.now().replace(microsecond=0)
+
+
 class _TargetSweepSchematic(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -975,6 +993,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             ("bidirectional_repeatability", "BiDir Repeat"),
             ("unidirectional_repeatability", "Uni Repeat"),
             ("mean_reversal_value", "Mean Reversal"),
+            ("maximum_reversal_value", "Max Reversal"),
+            ("fit_slope", "Interpolation Slope"),
+            ("fit_intercept", "Interpolation Offset"),
         ]
         for idx, (key, title) in enumerate(summary_fields):
             row = idx // 2
@@ -3648,14 +3669,20 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
             return
         try:
             payload = json.loads(Path(path).read_text(encoding="utf-8"))
-            if str(payload.get("file_type", "")) != "ecmc_iso230_session":
+            file_type = str(payload.get("file_type", "") or "").strip()
+            has_session_shape = isinstance(payload, dict) and (
+                "settings" in payload or "measurements" in payload
+            )
+            if file_type and file_type != "ecmc_iso230_session":
+                raise RuntimeError("Unsupported session file")
+            if not file_type and not has_session_shape:
                 raise RuntimeError("Unsupported session file")
             settings = dict(payload.get("settings") or {})
             rows = []
             for source_row in list(payload.get("measurements") or []):
                 row = dict(source_row)
                 timestamp_txt = str(row.get("timestamp") or "").strip()
-                row["timestamp"] = datetime.fromisoformat(timestamp_txt) if timestamp_txt else datetime.now().replace(microsecond=0)
+                row["timestamp"] = _parse_saved_timestamp(timestamp_txt)
                 row["reference_stats"] = _deserialize_reference_stats(row.get("reference_stats"))
                 rows.append(row)
             state = str(payload.get("state") or "Loaded")
