@@ -3425,7 +3425,7 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         path, _flt = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "Save ISO 230 Session Data",
-            str(Path.cwd() / default_name),
+            str(Path.home() / default_name),
             "JSON Files (*.json);;All Files (*)",
         )
         if not path:
@@ -3442,7 +3442,7 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         path, _flt = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "Open ISO 230 Session Data",
-            str(Path.cwd()),
+            str(Path.home()),
             "JSON Files (*.json);;All Files (*)",
         )
         if not path:
@@ -3684,7 +3684,7 @@ A = max_i(xbar_i^+ + 2*s_i^+, xbar_i^- + 2*s_i^-)
         path, _flt = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "Save ISO 230 Report",
-            str(Path.cwd() / default_name),
+            str(Path.home() / default_name),
             "Markdown Files (*.md);;All Files (*)",
         )
         if not path:
@@ -3703,7 +3703,7 @@ A = max_i(xbar_i^+ + 2*s_i^+, xbar_i^- + 2*s_i^-)
         path, _flt = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "Save ISO 230 Raw Data CSV",
-            str(Path.cwd() / default_name),
+            str(Path.home() / default_name),
             "CSV Files (*.csv);;All Files (*)",
         )
         if not path:
