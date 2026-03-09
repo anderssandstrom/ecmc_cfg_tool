@@ -744,11 +744,14 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.reference_pv_edits = []
         self.reference_value_edits = []
         for idx in range(_MAX_REFERENCE_PVS):
-            edit = QtWidgets.QLineEdit("")
+            edit = QtWidgets.QComboBox()
+            edit.setEditable(True)
+            edit.setInsertPolicy(QtWidgets.QComboBox.NoInsert)
+            edit.setMinimumWidth(_scaled_px(260))
             if idx == 0:
-                edit.setPlaceholderText("Defaults to <motor>-PosAct")
+                edit.lineEdit().setPlaceholderText("Defaults to <motor>-PosAct")
             else:
-                edit.setPlaceholderText("Optional additional reference PV")
+                edit.lineEdit().setPlaceholderText("Optional additional reference PV")
             self.reference_pv_edits.append(edit)
             value_edit = QtWidgets.QLineEdit("")
             value_edit.setReadOnly(True)
@@ -823,7 +826,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.motor_name_cfg_pv_edit.returnPressed.connect(self._commit_cfg_pv_edits)
         self.motor_record_edit.returnPressed.connect(self._commit_motor_record_edit)
         for edit in self.reference_pv_edits:
-            edit.returnPressed.connect(self._commit_reference_pv_edits)
+            edit.activated.connect(self._commit_reference_pv_edits)
+            if edit.lineEdit() is not None:
+                edit.lineEdit().editingFinished.connect(self._commit_reference_pv_edits)
         self.report_reference_combo.currentIndexChanged.connect(self._on_reference_selection_changed)
         self.range_min_edit.editingFinished.connect(self._on_range_inputs_changed)
         self.range_max_edit.editingFinished.connect(self._on_range_inputs_changed)
@@ -1515,8 +1520,52 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         except Exception:
             pass
 
+    def _reference_pv_presets(self):
+        motor = self._committed_motor_record_text()
+        if not motor:
+            return []
+        presets = []
+        for pv in (
+            f"{motor}-PosAct",
+            f"{motor}-Enc01-PosAct",
+            f"{motor}-Enc02-PosAct",
+        ):
+            if pv not in presets:
+                presets.append(pv)
+        return presets
+
+    def _reference_pv_text(self, widget):
+        try:
+            return widget.currentText().strip()
+        except Exception:
+            return widget.text().strip()
+
+    def _set_reference_pv_text(self, widget, text):
+        value = str(text or "").strip()
+        try:
+            widget.setEditText(value)
+        except Exception:
+            widget.setText(value)
+
+    def _refresh_reference_pv_presets(self):
+        presets = self._reference_pv_presets()
+        for edit in self.reference_pv_edits:
+            current = self._reference_pv_text(edit)
+            values = []
+            for pv in presets + ([current] if current else []):
+                pv = str(pv or "").strip()
+                if pv and pv not in values:
+                    values.append(pv)
+            edit.blockSignals(True)
+            edit.clear()
+            for pv in values:
+                edit.addItem(pv)
+            self._set_reference_pv_text(edit, current)
+            edit.blockSignals(False)
+
     def _commit_reference_pv_edits(self):
-        self._committed_reference_pvs = [edit.text().strip() for edit in self.reference_pv_edits]
+        self._committed_reference_pvs = [self._reference_pv_text(edit) for edit in self.reference_pv_edits]
+        self._refresh_reference_pv_presets()
         self._poll_failure_cache.clear()
         self._on_reference_pvs_changed()
 
@@ -1606,10 +1655,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
     def _sync_reference_pv_default(self, _text=None):
         motor = self._committed_motor_record_text()
         default_ref = f"{motor}-PosAct" if motor else ""
-        current_ref = self.reference_pv_edits[0].text().strip()
+        self._refresh_reference_pv_presets()
+        current_ref = self._reference_pv_text(self.reference_pv_edits[0])
         changed = False
         if not current_ref or current_ref == self._last_auto_reference_pv:
-            self.reference_pv_edits[0].setText(default_ref)
+            self._set_reference_pv_text(self.reference_pv_edits[0], default_ref)
             changed = True
         self._last_auto_reference_pv = default_ref
         if changed:
@@ -3708,11 +3758,13 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         self._commit_cfg_pv_edits()
         self.motor_record_edit.setText(str(settings.get("motor", "")))
         self._committed_motor_record = str(settings.get("motor", "") or "")
+        self._last_auto_reference_pv = f"{self._committed_motor_record}-PosAct" if self._committed_motor_record else ""
         reference_pvs = _settings_reference_pvs(settings)
+        self._refresh_reference_pv_presets()
         for edit in self.reference_pv_edits:
             edit.blockSignals(True)
         for idx, edit in enumerate(self.reference_pv_edits):
-            edit.setText(str(reference_pvs[idx]))
+            self._set_reference_pv_text(edit, str(reference_pvs[idx]))
         for edit in self.reference_pv_edits:
             edit.blockSignals(False)
         self._committed_reference_pvs = list(reference_pvs)
