@@ -33,6 +33,8 @@ APP_LAUNCH_ISO230 = "New ISO230 App"
 APP_LAUNCH_AXIS = "Axis Cfg App"
 APP_LAUNCH_CONTROLLER = "Cntrl Cfg App"
 APP_LAUNCH_MOTION = "Motion App"
+APP_LAUNCH_FFT = "FFT App"
+APP_LAUNCH_CAQTDM_MAIN = "caqtdm Main"
 APP_LAUNCH_CAQTDM_AXIS = "caqtdm Axis"
 
 
@@ -666,6 +668,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.open_app_combo.addItem(APP_LAUNCH_AXIS, "axis")
         self.open_app_combo.addItem(APP_LAUNCH_CONTROLLER, "controller")
         self.open_app_combo.addItem(APP_LAUNCH_MOTION, "motion")
+        self.open_app_combo.addItem(APP_LAUNCH_FFT, "fft")
+        self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_MAIN, "caqtdm_main")
         self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_AXIS, "caqtdm_axis")
         for btn in (
             self.cfg_toggle_btn,
@@ -1194,6 +1198,10 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 self._open_controller_window()
             elif action == "motion":
                 self._open_motion_window()
+            elif action == "fft":
+                self._open_fft_window()
+            elif action == "caqtdm_main":
+                self._open_caqtdm_main_panel()
             elif action == "caqtdm_axis":
                 self._open_caqtdm_axis_panel()
         finally:
@@ -1201,6 +1209,38 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
 
     def _axis_id_text(self):
         return self.axis_edit.text().strip() or self.default_axis_id
+
+    def _open_fft_window(self):
+        script = Path(__file__).with_name("start_fft.sh")
+        if not script.exists():
+            self._log(f"Launcher not found: {script.name}")
+            return
+        prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started FFT window (prefix {prefix})")
+        except Exception as ex:
+            self._log(f"Failed to start FFT window: {ex}")
+
+    def _open_caqtdm_main_panel(self):
+        ioc_prefix = self.prefix_edit.text().strip() or self.default_prefix or ""
+        macro = f"IOC={ioc_prefix}"
+        try:
+            cmd = f'caqtdm -macro "{macro}" ecmcMain.ui'
+            subprocess.Popen(
+                ["bash", "-lc", cmd],
+                cwd=str(Path(__file__).resolve().parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started caQtDM main panel ({macro})")
+        except Exception as ex:
+            self._log(f"Failed to start caQtDM main panel: {ex}")
 
     def _sync_axis_combo_to_axis_id(self, axis_id):
         want = str(axis_id or "").strip()

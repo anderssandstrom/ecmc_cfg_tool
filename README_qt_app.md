@@ -11,6 +11,7 @@ This folder now contains:
 - `ecmc_cntrl_qt.py` / `start_cntrl.sh` (controller tuning/config app)
 - `ecmc_mtn_qt.py` / `start_mtn.sh` (motor-record motion app)
 - `ecmc_iso230_qt.py` / `start_iso230.sh` (ISO 230-style bidirectional test app)
+- `ecmc_fft_qt.py` / `start_fft.sh` (timestamp-derived FFT viewer for numeric PVs)
 
 ## Applications
 
@@ -71,6 +72,16 @@ Use the ISO230 app when running an automated bidirectional positioning test agai
 - Supports demo data loading and CLI demo report generation.
 - Default settle time is `0 s`.
 
+### FFT
+
+Use the FFT app when you want to capture one or more scalar numeric PVs and inspect both the time-domain signal and its frequency content.
+
+- Captures a configurable number of samples per PV.
+- Derives the effective sample rate from the captured timestamps instead of assuming a fixed rate.
+- Uses EPICS monitor callbacks when `pyepics` is available, with a timer-poll fallback for slower environments.
+- Shows the time-domain traces in the main window and the FFT spectrum in a separate frequency window.
+- Displays per-PV capture span, effective sample rate, FFT size, and dominant spectral peak.
+
 ## Generate/update command catalog
 
 Run from this repo root:
@@ -111,6 +122,19 @@ Examples:
 ```
 
 The apps resolve axis IDs from IOC config PVs when a motor name/full motor PV is provided.
+
+### FFT app
+
+FFT launcher accepts:
+
+- `./start_fft.sh <IOC prefix>`
+- `./start_fft.sh <IOC prefix> <pv1> <pv2> ...`
+
+Example:
+
+```bash
+./start_fft.sh IOC:ECMC AXIS7-PosAct AXIS7-Enc01-PosAct
+```
 
 ## Axis selection behavior (axis / controller / motion / ISO230 apps)
 

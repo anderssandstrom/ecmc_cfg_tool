@@ -27,6 +27,8 @@ APP_LAUNCH_CONTROLLER = 'New Cntrl App'
 APP_LAUNCH_AXIS = 'Axis Cfg App'
 APP_LAUNCH_MOTION = 'Motion App'
 APP_LAUNCH_ISO230 = 'ISO230 App'
+APP_LAUNCH_FFT = 'FFT App'
+APP_LAUNCH_CAQTDM_MAIN = 'caqtdm Main'
 APP_LAUNCH_CAQTDM_AXIS = 'caqtdm Axis'
 
 
@@ -476,6 +478,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.open_app_combo.addItem(APP_LAUNCH_AXIS, 'axis')
         self.open_app_combo.addItem(APP_LAUNCH_MOTION, 'motion')
         self.open_app_combo.addItem(APP_LAUNCH_ISO230, 'iso230')
+        self.open_app_combo.addItem(APP_LAUNCH_FFT, 'fft')
+        self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_MAIN, 'caqtdm_main')
         self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_AXIS, 'caqtdm_axis')
         self.open_app_combo.activated.connect(self._on_open_app_selected)
         top_row.addWidget(QtWidgets.QLabel('Launch'))
@@ -970,6 +974,10 @@ class CntrlWindow(QtWidgets.QMainWindow):
                 self._open_motion_window()
             elif action == 'iso230':
                 self._open_iso230_window()
+            elif action == 'fft':
+                self._open_fft_window()
+            elif action == 'caqtdm_main':
+                self._open_caqtdm_main_panel()
             elif action == 'caqtdm_axis':
                 self._open_caqtdm_axis_panel()
         finally:
@@ -1001,6 +1009,27 @@ class CntrlWindow(QtWidgets.QMainWindow):
         except Exception as ex:
             self._log(f'Failed to start new controller window: {ex}')
             return False
+
+    def _open_fft_window(self):
+        script = Path(__file__).with_name('start_fft.sh')
+        if not script.exists():
+            self._log(f'Launcher not found: {script.name}')
+            return
+        prefix = self.title_prefix or ''
+        if not prefix:
+            cmd_pv = self.cmd_pv.text().strip()
+            m = re.match(r'^(.*):MCU-Cmd\.AOUT$', cmd_pv)
+            prefix = m.group(1) if m else 'IOC:ECMC'
+        try:
+            subprocess.Popen(
+                ['bash', str(script), str(prefix)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f'Started FFT window (prefix {prefix})')
+        except Exception as ex:
+            self._log(f'Failed to start FFT window: {ex}')
 
     def _motor_type_for_axis(self, axis_id):
         axis = str(axis_id or '').strip() or self.default_axis_id

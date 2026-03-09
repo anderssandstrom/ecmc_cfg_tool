@@ -16,6 +16,8 @@ APP_LAUNCH_MOTION = "New Motion App"
 APP_LAUNCH_AXIS = "Axis Cfg App"
 APP_LAUNCH_CONTROLLER = "Cntrl Cfg App"
 APP_LAUNCH_ISO230 = "ISO230 App"
+APP_LAUNCH_FFT = "FFT App"
+APP_LAUNCH_CAQTDM_MAIN = "caqtdm Main"
 APP_LAUNCH_CAQTDM_AXIS = "caqtdm Axis"
 
 
@@ -335,6 +337,8 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
         self.open_app_combo.addItem(APP_LAUNCH_AXIS, "axis")
         self.open_app_combo.addItem(APP_LAUNCH_CONTROLLER, "controller")
         self.open_app_combo.addItem(APP_LAUNCH_ISO230, "iso230")
+        self.open_app_combo.addItem(APP_LAUNCH_FFT, "fft")
+        self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_MAIN, "caqtdm_main")
         self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_AXIS, "caqtdm_axis")
         self.open_app_combo.activated.connect(self._on_open_app_selected)
         self.axis_pick_combo = QtWidgets.QComboBox()
@@ -601,6 +605,10 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
                 self._open_controller_window()
             elif action == "iso230":
                 self._open_iso230_window()
+            elif action == "fft":
+                self._open_fft_window()
+            elif action == "caqtdm_main":
+                self._open_caqtdm_main_panel()
             elif action == "caqtdm_axis":
                 self._open_caqtdm_axis_panel()
         finally:
@@ -625,6 +633,23 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
         except Exception as ex:
             self._log(f"Failed to start new motion window: {ex}")
             return False
+
+    def _open_fft_window(self):
+        script = QtCore.QFileInfo(__file__).dir().filePath("start_fft.sh")
+        if not QtCore.QFileInfo(script).exists():
+            self._log("Launcher not found: start_fft.sh")
+            return
+        prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix)],
+                cwd=str(QtCore.QFileInfo(script).absolutePath()),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started FFT window (prefix {prefix})")
+        except Exception as ex:
+            self._log(f"Failed to start FFT window: {ex}")
 
     def _prompt_axis_selection_via_combo(self, reason_msg=None):
         if reason_msg:

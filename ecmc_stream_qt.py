@@ -28,6 +28,8 @@ APP_LAUNCH_AXIS = 'Axis Cfg App'
 APP_LAUNCH_CONTROLLER = 'Cntrl Cfg App'
 APP_LAUNCH_MOTION = 'Motion App'
 APP_LAUNCH_ISO230 = 'ISO230 App'
+APP_LAUNCH_FFT = 'FFT App'
+APP_LAUNCH_CAQTDM_MAIN = 'caqtdm Main'
 
 
 class EpicsClient:
@@ -1155,15 +1157,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.open_app_combo.addItem(APP_LAUNCH_CONTROLLER, 'controller')
         self.open_app_combo.addItem(APP_LAUNCH_MOTION, 'motion')
         self.open_app_combo.addItem(APP_LAUNCH_ISO230, 'iso230')
+        self.open_app_combo.addItem(APP_LAUNCH_FFT, 'fft')
+        self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_MAIN, 'caqtdm_main')
         self.open_app_combo.activated.connect(self._on_open_app_selected)
         top_row.addWidget(QtWidgets.QLabel('Launch'))
         top_row.addWidget(self.open_app_combo)
         top_row.addStretch(1)
-        self.caqtdm_main_btn = QtWidgets.QPushButton('caqtdm Main')
-        self.caqtdm_main_btn.setAutoDefault(False)
-        self.caqtdm_main_btn.setDefault(False)
-        self.caqtdm_main_btn.clicked.connect(self._open_caqtdm_main_panel)
-        top_row.addWidget(self.caqtdm_main_btn)
         layout.addLayout(top_row)
 
         cfg_group = QtWidgets.QGroupBox('PV Configuration')
@@ -1333,6 +1332,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._open_motion_window()
             elif action == 'iso230':
                 self._open_iso230_window()
+            elif action == 'fft':
+                self._open_fft_window()
+            elif action == 'caqtdm_main':
+                self._open_caqtdm_main_panel()
         finally:
             self._reset_open_app_combo()
 
@@ -1381,6 +1384,23 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _open_iso230_window(self):
         self._open_script_window('start_iso230.sh', 'ISO230')
+
+    def _open_fft_window(self):
+        script = Path(__file__).with_name('start_fft.sh')
+        if not script.exists():
+            self._log(f'Launcher not found: {script.name}')
+            return
+        prefix = self._ioc_prefix_for_title() or 'IOC:ECMC'
+        try:
+            subprocess.Popen(
+                ['bash', str(script), str(prefix)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f'Started FFT window (prefix {prefix})')
+        except Exception as ex:
+            self._log(f'Failed to start FFT window: {ex}')
 
     def _is_config_only_command(self, cmd):
         return str(cmd or '').strip().startswith('Cfg.')
