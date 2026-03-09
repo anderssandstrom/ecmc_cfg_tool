@@ -63,8 +63,13 @@ Use the ISO230 app when running an automated bidirectional positioning test agai
 - Configures range, point count, cycles, settle time, samples per point, decimals, and approach margin.
 - Estimates run duration before the test starts and executes the sweep automatically.
 - Calculates ISO 230-style positioning metrics such as bidirectional accuracy, repeatability, and reversal values.
+- Shows lower tabs for `Live graph progress`, `ISO230 summary`, and `Live status` during setup and execution.
+- Overlays live actual motion and current target on the sweep schematic while the sequence runs.
 - Previews and exports a Markdown report, exports CSV data, and saves or reloads full session files.
+- Preview Report uses the currently loaded/measured dataset and does not auto-load demo data.
+- Saved session loading also accepts older JSON session files that contain compatible `settings` / `measurements` payloads.
 - Supports demo data loading and CLI demo report generation.
+- Default settle time is `0 s`.
 
 ## Generate/update command catalog
 
