@@ -28,7 +28,7 @@ APP_LAUNCH_AXIS = 'Axis Cfg App'
 APP_LAUNCH_CONTROLLER = 'Cntrl Cfg App'
 APP_LAUNCH_MOTION = 'Motion App'
 APP_LAUNCH_ISO230 = 'ISO230 App'
-APP_LAUNCH_FFT = 'FFT App'
+APP_LAUNCH_DAQ = 'DAQ App'
 APP_LAUNCH_CAQTDM_MAIN = 'caqtdm Main'
 
 
@@ -1157,7 +1157,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.open_app_combo.addItem(APP_LAUNCH_CONTROLLER, 'controller')
         self.open_app_combo.addItem(APP_LAUNCH_MOTION, 'motion')
         self.open_app_combo.addItem(APP_LAUNCH_ISO230, 'iso230')
-        self.open_app_combo.addItem(APP_LAUNCH_FFT, 'fft')
+        self.open_app_combo.addItem(APP_LAUNCH_DAQ, 'daq')
         self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_MAIN, 'caqtdm_main')
         self.open_app_combo.activated.connect(self._on_open_app_selected)
         top_row.addWidget(QtWidgets.QLabel('Launch'))
@@ -1332,8 +1332,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._open_motion_window()
             elif action == 'iso230':
                 self._open_iso230_window()
-            elif action == 'fft':
-                self._open_fft_window()
+            elif action == 'daq':
+                self._open_daq_window()
             elif action == 'caqtdm_main':
                 self._open_caqtdm_main_panel()
         finally:
@@ -1385,8 +1385,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _open_iso230_window(self):
         self._open_script_window('start_iso230.sh', 'ISO230')
 
-    def _open_fft_window(self):
-        script = Path(__file__).with_name('start_fft.sh')
+    def _open_daq_window(self):
+        script = Path(__file__).with_name('start_daq.sh')
         if not script.exists():
             self._log(f'Launcher not found: {script.name}')
             return
@@ -1398,9 +1398,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            self._log(f'Started FFT window (prefix {prefix})')
+            self._log(f'Started DAQ window (prefix {prefix})')
         except Exception as ex:
-            self._log(f'Failed to start FFT window: {ex}')
+            self._log(f'Failed to start DAQ window: {ex}')
 
     def _is_config_only_command(self, cmd):
         return str(cmd or '').strip().startswith('Cfg.')
