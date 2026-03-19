@@ -72,6 +72,20 @@ Use the ISO230 app when running an automated bidirectional positioning test agai
 - Supports demo data loading and CLI demo report generation.
 - Default settle time is `0 s`.
 
+#### Checking axes with a stepper motor and a linear encoder
+
+For these axes, it is possible to measure the mechanical performance between the motor and the encoder:
+
+1. Run the axis in open loop mode. This can be selected in the `ecmc` expert panels.
+2. Calibrate/reference the open loop counter by setting it to the same value as the encoder in the expert panel.
+3. Start the ISO230 app and configure the scan, PVs, and motion parameters.
+4. Select the encoder as the reference.
+5. Run the sequence.
+
+Important:
+This measures the difference between the open loop counter and the encoder, not the accuracy of the complete system. It can still be useful when you want to evaluate the mechanical performance of the chain between the motor and the encoder. To judge the overall system performance, an external sensor must be used as the reference; see the next section for one example.
+
+
 #### Using a Micro-Epsilon ILD2300 as the reference
 
 **Warning: the sensor is equipped with a laser that can cause eye injuries. Do not look into the beam, and add covers to avoid reflections.**
