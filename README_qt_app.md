@@ -72,6 +72,26 @@ Use the ISO230 app when running an automated bidirectional positioning test agai
 - Supports demo data loading and CLI demo report generation.
 - Default settle time is `0 s`.
 
+#### Using a Micro-Epsilon ILD2300 as the reference
+
+**Warning: the sensor is equipped with a laser that can cause eye injuries. Do not look into the beam, and add covers to avoid reflections.**
+
+1. Connect the sensor to the EtherCAT chain.
+2. Add the following slave to the startup script:
+
+```
+${SCRIPTEXEC} ${ecmccfg_DIR}addSlave.cmd "HW_DESC=OptoILD2300_50mm, SLAVE_ID=<XX>"
+```
+
+Alternatively, you can use a compact controller and create a dedicated IOC just for the sensor.
+
+For older versions of `ecmc`, add the following line to the startup script to get the correct panel in the hw overview:
+
+```bash
+# Example for master 0 and slave 21
+afterInit("dbpf c6025a-0:m0s021-PnlTyp OptoILD2300_XXmm")
+```
+
 ### DAQ
 
 Use the DAQ app when you want to capture one or more scalar numeric PVs and inspect both the time-domain signal and its frequency content.
