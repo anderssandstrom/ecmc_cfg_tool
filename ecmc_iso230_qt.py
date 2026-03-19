@@ -351,6 +351,9 @@ def _serialize_reference_stats(stats):
             "mean": value.get("mean"),
             "std": value.get("std"),
             "error": value.get("error"),
+            "raw_mean": value.get("raw_mean"),
+            "raw_std": value.get("raw_std"),
+            "raw_error": value.get("raw_error"),
         }
     return out
 
@@ -368,6 +371,9 @@ def _deserialize_reference_stats(stats):
             "mean": value.get("mean"),
             "std": value.get("std"),
             "error": value.get("error"),
+            "raw_mean": value.get("raw_mean"),
+            "raw_std": value.get("raw_std"),
+            "raw_error": value.get("raw_error"),
         }
     return out
 
@@ -388,6 +394,10 @@ def _parse_saved_timestamp(text):
         return datetime.strptime(s.replace("Z", ""), "%Y-%m-%d %H:%M:%S")
     except Exception:
         return datetime.now().replace(microsecond=0)
+
+
+def _apply_reference_transform(value, gain=None, offset=None):
+    return (float(value) * float(1.0 if gain is None else gain)) + float(0.0 if offset is None else offset)
 
 
 class _TargetSweepSchematic(QtWidgets.QWidget):
@@ -617,6 +627,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._last_auto_range_min = ""
         self._last_auto_range_max = ""
         self._motor_soft_limits = None
+        self._optimal_fit_base_transform = None
+        self._updating_optimal_fit_checkbox = False
 
         self._build_ui(timeout)
         self._log(f"Connected via backend: {self.client.backend}")
@@ -745,6 +757,12 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.motor_name_cfg_pv_edit = QtWidgets.QLineEdit()
         self.motor_record_edit = QtWidgets.QLineEdit("")
         self.motor_record_edit.setPlaceholderText("Resolved motor record base PV")
+        self.reference_gain_edit = QtWidgets.QLineEdit("1")
+        self.reference_offset_edit = QtWidgets.QLineEdit("0")
+        self.reference_gain_edit.setMaximumWidth(_scaled_px(100))
+        self.reference_offset_edit.setMaximumWidth(_scaled_px(100))
+        self.reference_gain_edit.setToolTip("Applied to each acquired reference value: adjusted = raw * gain + offset")
+        self.reference_offset_edit.setToolTip("Applied to each acquired reference value: adjusted = raw * gain + offset")
         self.reference_pv_edits = []
         self.reference_value_edits = []
         for idx in range(_MAX_REFERENCE_PVS):
@@ -829,6 +847,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.axis_pfx_cfg_pv_edit.returnPressed.connect(self._commit_cfg_pv_edits)
         self.motor_name_cfg_pv_edit.returnPressed.connect(self._commit_cfg_pv_edits)
         self.motor_record_edit.returnPressed.connect(self._commit_motor_record_edit)
+        self.reference_gain_edit.editingFinished.connect(self._on_reference_transform_changed)
+        self.reference_offset_edit.editingFinished.connect(self._on_reference_transform_changed)
         for edit in self.reference_pv_edits:
             edit.activated.connect(self._commit_reference_pv_edits)
             if edit.lineEdit() is not None:
@@ -869,6 +889,10 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         axis_grid.addWidget(self.motor_record_edit, 2, 1, 1, 4)
         axis_grid.addWidget(resolve_btn, 2, 5)
         axis_grid.addWidget(read_status_btn, 2, 6)
+        axis_grid.addWidget(QtWidgets.QLabel("Ref Gain"), 3, 0)
+        axis_grid.addWidget(self.reference_gain_edit, 3, 1)
+        axis_grid.addWidget(QtWidgets.QLabel("Ref Offset"), 3, 2)
+        axis_grid.addWidget(self.reference_offset_edit, 3, 3)
         motion_row = QtWidgets.QHBoxLayout()
         motion_row.setContentsMargins(0, 0, 0, 0)
         motion_row.setSpacing(6)
@@ -881,7 +905,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         motion_row.addWidget(QtWidgets.QLabel("ACCS"))
         motion_row.addWidget(self.motion_accs_edit)
         motion_row.addStretch(1)
-        axis_grid.addLayout(motion_row, 3, 0, 1, 7)
+        axis_grid.addLayout(motion_row, 4, 0, 1, 7)
         axis_grid.setColumnStretch(1, 2)
         axis_grid.setColumnStretch(4, 3)
         axis_grid.setColumnStretch(6, 1)
@@ -1014,7 +1038,15 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
             summary_layout.addWidget(label, row, col + 1)
             self.summary_labels[key] = label
+        self.apply_optimal_fit_checkbox = QtWidgets.QCheckBox("Apply optimal fit")
+        self.apply_optimal_fit_checkbox.setEnabled(False)
+        self.apply_optimal_fit_checkbox.setToolTip(
+            "Apply the current linear-fit correction on top of the configured reference gain/offset. "
+            "Uncheck to restore the previous manual gain/offset."
+        )
+        self.apply_optimal_fit_checkbox.toggled.connect(self._on_apply_optimal_fit_toggled)
         left_col.addWidget(self.summary_group)
+        left_col.addWidget(self.apply_optimal_fit_checkbox)
 
         self.summary_table = QtWidgets.QTableWidget(0, 8)
         self.summary_table.setHorizontalHeaderLabels(
@@ -2081,6 +2113,151 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         accs = _to_float(accs_txt, "ACCS") if accs_txt else None
         return velo, accl, accs, vmax
 
+    def _reference_transform_settings(self):
+        gain_txt = self.reference_gain_edit.text().strip()
+        offset_txt = self.reference_offset_edit.text().strip()
+        gain = _to_float(gain_txt, "Reference Gain") if gain_txt else 1.0
+        offset = _to_float(offset_txt, "Reference Offset") if offset_txt else 0.0
+        return gain, offset
+
+    def _transformed_reference_value(self, value, settings=None):
+        active_settings = settings or {}
+        gain = active_settings.get("reference_gain")
+        offset = active_settings.get("reference_offset")
+        if gain is None or offset is None:
+            gain, offset = self._reference_transform_settings()
+        return _apply_reference_transform(value, gain, offset)
+
+    def _recompute_row_reference_stats(self, row, settings=None):
+        active_settings = settings or self._test_settings_cache or {}
+        gain = active_settings.get("reference_gain")
+        offset = active_settings.get("reference_offset")
+        if gain is None or offset is None:
+            gain, offset = self._reference_transform_settings()
+        target = _float_or_none(row.get("target"))
+        stats = dict(self._reference_stats_for_row(row))
+        updated = {}
+        for key, stat in stats.items():
+            item = dict(stat or {})
+            raw_mean = item.get("raw_mean", item.get("mean"))
+            raw_std = item.get("raw_std", item.get("std"))
+            raw_error = item.get("raw_error")
+            adjusted_mean = None if raw_mean is None else _apply_reference_transform(raw_mean, gain, offset)
+            adjusted_std = None if raw_std is None else abs(float(gain)) * float(raw_std)
+            if target is not None and adjusted_mean is not None:
+                adjusted_error = adjusted_mean - target
+            elif raw_error is not None and raw_mean is not None and adjusted_mean is not None:
+                adjusted_error = adjusted_mean - float(raw_mean) + float(raw_error)
+            else:
+                adjusted_error = None
+            item["mean"] = adjusted_mean
+            item["std"] = adjusted_std
+            item["error"] = adjusted_error
+            item["raw_mean"] = raw_mean
+            item["raw_std"] = raw_std
+            item["raw_error"] = raw_error
+            updated[key] = item
+        row["reference_stats"] = updated
+        return row
+
+    def _on_reference_transform_changed(self):
+        try:
+            gain, offset = self._reference_transform_settings()
+        except Exception as ex:
+            self._log(f"Reference transform invalid: {ex}")
+            return
+        if self._test_settings_cache is not None:
+            self._test_settings_cache["reference_gain"] = gain
+            self._test_settings_cache["reference_offset"] = offset
+        if self._measurements:
+            self._reproject_measurements_for_selected_reference()
+        else:
+            try:
+                self.refresh_status()
+            except Exception:
+                pass
+
+    def _reset_optimal_fit_state(self, clear_checkbox=True):
+        self._optimal_fit_base_transform = None
+        if clear_checkbox and hasattr(self, "apply_optimal_fit_checkbox"):
+            self._updating_optimal_fit_checkbox = True
+            try:
+                self.apply_optimal_fit_checkbox.setChecked(False)
+            finally:
+                self._updating_optimal_fit_checkbox = False
+
+    def _optimal_fit_available(self, metrics=None):
+        active_metrics = metrics or self._latest_metrics or {}
+        slope = _float_or_none(active_metrics.get("fit_slope"))
+        intercept = _float_or_none(active_metrics.get("fit_intercept"))
+        if slope is None or intercept is None or abs(slope) < 1e-18:
+            return False
+        if not self._measurements:
+            return False
+        state = str(active_metrics.get("state", "") or "").strip().lower()
+        if state.startswith("running") or state.startswith("error"):
+            return False
+        return True
+
+    def _update_optimal_fit_checkbox_state(self, metrics=None):
+        if not hasattr(self, "apply_optimal_fit_checkbox"):
+            return
+        active_metrics = metrics or self._latest_metrics or {}
+        enabled = self._optimal_fit_available(active_metrics)
+        slope = _float_or_none(active_metrics.get("fit_slope"))
+        intercept = _float_or_none(active_metrics.get("fit_intercept"))
+        self.apply_optimal_fit_checkbox.setEnabled(enabled)
+        if enabled:
+            self.apply_optimal_fit_checkbox.setToolTip(
+                "Apply the current linear-fit correction on top of the configured reference gain/offset. "
+                f"Current fit: slope={_fmt(slope)}, offset={_fmt(intercept)}. "
+                "Uncheck to restore the previous manual gain/offset."
+            )
+        else:
+            self.apply_optimal_fit_checkbox.setToolTip(
+                "Available after a completed dataset with a valid fit slope and offset."
+            )
+            if self.apply_optimal_fit_checkbox.isChecked():
+                self._reset_optimal_fit_state(clear_checkbox=True)
+
+    def _on_apply_optimal_fit_toggled(self, checked):
+        if self._updating_optimal_fit_checkbox:
+            return
+        if not checked:
+            if self._optimal_fit_base_transform is None:
+                return
+            base_gain, base_offset = self._optimal_fit_base_transform
+            self._optimal_fit_base_transform = None
+            self.reference_gain_edit.setText(_fmt(base_gain))
+            self.reference_offset_edit.setText(_fmt(base_offset))
+            self._on_reference_transform_changed()
+            self._log(
+                f"Restored manual reference transform: gain={_fmt(base_gain)}, offset={_fmt(base_offset)}"
+            )
+            return
+        if not self._optimal_fit_available():
+            self._updating_optimal_fit_checkbox = True
+            try:
+                self.apply_optimal_fit_checkbox.setChecked(False)
+            finally:
+                self._updating_optimal_fit_checkbox = False
+            self._log("Optimal fit correction unavailable: run or load a completed dataset with a valid fit")
+            return
+        slope = float(self._latest_metrics.get("fit_slope"))
+        intercept = float(self._latest_metrics.get("fit_intercept"))
+        gain, offset = self._reference_transform_settings()
+        self._optimal_fit_base_transform = (gain, offset)
+        corrected_gain = gain / slope
+        corrected_offset = (offset - intercept) / slope
+        self.reference_gain_edit.setText(_fmt(corrected_gain))
+        self.reference_offset_edit.setText(_fmt(corrected_offset))
+        self._on_reference_transform_changed()
+        self._log(
+            "Applied optimal fit correction on top of the current reference transform: "
+            f"slope={_fmt(slope)}, fit_offset={_fmt(intercept)}, "
+            f"gain={_fmt(corrected_gain)}, offset={_fmt(corrected_offset)}"
+        )
+
     def _set_move_params(self, velo, accl, accs=None, vmax=None):
         if vmax is not None:
             try:
@@ -2133,6 +2310,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             vals["REF"], err = self._read_polled_pv(ref_pv)
             if err:
                 vals["REF"] = err
+            else:
+                vals["REF"] = self._transformed_reference_value(vals["REF"])
             self.status_fields["REF"].setText(_fmt(vals["REF"]))
         else:
             vals["REF"] = ""
@@ -2146,6 +2325,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             if err:
                 raw = err
             else:
+                raw = self._transformed_reference_value(raw)
                 ref_values[idx] = raw
             self.reference_value_edits[idx].setText(_fmt(raw))
         vals["REFS"] = dict(ref_values)
@@ -2188,6 +2368,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             "reference_pvs": reference_pvs,
             "reference_slot": reference_slot,
             "reference_pv": ref_pv,
+            "reference_gain": self._reference_transform_settings()[0],
+            "reference_offset": self._reference_transform_settings()[1],
             "range_min": range_min,
             "range_max": range_max,
             "span": span,
@@ -2225,15 +2407,24 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                         pv = pvs[slot]
             if not pv:
                 pv = str(self._test_settings_cache.get("reference_pv", "") or "").strip()
-        if row.get("reference_mean") is None and row.get("reference_std") is None and row.get("ref_error") is None:
+        adjusted_mean = row.get("adjusted_reference_mean", row.get("reference_mean"))
+        adjusted_std = row.get("adjusted_reference_std", row.get("reference_std"))
+        adjusted_error = row.get("adjusted_ref_error", row.get("ref_error"))
+        if adjusted_mean is None and adjusted_std is None and adjusted_error is None:
             return {}
+        raw_mean = row.get("raw_reference_mean", row.get("reference_mean"))
+        raw_std = row.get("raw_reference_std", row.get("reference_std"))
+        raw_error = row.get("raw_ref_error", row.get("ref_error"))
         return {
             0: {
                 "slot": 0,
                 "pv": pv,
-                "mean": row.get("reference_mean"),
-                "std": row.get("reference_std"),
-                "error": row.get("ref_error"),
+                "mean": adjusted_mean,
+                "std": adjusted_std,
+                "error": adjusted_error,
+                "raw_mean": raw_mean,
+                "raw_std": raw_std,
+                "raw_error": raw_error,
             }
         }
 
@@ -2265,6 +2456,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         row["reference_mean"] = chosen.get("mean")
         row["reference_std"] = chosen.get("std")
         row["ref_error"] = chosen.get("error")
+        row["raw_reference_mean"] = chosen.get("raw_mean", chosen.get("mean"))
+        row["raw_reference_std"] = chosen.get("raw_std", chosen.get("std"))
+        row["raw_ref_error"] = chosen.get("raw_error", chosen.get("error"))
         return row
 
     def _reproject_measurements_for_selected_reference(self):
@@ -2273,10 +2467,14 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         reference_pvs = self._configured_reference_pvs()
         reference_slot = self._selected_reference_slot(reference_pvs)
         selected_pv = self._selected_reference_pv(reference_pvs)
+        gain, offset = self._reference_transform_settings()
         self._test_settings_cache["reference_pvs"] = reference_pvs
         self._test_settings_cache["reference_slot"] = reference_slot
         self._test_settings_cache["reference_pv"] = selected_pv
+        self._test_settings_cache["reference_gain"] = gain
+        self._test_settings_cache["reference_offset"] = offset
         for row in self._measurements:
+            self._recompute_row_reference_stats(row, self._test_settings_cache)
             self._project_row_reference(row, self._test_settings_cache, reference_slot)
         self._latest_metrics = self._compute_metrics(self._measurements)
         if self._demo_mode and self._latest_metrics:
@@ -2377,6 +2575,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
     def start_test(self):
         try:
             self._demo_mode = False
+            self._reset_optimal_fit_state(clear_checkbox=True)
             settings = self._test_settings()
             self.preview_targets()
             self._set_move_params(settings["velo"], settings["accl"], accs=settings.get("accs"), vmax=settings.get("vmax"))
@@ -2488,17 +2687,26 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
 
     def _capture_sample(self, step):
         reference_values = {}
+        raw_reference_values = {}
+        reference_gain = self._test_settings_cache.get("reference_gain")
+        reference_offset = self._test_settings_cache.get("reference_offset")
         for idx, ref_pv in enumerate(self._test_settings_cache.get("reference_pvs") or []):
             if not ref_pv:
                 continue
-            ref_raw = self.client.get(ref_pv, as_string=True)
-            reference_values[idx] = _to_float(ref_raw, f"Reference PV {idx + 1}")
+            ref_raw = _to_float(self.client.get(ref_pv, as_string=True), f"Reference PV {idx + 1}")
+            raw_reference_values[idx] = ref_raw
+            reference_values[idx] = _apply_reference_transform(
+                ref_raw,
+                reference_gain,
+                reference_offset,
+            )
         rbv_raw = self.client.get(self._pv("RBV"), as_string=True)
         val_raw = self.client.get(self._pv("VAL"), as_string=True)
         return {
             "cycle": step["cycle"],
             "direction": step["direction"],
             "target": float(step["target"]),
+            "raw_references": raw_reference_values,
             "references": reference_values,
             "rbv": _to_float(rbv_raw, "RBV"),
             "command": _to_float(val_raw, "VAL"),
@@ -2514,9 +2722,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         for idx, ref_pv in enumerate(reference_pvs):
             if not ref_pv:
                 continue
+            raw_ref_vals = [s.get("raw_references", {}).get(idx) for s in samples if idx in s.get("raw_references", {})]
             ref_vals = [s.get("references", {}).get(idx) for s in samples if idx in s.get("references", {})]
             if not ref_vals:
                 continue
+            raw_ref_mean = _mean(raw_ref_vals) if raw_ref_vals else None
             ref_mean = _mean(ref_vals)
             reference_stats[idx] = {
                 "slot": idx,
@@ -2524,6 +2734,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 "mean": ref_mean,
                 "std": _stddev(ref_vals),
                 "error": (ref_mean - target) if ref_mean is not None else None,
+                "raw_mean": raw_ref_mean,
+                "raw_std": _stddev(raw_ref_vals) if raw_ref_vals else None,
+                "raw_error": (raw_ref_mean - target) if raw_ref_mean is not None else None,
             }
         row = {
             "cycle": int(step["cycle"]),
@@ -3016,9 +3229,13 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             "bidirectional_repeatability": _fmt(metrics.get("bidirectional_repeatability")),
             "unidirectional_repeatability": _fmt(metrics.get("unidirectional_repeatability")),
             "mean_reversal_value": _fmt(metrics.get("mean_reversal_value")),
+            "maximum_reversal_value": _fmt(metrics.get("maximum_reversal_value")),
+            "fit_slope": _fmt(metrics.get("fit_slope")),
+            "fit_intercept": _fmt(metrics.get("fit_intercept")),
         }
         for key, label in self.summary_labels.items():
             label.setText(values.get(key, "-") or "-")
+        self._update_optimal_fit_checkbox_state(metrics)
 
     def _populate_summary_table(self, rows):
         self.summary_table.setRowCount(0)
@@ -3146,6 +3363,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             f"- Motor record: `{settings.get('motor', '')}`",
             f"- Configured reference PVs: `{_reference_pv_summary_text(settings)}`",
             f"- Reference used for report calculations: `{settings.get('reference_pv', '')}`",
+            f"- Reference gain: `{_fmt(settings.get('reference_gain', 1.0))}`",
+            f"- Reference offset: `{_fmt(settings.get('reference_offset', 0.0))}`",
             f"- Range: `{_fmt(settings.get('range_min'))} .. {_fmt(settings.get('range_max'))}`",
             f"- Target generation mode: `{settings.get('target_mode', '')}`",
             f"- Target generation rule: `{settings.get('target_rule_note', '')}`",
@@ -3209,8 +3428,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 "## Raw Measured Points",
                 "",
                 f"Selected reference for report/error columns: `{settings.get('reference_pv', '')}`",
+                "The raw reference values below are saved without applying the configured reference gain/offset.",
                 "",
-                "| Cycle | Direction | Target | Ref Mean | Ref Std | RBV Mean | RBV Std | Ref Err | RBV Err | Timestamp |",
+                "| Cycle | Direction | Target | Raw Ref Mean | Raw Ref Std | RBV Mean | RBV Std | Raw Ref Err | RBV Err | Timestamp |",
                 "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
             ]
         )
@@ -3218,9 +3438,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         for row in rows:
             lines.append(
                 f"| {row.get('cycle')} | {row.get('direction')} | {_fmt(row.get('target'))} | "
-                f"{_fmt(row.get('reference_mean'))} | {_fmt(row.get('reference_std'))} | "
+                f"{_fmt(row.get('raw_reference_mean'))} | {_fmt(row.get('raw_reference_std'))} | "
                 f"{_fmt(row.get('rbv_mean'))} | {_fmt(row.get('rbv_std'))} | "
-                f"{_fmt(row.get('ref_error'))} | {_fmt(row.get('rbv_error'))} | "
+                f"{_fmt(row.get('raw_ref_error'))} | {_fmt(row.get('rbv_error'))} | "
                 f"{row.get('timestamp').strftime('%Y-%m-%d %H:%M:%S')} |"
             )
 
@@ -3240,7 +3460,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                         "",
                         f"### Ref {slot + 1}: `{pv}`",
                         "",
-                        "| Cycle | Direction | Target | Ref Mean | Ref Std | Ref Err | Timestamp |",
+                        "| Cycle | Direction | Target | Raw Ref Mean | Raw Ref Std | Raw Ref Err | Timestamp |",
                         "| --- | --- | --- | --- | --- | --- | --- |",
                     ]
                 )
@@ -3251,7 +3471,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                         continue
                     lines.append(
                         f"| {row.get('cycle')} | {row.get('direction')} | {_fmt(row.get('target'))} | "
-                        f"{_fmt(stat.get('mean'))} | {_fmt(stat.get('std'))} | {_fmt(stat.get('error'))} | "
+                        f"{_fmt(stat.get('raw_mean', stat.get('mean')))} | "
+                        f"{_fmt(stat.get('raw_std', stat.get('std')))} | "
+                        f"{_fmt(stat.get('raw_error', stat.get('error')))} | "
                         f"{row.get('timestamp').strftime('%Y-%m-%d %H:%M:%S')} |"
                     )
 
@@ -3292,11 +3514,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 f"<td>{h(row.get('cycle'))}</td>"
                 f"<td>{h(row.get('direction'))}</td>"
                 f"<td>{h(_fmt_preview(row.get('target')))}</td>"
-                f"<td>{h(_fmt_preview(row.get('reference_mean')))}</td>"
-                f"<td>{h(_fmt_preview(row.get('reference_std')))}</td>"
+                f"<td>{h(_fmt_preview(row.get('raw_reference_mean')))}</td>"
+                f"<td>{h(_fmt_preview(row.get('raw_reference_std')))}</td>"
                 f"<td>{h(_fmt_preview(row.get('rbv_mean')))}</td>"
                 f"<td>{h(_fmt_preview(row.get('rbv_std')))}</td>"
-                f"<td>{h(_fmt_preview(row.get('ref_error')))}</td>"
+                f"<td>{h(_fmt_preview(row.get('raw_ref_error')))}</td>"
                 f"<td>{h(_fmt_preview(row.get('rbv_error')))}</td>"
                 f"<td>{h(row.get('timestamp').strftime('%Y-%m-%d %H:%M:%S'))}</td>"
                 "</tr>"
@@ -3649,11 +3871,11 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
                 "Cycle",
                 "Direction",
                 "Target",
-                "Ref Mean",
-                "Ref Std",
+                "Raw Ref Mean",
+                "Raw Ref Std",
                 "RBV Mean",
                 "RBV Std",
-                "Ref Err",
+                "Raw Ref Err",
                 "RBV Err",
                 "Timestamp",
             ]
@@ -3668,11 +3890,11 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
                 str(row.get("cycle")),
                 str(row.get("direction")),
                 _fmt_preview(row.get("target")),
-                _fmt_preview(row.get("reference_mean")),
-                _fmt_preview(row.get("reference_std")),
+                _fmt_preview(row.get("raw_reference_mean")),
+                _fmt_preview(row.get("raw_reference_std")),
                 _fmt_preview(row.get("rbv_mean")),
                 _fmt_preview(row.get("rbv_std")),
-                _fmt_preview(row.get("ref_error")),
+                _fmt_preview(row.get("raw_ref_error")),
                 _fmt_preview(row.get("rbv_error")),
                 row.get("timestamp").strftime("%Y-%m-%d %H:%M:%S"),
             ]
@@ -3692,6 +3914,8 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         settings["reference_pvs"] = self._configured_reference_pvs()
         settings["reference_slot"] = self._selected_reference_slot(settings["reference_pvs"])
         settings["reference_pv"] = self._selected_reference_pv(settings["reference_pvs"])
+        settings["reference_gain"] = self._reference_transform_settings()[0]
+        settings["reference_offset"] = self._reference_transform_settings()[1]
         return settings
 
     def _set_operator_comments(self, text):
@@ -3703,7 +3927,7 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         settings = self._current_session_settings()
         return {
             "file_type": "ecmc_iso230_session",
-            "version": 1,
+            "version": 2,
             "saved_at": datetime.now().isoformat(),
             "state": (self._latest_metrics or {}).get("state", "Saved"),
             "operator_comments": self._operator_comments,
@@ -3715,12 +3939,15 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
                     "target": row.get("target"),
                     "reference_slot": row.get("reference_slot"),
                     "reference_pv": row.get("reference_pv", ""),
-                    "reference_mean": row.get("reference_mean"),
-                    "reference_std": row.get("reference_std"),
+                    "reference_mean": row.get("raw_reference_mean"),
+                    "reference_std": row.get("raw_reference_std"),
                     "rbv_mean": row.get("rbv_mean"),
                     "rbv_std": row.get("rbv_std"),
                     "command_mean": row.get("command_mean"),
-                    "ref_error": row.get("ref_error"),
+                    "ref_error": row.get("raw_ref_error"),
+                    "adjusted_reference_mean": row.get("reference_mean"),
+                    "adjusted_reference_std": row.get("reference_std"),
+                    "adjusted_ref_error": row.get("ref_error"),
                     "rbv_error": row.get("rbv_error"),
                     "reference_stats": _serialize_reference_stats(row.get("reference_stats")),
                     "timestamp": row.get("timestamp").isoformat() if row.get("timestamp") else "",
@@ -3785,6 +4012,7 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
 
     def _apply_report_dataset(self, settings, rows, state="Loaded"):
         self._demo_mode = str(state).lower() == "demo"
+        self._reset_optimal_fit_state(clear_checkbox=True)
         self._poll_failure_cache.clear()
         decimals = int(settings.get("display_decimals", _FORMAT_DECIMALS))
         self.decimals_spin.blockSignals(True)
@@ -3799,6 +4027,8 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         self.motor_record_edit.setText(str(settings.get("motor", "")))
         self._committed_motor_record = str(settings.get("motor", "") or "")
         self._last_auto_reference_pv = f"{self._committed_motor_record}-PosAct" if self._committed_motor_record else ""
+        self.reference_gain_edit.setText(_fmt(settings.get("reference_gain", 1.0)))
+        self.reference_offset_edit.setText(_fmt(settings.get("reference_offset", 0.0)))
         reference_pvs = _settings_reference_pvs(settings)
         self._refresh_reference_pv_presets()
         for edit in self.reference_pv_edits:
@@ -4032,6 +4262,8 @@ A = max_i(xbar_i^+ + 2*s_i^+, xbar_i^- + 2*s_i^-)
                     "cycle",
                     "direction",
                     "target",
+                    "reference_gain",
+                    "reference_offset",
                     "selected_reference_slot",
                     "selected_reference_pv",
                     "reference_mean",
@@ -4052,20 +4284,29 @@ A = max_i(xbar_i^+ + 2*s_i^+, xbar_i^- + 2*s_i^-)
                         row["cycle"],
                         row["direction"],
                         row["target"],
+                        self._test_settings_cache.get("reference_gain"),
+                        self._test_settings_cache.get("reference_offset"),
                         row.get("reference_slot"),
                         row.get("reference_pv", ""),
-                        row["reference_mean"],
-                        row["reference_std"],
+                        row.get("raw_reference_mean"),
+                        row.get("raw_reference_std"),
                         row["rbv_mean"],
                         row["rbv_std"],
                         row["command_mean"],
-                        row["ref_error"],
+                        row.get("raw_ref_error"),
                         row["rbv_error"],
                     ]
                     stats = dict(row.get("reference_stats") or {})
                     for idx in range(_MAX_REFERENCE_PVS):
                         stat = stats.get(idx, {})
-                        record.extend([stat.get("pv", ""), stat.get("mean"), stat.get("std"), stat.get("error")])
+                        record.extend(
+                            [
+                                stat.get("pv", ""),
+                                stat.get("raw_mean", stat.get("mean")),
+                                stat.get("raw_std", stat.get("std")),
+                                stat.get("raw_error", stat.get("error")),
+                            ]
+                        )
                     record.append(row["timestamp"].isoformat())
                     writer.writerow(record)
             self._log(f"Saved CSV: {path}")
