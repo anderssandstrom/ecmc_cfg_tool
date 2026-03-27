@@ -400,6 +400,203 @@ def _apply_reference_transform(value, gain=None, offset=None):
     return (float(value) * float(1.0 if gain is None else gain)) + float(0.0 if offset is None else offset)
 
 
+class _StandaloneEpicsClient:
+    def __init__(self, timeout=2.0):
+        self.timeout = float(timeout)
+        self.backend = "standalone"
+
+    def get(self, pv, as_string=True):
+        raise RuntimeError(f"Standalone mode: EPICS get unavailable for {pv}")
+
+    def put(self, pv, value, wait=True):
+        raise RuntimeError(f"Standalone mode: EPICS put unavailable for {pv}")
+
+
+def _extract_markdown_section(text, heading):
+    match = re.search(
+        rf"(?ms)^##\s+{re.escape(str(heading))}\s*$\n(.*?)(?=^##\s+|\Z)",
+        str(text or ""),
+    )
+    return match.group(1) if match else ""
+
+
+def _strip_wrapped_backticks(text):
+    value = str(text or "").strip()
+    if len(value) >= 2 and value.startswith("`") and value.endswith("`"):
+        value = value[1:-1]
+    return value.strip()
+
+
+def _parse_markdown_bullet_values(section_text):
+    out = {}
+    for raw_line in str(section_text or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("- "):
+            continue
+        label, sep, value = line[2:].partition(":")
+        if not sep:
+            continue
+        out[label.strip()] = _strip_wrapped_backticks(value)
+    return out
+
+
+def _parse_report_reference_pvs(summary_text):
+    pvs = [""] * _MAX_REFERENCE_PVS
+    for slot_text, pv in re.findall(r"Ref\s+(\d+)\s*=\s*([^,]+)", str(summary_text or "")):
+        try:
+            slot = int(slot_text) - 1
+        except Exception:
+            continue
+        if 0 <= slot < _MAX_REFERENCE_PVS:
+            pvs[slot] = pv.strip()
+    return pvs
+
+
+def _parse_report_range(range_text):
+    match = re.match(r"^\s*([^\s]+)\s*\.\.\s*([^\s]+)\s*$", str(range_text or ""))
+    if not match:
+        return None, None
+    return _float_or_none(match.group(1)), _float_or_none(match.group(2))
+
+
+def _parse_motion_param_summary(text):
+    values = {}
+    for key in ("VELO", "ACCL", "VMAX", "ACCS"):
+        match = re.search(rf"\b{key}=([^\s]+)", str(text or ""))
+        values[key] = _float_or_none(match.group(1)) if match else None
+    return values
+
+
+def _parse_iso230_markdown_rows(section_text, selected_pv="", selected_slot=None):
+    table_lines = [line.strip() for line in str(section_text or "").splitlines() if line.strip().startswith("|")]
+    if len(table_lines) < 3:
+        raise RuntimeError("Markdown report does not contain a usable raw-measurements table")
+
+    rows = []
+    for line in table_lines[2:]:
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) < 10:
+            continue
+        try:
+            cycle = int(float(cells[0]))
+        except Exception:
+            continue
+        target = _float_or_none(cells[2])
+        if target is None:
+            continue
+        raw_ref_mean = _float_or_none(cells[3])
+        raw_ref_std = _float_or_none(cells[4])
+        rbv_mean = _float_or_none(cells[5])
+        rbv_std = _float_or_none(cells[6])
+        raw_ref_error = _float_or_none(cells[7])
+        rbv_error = _float_or_none(cells[8])
+        timestamp = _parse_saved_timestamp(cells[9])
+        rows.append(
+            {
+                "cycle": cycle,
+                "direction": str(cells[1] or "").strip().lower(),
+                "target": float(target),
+                "reference_slot": selected_slot,
+                "reference_pv": str(selected_pv or "").strip(),
+                "reference_mean": raw_ref_mean,
+                "reference_std": raw_ref_std,
+                "ref_error": raw_ref_error,
+                "raw_reference_mean": raw_ref_mean,
+                "raw_reference_std": raw_ref_std,
+                "raw_ref_error": raw_ref_error,
+                "rbv_mean": rbv_mean,
+                "rbv_std": rbv_std,
+                "rbv_error": rbv_error,
+                "command_mean": float(target),
+                "timestamp": timestamp,
+                "reference_stats": {},
+            }
+        )
+    if not rows:
+        raise RuntimeError("Markdown report raw-measurements table is empty")
+    return rows
+
+
+def _parse_iso230_report_markdown(text):
+    report_text = str(text or "")
+    if "# ecmc ISO 230 Bidirectional Positioning Report" not in report_text:
+        raise RuntimeError("Unsupported Markdown report format")
+
+    status_values = _parse_markdown_bullet_values(_extract_markdown_section(report_text, "Status"))
+    cfg_values = _parse_markdown_bullet_values(_extract_markdown_section(report_text, "Configuration"))
+    raw_section = _extract_markdown_section(report_text, "Raw Measured Points")
+    comments_section = _extract_markdown_section(report_text, "Operator Comments")
+
+    reference_pvs = _parse_report_reference_pvs(cfg_values.get("Configured reference PVs", ""))
+    selected_pv = str(cfg_values.get("Reference used for report calculations", "") or "").strip()
+    if selected_pv and selected_pv not in reference_pvs:
+        try:
+            empty_slot = reference_pvs.index("")
+        except ValueError:
+            empty_slot = 0
+        reference_pvs[empty_slot] = selected_pv
+    try:
+        reference_slot = reference_pvs.index(selected_pv) if selected_pv else None
+    except ValueError:
+        reference_slot = None
+
+    range_min, range_max = _parse_report_range(cfg_values.get("Range", ""))
+    targets = [
+        float(value)
+        for value in (
+            _float_or_none(item)
+            for item in str(cfg_values.get("Targets", "") or "").split(",")
+        )
+        if value is not None
+    ]
+    motion = _parse_motion_param_summary(cfg_values.get("Motion parameters", ""))
+    rows = _parse_iso230_markdown_rows(raw_section, selected_pv=selected_pv, selected_slot=reference_slot)
+    if not targets:
+        targets = sorted({_float_or_none(row.get("target")) for row in rows if row.get("target") is not None})
+        targets = [float(value) for value in targets if value is not None]
+    if range_min is None and targets:
+        range_min = float(min(targets))
+    if range_max is None and targets:
+        range_max = float(max(targets))
+    if range_min is None or range_max is None:
+        raise RuntimeError("Markdown report is missing range information")
+
+    settle_text = str(cfg_values.get("Settle time", "") or "").replace(" s", "").strip()
+    sample_interval_text = str(cfg_values.get("Sample interval", "") or "").replace(" ms", "").strip()
+    state_text = str(status_values.get("State", "") or "").strip()
+    loaded_state = f"Loaded report ({state_text})" if state_text else "Loaded report"
+    operator_comments = comments_section.strip()
+    settings = {
+        "prefix": cfg_values.get("IOC prefix", ""),
+        "axis_id": cfg_values.get("Axis ID", ""),
+        "motor": cfg_values.get("Motor record", ""),
+        "reference_pvs": reference_pvs,
+        "reference_slot": reference_slot,
+        "reference_pv": selected_pv,
+        "reference_gain": _float_or_none(cfg_values.get("Reference gain", "")) if cfg_values.get("Reference gain") else 1.0,
+        "reference_offset": _float_or_none(cfg_values.get("Reference offset", "")) if cfg_values.get("Reference offset") else 0.0,
+        "range_min": float(range_min),
+        "range_max": float(range_max),
+        "span": float(range_max) - float(range_min),
+        "targets": targets,
+        "target_count": len(targets),
+        "target_mode": cfg_values.get("Target generation mode", ""),
+        "target_rule_note": cfg_values.get("Target generation rule", ""),
+        "base_interval": _float_or_none(cfg_values.get("Base interval", "")),
+        "reversal_margin": _float_or_none(cfg_values.get("Approach margin outside targets", "")),
+        "cycles": int(_float_or_none(cfg_values.get("Cycles", "")) or 1),
+        "settle_s": _float_or_none(settle_text) or 0.0,
+        "samples_per_point": int(_float_or_none(cfg_values.get("Samples per point", "")) or 1),
+        "sample_interval_ms": int(_float_or_none(sample_interval_text) or 0),
+        "velo": motion.get("VELO"),
+        "accl": motion.get("ACCL"),
+        "vmax": motion.get("VMAX"),
+        "accs": motion.get("ACCS"),
+        "display_decimals": int(_float_or_none(cfg_values.get("Display decimals", "")) or _FORMAT_DECIMALS),
+    }
+    return settings, rows, loaded_state, operator_comments
+
+
 class _TargetSweepSchematic(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -576,14 +773,15 @@ class _TargetSweepSchematic(QtWidgets.QWidget):
 class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
     SAMPLE_INTERVAL_MS = 150
 
-    def __init__(self, prefix, axis_id, timeout, axis_id_was_provided=True):
+    def __init__(self, prefix, axis_id, timeout, axis_id_was_provided=True, standalone=False):
         super().__init__()
         self._base_title = "ecmc ISO 230 Bidirectional Test"
         self.setWindowTitle(self._base_title)
         self._apply_ui_scale()
         self.resize(_scaled_px(1120), _scaled_px(760))
 
-        self.client = EpicsClient(timeout=timeout)
+        self._standalone = bool(standalone)
+        self.client = _StandaloneEpicsClient(timeout=timeout) if self._standalone else EpicsClient(timeout=timeout)
         self.default_prefix = str(prefix or "").strip()
         self.default_axis_id = str(axis_id or "1").strip() or "1"
         self._axis_id_was_provided = bool(axis_id_was_provided)
@@ -631,12 +829,17 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._updating_optimal_fit_checkbox = False
 
         self._build_ui(timeout)
-        self._log(f"Connected via backend: {self.client.backend}")
-        if getattr(self.client, "backend", None) == "cli":
-            self._status_timer.setInterval(900)
-            self._log("CLI backend detected: status polling set to 900 ms")
-        self._status_timer.start()
-        QtCore.QTimer.singleShot(0, self._startup_axis_presence_check)
+        if self._standalone:
+            self._set_standalone_ui_state()
+            self._update_window_title()
+            self._log("Standalone mode: EPICS disabled. Use Open Report (.md), Open Data..., or Load Demo Data.")
+        else:
+            self._log(f"Connected via backend: {self.client.backend}")
+            if getattr(self.client, "backend", None) == "cli":
+                self._status_timer.setInterval(900)
+                self._log("CLI backend detected: status polling set to 900 ms")
+            self._status_timer.start()
+            QtCore.QTimer.singleShot(0, self._startup_axis_presence_check)
 
     def _apply_ui_scale(self):
         font = QtGui.QFont(self.font())
@@ -646,6 +849,22 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         if point_size > 0:
             font.setPointSizeF(max(7.0, point_size * _UI_SCALE))
             self.setFont(font)
+
+    def _standalone_notice(self):
+        return "Standalone mode: live EPICS access is disabled."
+
+    def _set_standalone_ui_state(self):
+        self.start_btn.setEnabled(False)
+        self.abort_btn.setEnabled(False)
+        if hasattr(self, "axis_apply_btn"):
+            self.axis_apply_btn.setEnabled(False)
+        if hasattr(self, "resolve_btn"):
+            self.resolve_btn.setEnabled(False)
+            self.resolve_btn.setToolTip(self._standalone_notice())
+        if hasattr(self, "read_status_btn"):
+            self.read_status_btn.setToolTip(self._standalone_notice())
+        self.start_btn.setToolTip("Standalone mode only supports loading and analyzing saved files.")
+        self.step_label.setText("Standalone analysis mode")
 
     def _build_ui(self, timeout):
         root = QtWidgets.QWidget()
@@ -660,6 +879,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.start_btn = QtWidgets.QPushButton("Start ISO 230 Test")
         self.abort_btn = QtWidgets.QPushButton("Abort")
         self.load_demo_btn = QtWidgets.QPushButton("Load Demo Data")
+        self.open_report_md_btn = QtWidgets.QPushButton("Open Report (.md)")
         self.data_btn = QtWidgets.QToolButton()
         self.data_btn.setText("Data")
         self.preview_report_btn = QtWidgets.QPushButton("Preview Report")
@@ -689,6 +909,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self.start_btn,
             self.abort_btn,
             self.load_demo_btn,
+            self.open_report_md_btn,
             self.preview_report_btn,
             self.export_report_btn,
             self.export_csv_btn,
@@ -712,6 +933,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.start_btn.clicked.connect(self.start_test)
         self.abort_btn.clicked.connect(self.abort_test)
         self.load_demo_btn.clicked.connect(self.load_demo_data)
+        self.open_report_md_btn.clicked.connect(self.load_report_markdown_file)
         self.preview_report_btn.clicked.connect(self.preview_report)
         self.export_report_btn.clicked.connect(self.export_report)
         self.export_csv_btn.clicked.connect(self.export_csv)
@@ -830,16 +1052,16 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.motion_vmax_edit.setPlaceholderText("optional")
         self.motion_accs_edit.setPlaceholderText("optional")
 
-        axis_apply_btn = QtWidgets.QPushButton("Apply Axis")
-        resolve_btn = QtWidgets.QPushButton("Resolve Motor")
-        read_status_btn = QtWidgets.QPushButton("Read Status")
-        for btn in (axis_apply_btn, resolve_btn, read_status_btn):
+        self.axis_apply_btn = QtWidgets.QPushButton("Apply Axis")
+        self.resolve_btn = QtWidgets.QPushButton("Resolve Motor")
+        self.read_status_btn = QtWidgets.QPushButton("Read Status")
+        for btn in (self.axis_apply_btn, self.resolve_btn, self.read_status_btn):
             btn.setAutoDefault(False)
             btn.setDefault(False)
             btn.setMaximumWidth(_scaled_px(140))
-        axis_apply_btn.clicked.connect(self._apply_axis_top)
-        resolve_btn.clicked.connect(self.resolve_motor_record_name)
-        read_status_btn.clicked.connect(self.refresh_status)
+        self.axis_apply_btn.clicked.connect(self._apply_axis_top)
+        self.resolve_btn.clicked.connect(self.resolve_motor_record_name)
+        self.read_status_btn.clicked.connect(self.refresh_status)
 
         self._update_cfg_pv_edits()
         self.prefix_edit.editingFinished.connect(self._update_cfg_pv_edits)
@@ -880,15 +1102,15 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         axis_grid.addWidget(self.axis_edit, 0, 3)
         axis_grid.addWidget(QtWidgets.QLabel("Timeout [s]"), 0, 4)
         axis_grid.addWidget(self.timeout_edit, 0, 5)
-        axis_grid.addWidget(axis_apply_btn, 0, 6)
+        axis_grid.addWidget(self.axis_apply_btn, 0, 6)
         axis_grid.addWidget(QtWidgets.QLabel("Axis Prefix PV"), 1, 0)
         axis_grid.addWidget(self.axis_pfx_cfg_pv_edit, 1, 1, 1, 2)
         axis_grid.addWidget(QtWidgets.QLabel("Motor Name PV"), 1, 3)
         axis_grid.addWidget(self.motor_name_cfg_pv_edit, 1, 4, 1, 3)
         axis_grid.addWidget(QtWidgets.QLabel("Motor Record"), 2, 0)
         axis_grid.addWidget(self.motor_record_edit, 2, 1, 1, 4)
-        axis_grid.addWidget(resolve_btn, 2, 5)
-        axis_grid.addWidget(read_status_btn, 2, 6)
+        axis_grid.addWidget(self.resolve_btn, 2, 5)
+        axis_grid.addWidget(self.read_status_btn, 2, 6)
         axis_grid.addWidget(QtWidgets.QLabel("Ref Gain"), 3, 0)
         axis_grid.addWidget(self.reference_gain_edit, 3, 1)
         axis_grid.addWidget(QtWidgets.QLabel("Ref Offset"), 3, 2)
@@ -980,9 +1202,10 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         tools_grid.setVerticalSpacing(6)
         tools_grid.addWidget(self.log_toggle_btn, 0, 0)
         tools_grid.addWidget(self.load_demo_btn, 0, 1)
+        tools_grid.addWidget(self.open_report_md_btn, 0, 2)
         tools_grid.addWidget(self.data_btn, 1, 0)
         tools_grid.addWidget(self.export_csv_btn, 1, 1)
-        tools_grid.setColumnStretch(2, 1)
+        tools_grid.setColumnStretch(3, 1)
         tools_layout.addLayout(tools_grid)
         tools_note = QtWidgets.QLabel("Less frequently used actions.")
         tools_note.setStyleSheet("color: #516079;")
@@ -1354,9 +1577,10 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._apply_axis_top()
 
     def _open_new_iso230_window(self, axis_id=None):
-        script = QtCore.QFileInfo(__file__).dir().filePath("start_iso230.sh")
+        launcher = "start_iso230_standalone.sh" if self._standalone else "start_iso230.sh"
+        script = QtCore.QFileInfo(__file__).dir().filePath(launcher)
         if not QtCore.QFileInfo(script).exists():
-            self._log("Launcher not found: start_iso230.sh")
+            self._log(f"Launcher not found: {launcher}")
             return False
         target_axis = str(axis_id or self._axis_id_text()).strip() or self.default_axis_id
         prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
@@ -1367,7 +1591,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            self._log(f"Started new ISO 230 window for axis {target_axis} (prefix {prefix})")
+            mode_text = "standalone " if self._standalone else ""
+            self._log(f"Started new {mode_text}ISO 230 window for axis {target_axis} (prefix {prefix})")
             return True
         except Exception as ex:
             self._log(f"Failed to start new ISO 230 window: {ex}")
@@ -1507,6 +1732,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         if self._did_startup_axis_presence_check:
             return
         self._did_startup_axis_presence_check = True
+        if self._standalone:
+            self._log("Startup axis probe skipped in standalone mode")
+            return
         prefix = self.prefix_edit.text().strip() or self.default_prefix
         cur_axis = self._axis_id_text()
         if not self._axis_id_was_provided:
@@ -1563,6 +1791,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.axis_edit.setText(axis_txt)
         self._update_cfg_pv_edits()
         self._sync_axis_combo_to_axis_id(axis_txt)
+        if self._standalone:
+            self._update_window_title()
+            self.preview_targets()
+            self._log("Standalone mode: axis selection updated locally; IOC lookup skipped")
+            return
         self.resolve_motor_record_name()
 
     def _update_cfg_pv_edits(self):
@@ -1648,6 +1881,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         name = str(pv or "").strip()
         if not name:
             return "", ""
+        if self._standalone:
+            return "", self._standalone_notice()
         cached_error = self._poll_failure_cache.get(name)
         if cached_error:
             return "", cached_error
@@ -1776,6 +2011,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                     self.status_fields[field].setText(_fmt(self._last_status.get(field)))
 
     def _read_motor_soft_limits(self):
+        if self._standalone:
+            return None
         if not self._committed_motor_record_text():
             return None
         for low_field, high_field in (("LLM", "HLM"), ("DLLM", "DHLM")):
@@ -1986,6 +2223,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.progress_label.setText("0 / 0 steps")
 
     def _read_cfg_pv(self, pv):
+        if self._standalone:
+            raise RuntimeError(self._standalone_notice())
         return str(self.client.get(pv, as_string=True)).strip().strip('"')
 
     def _candidate_motor_name_pvs(self):
@@ -2013,6 +2252,10 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         return a or m
 
     def resolve_motor_record_name(self):
+        if self._standalone:
+            self._update_window_title()
+            self._log("Standalone mode: Resolve Motor is unavailable without EPICS")
+            return
         try:
             self._demo_mode = False
             axis_pfx_pv = self._committed_axis_pfx_cfg_pv
@@ -2075,6 +2318,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         return f"{base}{s}"
 
     def _put(self, field, value, quiet=False, wait=False):
+        if self._standalone:
+            raise RuntimeError(self._standalone_notice())
         pv = self._pv(field)
         self.client.put(pv, value, wait=bool(wait))
         if not quiet:
@@ -2082,6 +2327,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self._log(f"PUT [{mode}] {pv} = {value}")
 
     def _init_motion_settings_from_pv(self):
+        if self._standalone:
+            self._update_duration_estimate()
+            return
         if not self._committed_motor_record_text():
             return
         try:
@@ -2272,6 +2520,34 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._put("VELO", velo)
         self._put("ACCL", accl)
 
+    def _refresh_status_from_loaded_data(self):
+        vals = {}
+        loaded_row = self._measurements[-1] if self._measurements else None
+        stats = self._reference_stats_for_row(loaded_row) if loaded_row is not None else {}
+        if loaded_row is not None:
+            vals = {
+                "VAL": _fmt(loaded_row.get("command_mean", loaded_row.get("target"))),
+                "RBV": _fmt(loaded_row.get("rbv_mean")),
+                "DMOV": "",
+                "CNEN": "",
+                "REF": _fmt(loaded_row.get("reference_mean", loaded_row.get("raw_reference_mean"))),
+            }
+        else:
+            vals = {"VAL": "", "RBV": "", "DMOV": "", "CNEN": "", "REF": ""}
+        for field in ("VAL", "RBV", "DMOV", "CNEN", "REF"):
+            self.status_fields[field].setText(str(vals.get(field, "")))
+        ref_values = {}
+        for idx, value_edit in enumerate(self.reference_value_edits):
+            stat = stats.get(idx, {})
+            value = stat.get("mean", stat.get("raw_mean"))
+            value_edit.setText(_fmt(value))
+            if value is not None:
+                ref_values[idx] = value
+        vals["REFS"] = dict(ref_values)
+        self._last_status = dict(vals)
+        self._update_target_schematic_live_state()
+        return vals
+
     def refresh_status(self):
         vals = {}
         if self._demo_mode:
@@ -2295,6 +2571,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self._last_status = dict(vals)
             self._update_target_schematic_live_state()
             return vals
+        if self._standalone:
+            return self._refresh_status_from_loaded_data()
         if self._committed_motor_record_text():
             for field in ("VAL", "RBV", "DMOV", "CNEN"):
                 vals[field], err = self._read_polled_pv(self._pv(field))
@@ -2334,7 +2612,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         return vals
 
     def _periodic_status_tick(self):
-        if self._demo_mode:
+        if self._demo_mode or self._standalone:
             return
         try:
             self.refresh_status()
@@ -2573,6 +2851,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._update_progress_display()
 
     def start_test(self):
+        if self._standalone:
+            self._log("Standalone mode: live EPICS test execution is unavailable")
+            return
         try:
             self._demo_mode = False
             self._reset_optimal_fit_state(clear_checkbox=True)
@@ -2856,7 +3137,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             bidir_lower = min(lower_candidates) if lower_candidates else None
             if fwd_std is not None and rev_std is not None and reversal is not None:
                 bidir_repeat = max(
-                    math.sqrt((2.0 * float(fwd_std) * float(fwd_std)) + (2.0 * float(rev_std) * float(rev_std)) + (float(reversal) * float(reversal))),
+                    (2.0 * float(fwd_std)) + (2.0 * float(rev_std)) + abs(float(reversal)),
                     float(fwd_repeat or 0.0),
                     float(rev_repeat or 0.0),
                 )
@@ -3396,7 +3677,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             "- Mean bidirectional positional deviation is calculated as the average of the forward and reverse mean reference errors at each target.",
             "- Reversal value at a target is calculated as forward mean error minus reverse mean error; the axis reversal value is the maximum absolute reversal over all targets.",
             "- Unidirectional repeatability is calculated as 4 times the sample standard deviation for each direction at each target.",
-                "- Bidirectional repeatability is calculated as max(sqrt(2*s_f^2 + 2*s_r^2 + B_i^2), R_i^+, R_i^-).",
+                "- Bidirectional repeatability is calculated as max(2*s_f + 2*s_r + |B_i|, R_i^+, R_i^-).",
                 "",
                 "## Per-Target Results",
                 "",
@@ -4010,6 +4291,28 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         except Exception as ex:
             self._log(f"Failed to load session data: {ex}")
 
+    def load_report_markdown_file(self):
+        if self._test_active:
+            self.abort_test()
+        path, _flt = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Open ISO 230 Markdown Report",
+            str(Path.home()),
+            "Markdown Files (*.md);;All Files (*)",
+        )
+        if not path:
+            return
+        try:
+            settings, rows, state, operator_comments = _parse_iso230_report_markdown(
+                Path(path).read_text(encoding="utf-8")
+            )
+            self._apply_report_dataset(settings, rows, state=state)
+            self._set_operator_comments(operator_comments)
+            self.step_label.setText(f"Loaded report: {Path(path).name}")
+            self._log(f"Loaded Markdown report: {path}")
+        except Exception as ex:
+            self._log(f"Failed to load Markdown report: {ex}")
+
     def _apply_report_dataset(self, settings, rows, state="Loaded"):
         self._demo_mode = str(state).lower() == "demo"
         self._reset_optimal_fit_state(clear_checkbox=True)
@@ -4169,7 +4472,7 @@ R_i^-    = 4 * s_i^-
             <h3>Per-target bidirectional repeatability</h3>
             <pre style="background:#f8fafc;border:1px solid #d7e0eb;padding:10px;border-radius:8px;">
 R_i = max(
-    sqrt(2*s_i^+*s_i^+ + 2*s_i^-*s_i^- + B_i*B_i),
+    2*s_i^+ + 2*s_i^- + |B_i|,
     R_i^+,
     R_i^-
 )
@@ -4346,6 +4649,7 @@ def main():
     ap.add_argument("--prefix", default="", help="IOC prefix (e.g. IOC:ECMC)")
     ap.add_argument("--axis-id", default="", help="Axis ID")
     ap.add_argument("--timeout", type=float, default=2.0, help="EPICS timeout [s]")
+    ap.add_argument("--standalone", action="store_true", help="Start without EPICS connection; load files for analysis only")
     ap.add_argument("--demo-report-out", default="", help="Write a synthetic Markdown report without connecting to EPICS")
     ap.add_argument("--demo-csv-out", default="", help="Optional CSV path for synthetic raw data")
     ap.add_argument("--demo-seed", type=int, default=2302, help="Random seed for synthetic report generation")
@@ -4368,6 +4672,7 @@ def main():
         axis_id=args.axis_id,
         timeout=args.timeout,
         axis_id_was_provided=bool((args.axis_id or "").strip()),
+        standalone=bool(args.standalone),
     )
     w.show()
     sys.exit(app.exec_())

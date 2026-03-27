@@ -10,7 +10,7 @@ This folder now contains:
 - `ecmc_axis_cfg.py` / `start_axis.sh` (axis YAML config app)
 - `ecmc_cntrl_qt.py` / `start_cntrl.sh` (controller tuning/config app)
 - `ecmc_mtn_qt.py` / `start_mtn.sh` (motor-record motion app)
-- `ecmc_iso230_qt.py` / `start_iso230.sh` (ISO 230-style bidirectional test app)
+- `ecmc_iso230_qt.py` / `start_iso230.sh` / `start_iso230_standalone.sh` (ISO 230-style bidirectional test app)
 - `ecmc_daq_qt.py` / `start_daq.sh` (timestamp-derived DAQ viewer for numeric PVs with FFT analysis)
 
 ## Applications
@@ -67,9 +67,11 @@ Use the ISO230 app when running an automated bidirectional positioning test agai
 - Shows lower tabs for `Live graph progress`, `ISO230 summary`, and `Live status` during setup and execution.
 - Overlays live actual motion and current target on the sweep schematic while the sequence runs.
 - Previews and exports a Markdown report, exports CSV data, and saves or reloads full session files.
+- Tools tab can open exported ISO230 Markdown reports directly back into the app for further analysis.
 - Preview Report uses the currently loaded/measured dataset and does not auto-load demo data.
 - Saved session loading also accepts older JSON session files that contain compatible `settings` / `measurements` payloads.
 - Supports demo data loading and CLI demo report generation.
+- Standalone mode starts without EPICS access and is intended for report/session-file analysis only.
 - Default settle time is `0 s`.
 
 #### Checking axes with a stepper motor and a linear encoder
@@ -157,6 +159,23 @@ Examples:
 
 The apps resolve axis IDs from IOC config PVs when a motor name/full motor PV is provided.
 
+### ISO230 standalone analysis mode
+
+Use the standalone launcher when you want to inspect saved ISO230 reports or session files without any EPICS connection.
+
+Examples:
+
+```bash
+./start_iso230_standalone.sh
+./start_iso230_standalone.sh "" 3
+```
+
+In standalone mode:
+
+- EPICS startup probing, status polling, and live test execution are disabled.
+- `Open Report (.md)`, `Open Data...`, `Load Demo Data`, report preview, CSV export, and Markdown export remain available.
+- The existing `start_iso230.sh` launcher still opens the normal EPICS-connected app.
+
 ### DAQ app
 
 DAQ launcher accepts:
@@ -208,10 +227,12 @@ One Qt binding:
 
 - `PyQt5` or `PySide6`
 
-One EPICS client backend:
+One EPICS client backend for live-connected apps:
 
 - `pyepics` (preferred), or
 - EPICS CLI tools in PATH: `caput` and `caget`
+
+Standalone ISO230 analysis mode does not require an EPICS backend.
 
 ## Notes
 
