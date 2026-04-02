@@ -1532,6 +1532,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
     def _row_def(self, name):
         return self._rows_all_by_name.get(name)
 
+    def _command_tooltip(self, row_def):
+        if not row_def:
+            return ''
+        return f"GET: {row_def.get('get') or '-'}\nSET: {row_def.get('set') or '-'}"
+
     def _make_sketch_cell(self, row_def, overlay=False):
         cell = QtWidgets.QWidget()
         if overlay:
@@ -1562,6 +1567,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         edit.setProperty('sketchOverlay', bool(overlay))
         edit.setProperty('sketchBaseStyle', base_style)
         edit.textChanged.connect(lambda _txt='', e=edit: self._on_sketch_value_text_changed(e))
+        edit.setToolTip(self._command_tooltip(row_def))
 
         rb = QtWidgets.QPushButton('R')
         wb = QtWidgets.QPushButton('W')
@@ -1580,6 +1586,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
                 ' font-weight: 700;'
                 '}'
             )
+            b.setToolTip(self._command_tooltip(row_def))
 
         if row_def is None:
             edit.setEnabled(False)
@@ -2042,7 +2049,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         r = self.table.rowCount()
         self.table.insertRow(r)
         item = QtWidgets.QTableWidgetItem(row_def['name'])
-        item.setToolTip(f"GET: {row_def.get('get') or '-'}\nSET: {row_def.get('set') or '-'}")
+        item.setToolTip(self._command_tooltip(row_def))
         self.table.setItem(r, 0, item)
 
         axis_default = self.axis_all_edit.text().strip() if hasattr(self, 'axis_all_edit') else ''
