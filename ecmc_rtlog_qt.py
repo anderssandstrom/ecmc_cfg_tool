@@ -265,6 +265,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.prefix_edit = QtWidgets.QLineEdit(self.default_prefix or "IOC:ECMC")
         self.launch_axis_edit = QtWidgets.QLineEdit(str(launch_axis_id or "1").strip() or "1")
         self.launch_axis_edit.setMaximumWidth(80)
+        self.launch_axis_edit.editingFinished.connect(self._refresh_axis_dbg_state)
         self.timeout_edit = CompactDoubleSpinBox()
         self.timeout_edit.setRange(0.1, 60.0)
         self.timeout_edit.setDecimals(1)
@@ -663,6 +664,8 @@ class RtLogWindow(QtWidgets.QMainWindow):
 
     def _refresh_axis_dbg_state(self):
         axis_id = self._current_axis_id()
+        self._axis_dbg_supported = True
+        self._axis_dbg_missing_logged = False
         try:
             axis_dbg_text = self._get_pv_text(f"Axis{axis_id}-DbgPrntEna")
             self._axis_dbg_supported = True
@@ -808,7 +811,6 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.count_edit.setText(str(count))
         self.drop_count_edit.setText(drop_count)
         self.last_msg_edit.setPlainText(msg)
-        self._refresh_axis_dbg_state()
         self.ctrl_rb_edit.setText(str(ctrl_rb))
         source_type_value = _parse_int(source_type_rb, default=-1)
         self.source_type_edit.setText(SOURCE_TYPE_LABELS.get(source_type_value, str(source_type_rb or "")))
