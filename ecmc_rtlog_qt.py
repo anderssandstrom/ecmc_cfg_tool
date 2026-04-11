@@ -10,6 +10,11 @@ from pathlib import Path
 
 from qt_compat import QtCore, QtGui, QtWidgets
 
+
+Signal = getattr(QtCore, "pyqtSignal", None)
+if Signal is None:
+    Signal = getattr(QtCore, "Signal")
+
 from ecmc_stream_qt import CompactDoubleSpinBox, EpicsClient, _join_prefix_pv
 
 
@@ -106,6 +111,8 @@ def _compact_log_text(text, fallback_level="INFO"):
 
 
 class RtLogWindow(QtWidgets.QMainWindow):
+    monitor_triggered = Signal()
+
     def __init__(self, prefix, timeout, poll_ms=250, history_limit=200, launch_axis_id="1"):
         super().__init__()
         self._base_title = "ecmc Log"
@@ -117,14 +124,25 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self._last_count = None
         self._history_limit = max(10, int(history_limit or 200))
         self._updating_ctrl_widgets = False
+        self._monitor_pvs = []
+        self._monitor_mode = False
+        self._refresh_pending = False
 
         self._build_ui(timeout=float(timeout), poll_ms=int(poll_ms or 250), launch_axis_id=launch_axis_id)
+        self.monitor_triggered.connect(self._schedule_monitor_refresh)
         self._log(f"Connected via backend: {self.client.backend}")
 
         self._poll_timer = QtCore.QTimer(self)
         self._poll_timer.setInterval(max(50, int(poll_ms or 250)))
         self._poll_timer.timeout.connect(self.refresh_status)
-        self._poll_timer.start()
+
+        self._refresh_timer = QtCore.QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(25)
+        self._refresh_timer.timeout.connect(self._run_scheduled_refresh)
+
+        self.prefix_edit.editingFinished.connect(self._reconnect_live_updates)
+        self._configure_live_updates()
         QtCore.QTimer.singleShot(0, self.refresh_status)
 
     def _build_ui(self, timeout, poll_ms, launch_axis_id):
@@ -324,10 +342,88 @@ class RtLogWindow(QtWidgets.QMainWindow):
 
     def _set_timeout(self, value):
         self.client.timeout = float(value)
+        if self._monitor_mode:
+            self._reconnect_live_updates()
 
     def _set_poll_ms(self, value):
         if hasattr(self, "_poll_timer"):
             self._poll_timer.setInterval(max(50, int(value or 250)))
+
+    def _schedule_monitor_refresh(self):
+        if self._refresh_pending:
+            return
+        self._refresh_pending = True
+        self._refresh_timer.start()
+
+    def _run_scheduled_refresh(self):
+        self._refresh_pending = False
+        self.refresh_status()
+
+    def _clear_monitors(self):
+        for pv in self._monitor_pvs:
+            try:
+                if hasattr(pv, "clear_callbacks"):
+                    pv.clear_callbacks()
+            except Exception:
+                pass
+            try:
+                pv.auto_monitor = False
+            except Exception:
+                pass
+            try:
+                if hasattr(pv, "disconnect"):
+                    pv.disconnect()
+            except Exception:
+                pass
+        self._monitor_pvs = []
+
+    def _monitor_callback(self, **_kwargs):
+        self.monitor_triggered.emit()
+
+    def _setup_monitors(self):
+        ep = getattr(self.client, "_epics", None)
+        if getattr(self.client, "backend", None) != "pyepics" or ep is None:
+            return False
+        pv_names = [
+            self._pv("MCU-RTLog-Cnt"),
+            self._pv("MCU-RTLog-DropCnt"),
+            self._pv("MCU-RTLog-Ctrl-RB"),
+            self._pv("MCU-RTLog-InfoEna"),
+            self._pv("MCU-RTLog-ErrEna"),
+        ]
+        self._monitor_pvs = []
+        for name in pv_names:
+            try:
+                pv = ep.PV(name, auto_monitor=True)
+                if hasattr(pv, "wait_for_connection") and not pv.wait_for_connection(timeout=float(self.client.timeout)):
+                    self._log(f"PV monitor failed to connect: {name}")
+                    self._clear_monitors()
+                    return False
+                pv.add_callback(callback=self._monitor_callback)
+                self._monitor_pvs.append(pv)
+            except Exception as ex:
+                self._log(f"PV monitor setup failed for {name}: {ex}")
+                self._clear_monitors()
+                return False
+        return True
+
+    def _configure_live_updates(self):
+        self._clear_monitors()
+        self._refresh_timer.stop()
+        self._refresh_pending = False
+        if self._setup_monitors():
+            self._monitor_mode = True
+            self._poll_timer.stop()
+            self._log("Using pyepics monitors for log updates")
+            return
+        self._monitor_mode = False
+        self._poll_timer.start()
+        self._log("Using polling for log updates")
+
+    def _reconnect_live_updates(self):
+        self._last_count = None
+        self._configure_live_updates()
+        self.refresh_status()
 
     def _set_history_limit(self, value):
         self._history_limit = max(10, int(value or 200))
@@ -365,7 +461,10 @@ class RtLogWindow(QtWidgets.QMainWindow):
         try:
             self.client.put(self._pv("MCU-RTLog-Ctrl"), word, wait=True)
             self._log(f"Applied log control word {word}")
-            self.refresh_status()
+            if self._monitor_mode:
+                self._schedule_monitor_refresh()
+            else:
+                self.refresh_status()
         except Exception as ex:
             self._log(f"Failed to write log control word: {ex}")
 
@@ -408,7 +507,11 @@ class RtLogWindow(QtWidgets.QMainWindow):
             self._log(f"Failed to read log PVs: {ex}")
             return
 
-        self.backend_edit.setText(str(self.client.backend or ""))
+        backend_label = str(self.client.backend or "")
+        if backend_label:
+            mode_text = "monitor" if self._monitor_mode else "poll"
+            backend_label = f"{backend_label} ({mode_text})"
+        self.backend_edit.setText(backend_label)
         self.level_edit.setText(level)
         self.level_text_edit.setText(level_text)
         self._set_level_color(level_text or level)
@@ -429,7 +532,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         delta = max(1, count - int(self._last_count))
         if delta > 1:
             self._append_history_item(
-                f"{delta - 1} message(s) elapsed between polls; latest message shown below",
+                f"{delta - 1} message(s) elapsed between updates; latest message shown below",
                 synthetic=True,
             )
         if msg:
@@ -522,6 +625,18 @@ class RtLogWindow(QtWidgets.QMainWindow):
             self._log(f"Started caQtDM main panel ({macro})")
         except Exception as ex:
             self._log(f"Failed to start caQtDM main panel: {ex}")
+
+    def closeEvent(self, event):
+        try:
+            self._poll_timer.stop()
+        except Exception:
+            pass
+        try:
+            self._refresh_timer.stop()
+        except Exception:
+            pass
+        self._clear_monitors()
+        super().closeEvent(event)
 
 
 def main():
