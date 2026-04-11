@@ -67,23 +67,6 @@ def _decode_waveform_text(value):
         return ""
     if not (text.startswith("[") and text.endswith("]")):
         return text
-
-
-def _compact_log_text(text, fallback_level="INFO"):
-    raw = str(text or "").strip()
-    if not raw:
-        return ""
-    m = LOG_LINE_RE.match(raw)
-    if not m:
-        return raw
-    path = m.group("path").strip()
-    func = m.group("func").strip()
-    line = m.group("line").strip()
-    level = (m.group("level") or fallback_level or "INFO").strip().upper()
-    body = (m.group("body") or "").strip()
-    body = re.sub(r"^(INFO|ERROR|WARNING):\s*", "", body)
-    file_name = os.path.basename(path)
-    return f"{level} {file_name}:{line} {func} | {body}"
     try:
         parsed = ast.literal_eval(text)
     except Exception:
@@ -103,6 +86,23 @@ def _compact_log_text(text, fallback_level="INFO"):
         return bytes(vals).decode("utf-8", errors="replace")
     except Exception:
         return text
+
+
+def _compact_log_text(text, fallback_level="INFO"):
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    m = LOG_LINE_RE.match(raw)
+    if not m:
+        return raw
+    path = m.group("path").strip()
+    func = m.group("func").strip()
+    line = m.group("line").strip()
+    level = (m.group("level") or fallback_level or "INFO").strip().upper()
+    body = (m.group("body") or "").strip()
+    body = re.sub(r"^(INFO|ERROR|WARNING):\s*", "", body)
+    file_name = os.path.basename(path)
+    return f"{level} {file_name}:{line} {func} | {body}"
 
 
 class RtLogWindow(QtWidgets.QMainWindow):
