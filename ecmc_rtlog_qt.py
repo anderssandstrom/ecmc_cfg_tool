@@ -118,6 +118,30 @@ def _decode_waveform_text(value):
         return text
 
 
+def _filter_mode_label(mode_value):
+    try:
+        mode = int(mode_value)
+    except Exception:
+        mode = FILTER_MODE_ALL
+    if mode == FILTER_MODE_NONE:
+        return "Send None"
+    if mode == FILTER_MODE_SELECTED:
+        return "Selected Objects"
+    return "Send All"
+
+
+def _mask_labels(mask_value):
+    labels = []
+    try:
+        mask = int(mask_value)
+    except Exception:
+        mask = 0
+    for label, type_value in SOURCE_TYPE_OPTIONS:
+        if mask & (1 << int(type_value)):
+            labels.append(label)
+    return labels
+
+
 def _compact_log_text(text, fallback_level="INFO"):
     raw = str(text or "").strip()
     if not raw:
@@ -152,6 +176,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self._updating_filter_widgets = False
         self._filter_supported = True
         self._filter_missing_logged = False
+        self._last_filter_rb_state = None
         self._monitor_pvs = []
         self._monitor_mode = False
         self._refresh_pending = False
@@ -170,6 +195,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self._refresh_timer.timeout.connect(self._run_scheduled_refresh)
 
         self.prefix_edit.editingFinished.connect(self._reconnect_live_updates)
+        self._detect_filter_support()
         self._configure_live_updates()
         QtCore.QTimer.singleShot(0, self.refresh_status)
 
@@ -424,10 +450,26 @@ class RtLogWindow(QtWidgets.QMainWindow):
             self._poll_timer.setInterval(max(50, int(value or 250)))
 
     def _set_filter_controls_enabled(self):
+        self.filter_group.setEnabled(self._filter_supported)
         selected_mode = self.filter_mode_combo.currentData() == FILTER_MODE_SELECTED
         self.filter_index_spin.setEnabled(self._filter_supported and selected_mode)
         for chk in self.filter_type_checks.values():
             chk.setEnabled(self._filter_supported and selected_mode)
+
+    def _detect_filter_support(self):
+        try:
+            self._get_pv_text("MCU-RTLog-FilterMode-RB")
+            self._get_pv_text("MCU-RTLog-FilterMask-RB")
+            self._get_pv_text("MCU-RTLog-FilterIndex-RB")
+            if not self._filter_supported:
+                self._log("Asyn log filter PVs detected")
+            self._filter_supported = True
+        except Exception as ex:
+            self._filter_supported = False
+            if not self._filter_missing_logged:
+                self._log(f"Asyn log filter PVs unavailable: {ex}")
+                self._filter_missing_logged = True
+        self._set_filter_controls_enabled()
 
     def _schedule_monitor_refresh(self):
         if self._refresh_pending:
@@ -507,6 +549,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
 
     def _reconnect_live_updates(self):
         self._last_count = None
+        self._detect_filter_support()
         self._configure_live_updates()
         self.refresh_status()
 
@@ -568,20 +611,28 @@ class RtLogWindow(QtWidgets.QMainWindow):
         index_value = int(self.filter_index_spin.value())
         self._set_filter_controls_enabled()
         if not self._filter_supported:
+            self._log("Asyn filter change ignored: filter PVs unavailable")
             return
+        selected_labels = _mask_labels(mask)
+        mode_label = _filter_mode_label(mode)
+        details = f"mode={mode_label}, index={'All' if index_value < 0 else index_value}"
+        if mode == FILTER_MODE_SELECTED:
+            details += f", types={', '.join(selected_labels) if selected_labels else 'none'}"
+        self._log(f"Applying asyn log filter: {details}")
         try:
-            self.client.put(self._pv("MCU-RTLog-FilterMode"), mode, wait=True)
-            self.client.put(self._pv("MCU-RTLog-FilterMask"), mask, wait=True)
-            self.client.put(self._pv("MCU-RTLog-FilterIndex"), index_value, wait=True)
-            self._log(f"Applied asyn log filter: mode={mode}, mask={mask}, index={index_value}")
+            self.client.put(self._pv("MCU-RTLog-FilterMode"), mode, wait=False)
+            self.client.put(self._pv("MCU-RTLog-FilterMask"), mask, wait=False)
+            self.client.put(self._pv("MCU-RTLog-FilterIndex"), index_value, wait=False)
             if self._monitor_mode:
                 self._schedule_monitor_refresh()
             else:
                 self.refresh_status()
         except Exception as ex:
             self._filter_supported = False
-            self.filter_group.setEnabled(False)
-            self._log(f"Asyn log filter PVs unavailable: {ex}")
+            self._set_filter_controls_enabled()
+            if not self._filter_missing_logged:
+                self._log(f"Asyn log filter PVs unavailable: {ex}")
+                self._filter_missing_logged = True
 
     def _append_history_item(self, text, level_text="INFO", synthetic=False):
         stamp = datetime.now().strftime("%H:%M:%S")
@@ -624,6 +675,16 @@ class RtLogWindow(QtWidgets.QMainWindow):
             chk.setChecked((mask_value & (1 << int(type_value))) != 0)
         self._updating_filter_widgets = False
         self._set_filter_controls_enabled()
+
+        state = (mode_value, mask_value, index_value)
+        if state != self._last_filter_rb_state:
+            mode_label = _filter_mode_label(mode_value)
+            selected_labels = _mask_labels(mask_value)
+            details = f"mode={mode_label}, index={'All' if index_value < 0 else index_value}"
+            if mode_value == FILTER_MODE_SELECTED:
+                details += f", types={', '.join(selected_labels) if selected_labels else 'none'}"
+            self._log(f"Asyn log filter readback: {details}")
+            self._last_filter_rb_state = state
 
     def _read_optional_text(self, suffix, default=""):
         try:
