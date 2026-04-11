@@ -12,7 +12,7 @@ from ecmc_stream_qt import CompactDoubleSpinBox, EpicsClient, _join_prefix_pv
 
 
 APP_LAUNCH_PLACEHOLDER = "Open app..."
-APP_LAUNCH_RTLOG = "New RT Logger App"
+APP_LAUNCH_RTLOG = "New ecmc Log App"
 APP_LAUNCH_STREAM = "Stream App"
 APP_LAUNCH_AXIS = "Axis Cfg App"
 APP_LAUNCH_CONTROLLER = "Cntrl Cfg App"
@@ -84,9 +84,9 @@ def _decode_waveform_text(value):
 class RtLogWindow(QtWidgets.QMainWindow):
     def __init__(self, prefix, timeout, poll_ms=250, history_limit=200, launch_axis_id="1"):
         super().__init__()
-        self._base_title = "ecmc RT Logger"
+        self._base_title = "ecmc Log"
         self.setWindowTitle(self._base_title)
-        self.resize(840, 620)
+        self.resize(780, 560)
 
         self.client = EpicsClient(timeout=timeout)
         self.default_prefix = str(prefix or "").strip()
@@ -113,7 +113,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         top_row = QtWidgets.QHBoxLayout()
         top_row.setSpacing(4)
 
-        self.cfg_toggle_btn = QtWidgets.QPushButton("Hide Config")
+        self.cfg_toggle_btn = QtWidgets.QPushButton("Show Config")
         self.cfg_toggle_btn.setAutoDefault(False)
         self.cfg_toggle_btn.setDefault(False)
         self.cfg_toggle_btn.clicked.connect(self._toggle_config_panel)
@@ -201,9 +201,10 @@ class RtLogWindow(QtWidgets.QMainWindow):
         cfg.addWidget(self.history_spin, 1, 3)
         cfg.addWidget(refresh_btn, 1, 4)
         cfg.addWidget(clear_history_btn, 1, 5)
+        self.cfg_group.setVisible(False)
         layout.addWidget(self.cfg_group)
 
-        self.control_group = QtWidgets.QGroupBox("Logger Control")
+        self.control_group = QtWidgets.QGroupBox("Log Control")
         ctrl = QtWidgets.QGridLayout(self.control_group)
         ctrl.setContentsMargins(6, 6, 6, 6)
         ctrl.setHorizontalSpacing(4)
@@ -219,7 +220,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         ctrl.setColumnStretch(2, 1)
         layout.addWidget(self.control_group)
 
-        self.status_group = QtWidgets.QGroupBox("RT Logger Status")
+        self.status_group = QtWidgets.QGroupBox("Log Status")
         status = QtWidgets.QGridLayout(self.status_group)
         status.setContentsMargins(6, 6, 6, 6)
         status.setHorizontalSpacing(4)
@@ -258,13 +259,17 @@ class RtLogWindow(QtWidgets.QMainWindow):
         status.addWidget(self.last_msg_edit, 3, 1, 1, 3)
         layout.addWidget(self.status_group)
 
-        history_group = QtWidgets.QGroupBox("Buffered Logger Messages")
+        history_group = QtWidgets.QGroupBox("Buffered Log Messages")
         history_layout = QtWidgets.QVBoxLayout(history_group)
         history_layout.setContentsMargins(6, 6, 6, 6)
         history_layout.setSpacing(4)
         self.history_list = QtWidgets.QListWidget()
         self.history_list.setAlternatingRowColors(True)
+        self.history_list.setSpacing(0)
         self.history_list.setUniformItemSizes(False)
+        self.history_list.setStyleSheet(
+            "QListWidget::item { padding-top: 0px; padding-bottom: 0px; margin: 0px; }"
+        )
         history_layout.addWidget(self.history_list, stretch=1)
         layout.addWidget(history_group, stretch=1)
 
@@ -331,10 +336,10 @@ class RtLogWindow(QtWidgets.QMainWindow):
             word |= 0x2
         try:
             self.client.put(self._pv("MCU-RTLog-Ctrl"), word, wait=True)
-            self._log(f"Applied logger control word {word}")
+            self._log(f"Applied log control word {word}")
             self.refresh_status()
         except Exception as ex:
-            self._log(f"Failed to write logger control word: {ex}")
+            self._log(f"Failed to write log control word: {ex}")
 
     def _append_history_item(self, text, level_text="INFO", synthetic=False):
         stamp = datetime.now().strftime("%H:%M:%S")
@@ -371,7 +376,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
             info_ena = self._get_pv_text("MCU-RTLog-InfoEna")
             err_ena = self._get_pv_text("MCU-RTLog-ErrEna")
         except Exception as ex:
-            self._log(f"Failed to read RT logger PVs: {ex}")
+            self._log(f"Failed to read log PVs: {ex}")
             return
 
         self.backend_edit.setText(str(self.client.backend or ""))
@@ -455,7 +460,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
             return False
 
     def _open_rtlog_window(self):
-        self._open_script("start_rtlog.sh", "RT logger", [self._current_prefix()])
+        self._open_script("start_rtlog.sh", "ecmc log", [self._current_prefix()])
 
     def _open_stream_window(self):
         self._open_script("start.sh", "stream", [self._current_prefix()])
@@ -491,7 +496,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Qt app for ecmc RT logger status and message history")
+    ap = argparse.ArgumentParser(description="Qt app for ecmc log status and message history")
     ap.add_argument("--prefix", default="", help="IOC prefix (e.g. IOC:ECMC)")
     ap.add_argument("--timeout", type=float, default=2.0, help="EPICS timeout [s]")
     ap.add_argument("--poll-ms", type=int, default=250, help="Logger poll interval [ms]")

@@ -33,7 +33,7 @@ APP_LAUNCH_AXIS = "Axis Cfg App"
 APP_LAUNCH_CONTROLLER = "Cntrl Cfg App"
 APP_LAUNCH_MOTION = "Motion App"
 APP_LAUNCH_ISO230 = "ISO230 App"
-APP_LAUNCH_RTLOG = "RT Logger App"
+APP_LAUNCH_RTLOG = "ecmc Log App"
 APP_LAUNCH_CAQTDM_MAIN = "caqtdm Main"
 
 
