@@ -86,7 +86,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         super().__init__()
         self._base_title = "ecmc RT Logger"
         self.setWindowTitle(self._base_title)
-        self.resize(760, 520)
+        self.resize(840, 620)
 
         self.client = EpicsClient(timeout=timeout)
         self.default_prefix = str(prefix or "").strip()
@@ -119,6 +119,11 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.cfg_toggle_btn.setDefault(False)
         self.cfg_toggle_btn.clicked.connect(self._toggle_config_panel)
 
+        self.status_toggle_btn = QtWidgets.QPushButton("Show Status")
+        self.status_toggle_btn.setAutoDefault(False)
+        self.status_toggle_btn.setDefault(False)
+        self.status_toggle_btn.clicked.connect(self._toggle_status_panel)
+
         self.app_log_toggle_btn = QtWidgets.QPushButton("Show App Log")
         self.app_log_toggle_btn.setAutoDefault(False)
         self.app_log_toggle_btn.setDefault(False)
@@ -137,13 +142,14 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_MAIN, "caqtdm_main")
         self.open_app_combo.activated.connect(self._on_open_app_selected)
 
-        for w in (self.cfg_toggle_btn, self.app_log_toggle_btn, self.open_app_combo):
+        for w in (self.cfg_toggle_btn, self.status_toggle_btn, self.app_log_toggle_btn, self.open_app_combo):
             try:
                 w.setMaximumHeight(24)
             except Exception:
                 pass
 
         top_row.addWidget(self.cfg_toggle_btn)
+        top_row.addWidget(self.status_toggle_btn)
         top_row.addWidget(self.app_log_toggle_btn)
         top_row.addWidget(QtWidgets.QLabel("Launch"))
         top_row.addWidget(self.open_app_combo)
@@ -198,47 +204,6 @@ class RtLogWindow(QtWidgets.QMainWindow):
         cfg.addWidget(clear_history_btn, 1, 5)
         layout.addWidget(self.cfg_group)
 
-        status_row = QtWidgets.QHBoxLayout()
-        status_row.setSpacing(4)
-
-        self.status_group = QtWidgets.QGroupBox("RT Logger Status")
-        status = QtWidgets.QGridLayout(self.status_group)
-        status.setContentsMargins(6, 6, 6, 6)
-        status.setHorizontalSpacing(4)
-        status.setVerticalSpacing(4)
-
-        self.backend_edit = QtWidgets.QLineEdit(str(self.client.backend or ""))
-        self.backend_edit.setReadOnly(True)
-        self.level_edit = QtWidgets.QLineEdit()
-        self.level_edit.setReadOnly(True)
-        self.level_text_edit = QtWidgets.QLineEdit()
-        self.level_text_edit.setReadOnly(True)
-        self.count_edit = QtWidgets.QLineEdit()
-        self.count_edit.setReadOnly(True)
-        self.drop_count_edit = QtWidgets.QLineEdit()
-        self.drop_count_edit.setReadOnly(True)
-        self.ctrl_rb_edit = QtWidgets.QLineEdit()
-        self.ctrl_rb_edit.setReadOnly(True)
-        self.last_msg_edit = QtWidgets.QPlainTextEdit()
-        self.last_msg_edit.setReadOnly(True)
-        self.last_msg_edit.setMaximumHeight(64)
-
-        status.addWidget(QtWidgets.QLabel("Backend"), 0, 0)
-        status.addWidget(self.backend_edit, 0, 1)
-        status.addWidget(QtWidgets.QLabel("Level"), 0, 2)
-        status.addWidget(self.level_edit, 0, 3)
-        status.addWidget(QtWidgets.QLabel("Level Text"), 1, 0)
-        status.addWidget(self.level_text_edit, 1, 1)
-        status.addWidget(QtWidgets.QLabel("Message Count"), 1, 2)
-        status.addWidget(self.count_edit, 1, 3)
-        status.addWidget(QtWidgets.QLabel("Dropped Count"), 2, 0)
-        status.addWidget(self.drop_count_edit, 2, 1)
-        status.addWidget(QtWidgets.QLabel("Control RB"), 2, 2)
-        status.addWidget(self.ctrl_rb_edit, 2, 3)
-        status.addWidget(QtWidgets.QLabel("Last Message"), 3, 0)
-        status.addWidget(self.last_msg_edit, 3, 1, 1, 3)
-        status_row.addWidget(self.status_group, 2)
-
         self.control_group = QtWidgets.QGroupBox("Logger Control")
         ctrl = QtWidgets.QGridLayout(self.control_group)
         ctrl.setContentsMargins(6, 6, 6, 6)
@@ -262,9 +227,47 @@ class RtLogWindow(QtWidgets.QMainWindow):
         ctrl.addWidget(self.ctrl_write_spin, 0, 1)
         ctrl.addWidget(self.apply_ctrl_btn, 0, 2)
         ctrl.addWidget(self.info_enable_chk, 1, 0, 1, 2)
-        ctrl.addWidget(self.err_enable_chk, 2, 0, 1, 2)
-        status_row.addWidget(self.control_group, 1)
-        layout.addLayout(status_row)
+        ctrl.addWidget(self.err_enable_chk, 1, 2)
+        layout.addWidget(self.control_group)
+
+        self.status_group = QtWidgets.QGroupBox("RT Logger Status")
+        status = QtWidgets.QGridLayout(self.status_group)
+        status.setContentsMargins(6, 6, 6, 6)
+        status.setHorizontalSpacing(4)
+        status.setVerticalSpacing(4)
+
+        self.backend_edit = QtWidgets.QLineEdit(str(self.client.backend or ""))
+        self.backend_edit.setReadOnly(True)
+        self.level_edit = QtWidgets.QLineEdit()
+        self.level_edit.setReadOnly(True)
+        self.level_text_edit = QtWidgets.QLineEdit()
+        self.level_text_edit.setReadOnly(True)
+        self.count_edit = QtWidgets.QLineEdit()
+        self.count_edit.setReadOnly(True)
+        self.drop_count_edit = QtWidgets.QLineEdit()
+        self.drop_count_edit.setReadOnly(True)
+        self.ctrl_rb_edit = QtWidgets.QLineEdit()
+        self.ctrl_rb_edit.setReadOnly(True)
+        self.last_msg_edit = QtWidgets.QPlainTextEdit()
+        self.last_msg_edit.setReadOnly(True)
+        self.last_msg_edit.setMaximumHeight(64)
+        self.status_group.setVisible(False)
+
+        status.addWidget(QtWidgets.QLabel("Backend"), 0, 0)
+        status.addWidget(self.backend_edit, 0, 1)
+        status.addWidget(QtWidgets.QLabel("Level"), 0, 2)
+        status.addWidget(self.level_edit, 0, 3)
+        status.addWidget(QtWidgets.QLabel("Level Text"), 1, 0)
+        status.addWidget(self.level_text_edit, 1, 1)
+        status.addWidget(QtWidgets.QLabel("Message Count"), 1, 2)
+        status.addWidget(self.count_edit, 1, 3)
+        status.addWidget(QtWidgets.QLabel("Dropped Count"), 2, 0)
+        status.addWidget(self.drop_count_edit, 2, 1)
+        status.addWidget(QtWidgets.QLabel("Control RB"), 2, 2)
+        status.addWidget(self.ctrl_rb_edit, 2, 3)
+        status.addWidget(QtWidgets.QLabel("Last Message"), 3, 0)
+        status.addWidget(self.last_msg_edit, 3, 1, 1, 3)
+        layout.addWidget(self.status_group)
 
         history_group = QtWidgets.QGroupBox("Buffered Logger Messages")
         history_layout = QtWidgets.QVBoxLayout(history_group)
@@ -272,6 +275,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         history_layout.setSpacing(4)
         self.history_list = QtWidgets.QListWidget()
         self.history_list.setAlternatingRowColors(True)
+        self.history_list.setUniformItemSizes(False)
         history_layout.addWidget(self.history_list, stretch=1)
         layout.addWidget(history_group, stretch=1)
 
@@ -285,6 +289,11 @@ class RtLogWindow(QtWidgets.QMainWindow):
         visible = not self.cfg_group.isVisible()
         self.cfg_group.setVisible(visible)
         self.cfg_toggle_btn.setText("Hide Config" if visible else "Show Config")
+
+    def _toggle_status_panel(self):
+        visible = not self.status_group.isVisible()
+        self.status_group.setVisible(visible)
+        self.status_toggle_btn.setText("Hide Status" if visible else "Show Status")
 
     def _toggle_app_log_panel(self):
         visible = not self.app_log.isVisible()
