@@ -318,40 +318,52 @@ class RtLogWindow(QtWidgets.QMainWindow):
 
         self.filter_group = QtWidgets.QGroupBox("Asyn Filter")
         flt = QtWidgets.QGridLayout(self.filter_group)
-        flt.setContentsMargins(6, 6, 6, 6)
-        flt.setHorizontalSpacing(4)
-        flt.setVerticalSpacing(4)
+        flt.setContentsMargins(6, 4, 6, 4)
+        flt.setHorizontalSpacing(8)
+        flt.setVerticalSpacing(2)
 
         self.filter_mode_combo = QtWidgets.QComboBox()
         self.filter_mode_combo.addItem("Send None", FILTER_MODE_NONE)
         self.filter_mode_combo.addItem("Send All", FILTER_MODE_ALL)
         self.filter_mode_combo.addItem("Selected Objects", FILTER_MODE_SELECTED)
+        self.filter_mode_combo.setMinimumWidth(180)
         self.filter_mode_combo.currentIndexChanged.connect(self._sync_filter_from_widgets)
 
         self.filter_index_spin = QtWidgets.QSpinBox()
         self.filter_index_spin.setRange(-1, 9999)
         self.filter_index_spin.setSpecialValueText("All")
         self.filter_index_spin.setValue(-1)
+        self.filter_index_spin.setMaximumWidth(90)
         self.filter_index_spin.valueChanged.connect(self._sync_filter_from_widgets)
+
+        self.filter_clear_btn = QtWidgets.QPushButton("Clear Types")
+        self.filter_clear_btn.setAutoDefault(False)
+        self.filter_clear_btn.setDefault(False)
+        self.filter_clear_btn.clicked.connect(self._clear_filter_types)
 
         self.filter_type_checks = {}
         filter_checks_widget = QtWidgets.QWidget()
         filter_checks_layout = QtWidgets.QGridLayout(filter_checks_widget)
         filter_checks_layout.setContentsMargins(0, 0, 0, 0)
-        filter_checks_layout.setHorizontalSpacing(8)
-        filter_checks_layout.setVerticalSpacing(2)
+        filter_checks_layout.setHorizontalSpacing(12)
+        filter_checks_layout.setVerticalSpacing(0)
+        filter_checks_layout.setColumnStretch(4, 1)
         for idx, (label, type_value) in enumerate(SOURCE_TYPE_OPTIONS):
             chk = QtWidgets.QCheckBox(label)
             chk.toggled.connect(self._sync_filter_from_widgets)
             self.filter_type_checks[type_value] = chk
-            filter_checks_layout.addWidget(chk, idx // 3, idx % 3)
+            row = idx // 4
+            col = idx % 4
+            filter_checks_layout.addWidget(chk, row, col)
 
         flt.addWidget(QtWidgets.QLabel("Mode"), 0, 0)
         flt.addWidget(self.filter_mode_combo, 0, 1)
         flt.addWidget(QtWidgets.QLabel("Index"), 0, 2)
         flt.addWidget(self.filter_index_spin, 0, 3)
-        flt.addWidget(filter_checks_widget, 1, 0, 1, 4)
-        flt.setColumnStretch(4, 1)
+        flt.addWidget(self.filter_clear_btn, 0, 4)
+        flt.addWidget(filter_checks_widget, 0, 5, 2, 1)
+        flt.setColumnStretch(1, 1)
+        flt.setColumnStretch(5, 3)
         layout.addWidget(self.filter_group)
 
         self.status_group = QtWidgets.QGroupBox("Log Status")
@@ -454,8 +466,19 @@ class RtLogWindow(QtWidgets.QMainWindow):
         selected_mode_data = self.filter_mode_combo.currentData()
         selected_mode = (FILTER_MODE_ALL if selected_mode_data is None else int(selected_mode_data)) == FILTER_MODE_SELECTED
         self.filter_index_spin.setEnabled(self._filter_supported and selected_mode)
+        self.filter_clear_btn.setEnabled(self._filter_supported and selected_mode)
         for chk in self.filter_type_checks.values():
             chk.setEnabled(self._filter_supported and selected_mode)
+
+    def _clear_filter_types(self):
+        if self._updating_filter_widgets:
+            return
+        self._updating_filter_widgets = True
+        for chk in self.filter_type_checks.values():
+            chk.setChecked(False)
+        self._updating_filter_widgets = False
+        self._log("Cleared selected asyn filter object types")
+        self._sync_filter_from_widgets()
 
     def _detect_filter_support(self):
         try:
