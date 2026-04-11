@@ -210,24 +210,18 @@ class RtLogWindow(QtWidgets.QMainWindow):
         ctrl.setHorizontalSpacing(4)
         ctrl.setVerticalSpacing(4)
 
-        self.ctrl_write_spin = QtWidgets.QSpinBox()
-        self.ctrl_write_spin.setRange(0, 0x7FFFFFFF)
-        self.ctrl_write_spin.setValue(3)
         self.info_enable_chk = QtWidgets.QCheckBox("INFO Enabled")
         self.err_enable_chk = QtWidgets.QCheckBox("ERROR Enabled")
         self.apply_ctrl_btn = QtWidgets.QPushButton("Apply Control")
         self.apply_ctrl_btn.setAutoDefault(False)
         self.apply_ctrl_btn.setDefault(False)
         self.apply_ctrl_btn.clicked.connect(self._apply_control)
-        self.ctrl_write_spin.valueChanged.connect(self._sync_checks_from_word)
         self.info_enable_chk.toggled.connect(self._sync_word_from_checks)
         self.err_enable_chk.toggled.connect(self._sync_word_from_checks)
 
-        ctrl.addWidget(QtWidgets.QLabel("Control Word"), 0, 0)
-        ctrl.addWidget(self.ctrl_write_spin, 0, 1)
+        ctrl.addWidget(self.info_enable_chk, 0, 0)
+        ctrl.addWidget(self.err_enable_chk, 0, 1)
         ctrl.addWidget(self.apply_ctrl_btn, 0, 2)
-        ctrl.addWidget(self.info_enable_chk, 1, 0, 1, 2)
-        ctrl.addWidget(self.err_enable_chk, 1, 2)
         layout.addWidget(self.control_group)
 
         self.status_group = QtWidgets.QGroupBox("RT Logger Status")
@@ -332,27 +326,9 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.level_edit.setStyleSheet(f"color: {color}; font-weight: 600;")
         self.level_text_edit.setStyleSheet(f"color: {color}; font-weight: 600;")
 
-    def _sync_checks_from_word(self, value):
-        if self._updating_ctrl_widgets:
-            return
-        self._updating_ctrl_widgets = True
-        word = int(value or 0)
-        self.info_enable_chk.setChecked(bool(word & 0x1))
-        self.err_enable_chk.setChecked(bool(word & 0x2))
-        self._updating_ctrl_widgets = False
-        self._set_control_dirty(True)
-
     def _sync_word_from_checks(self, _checked=False):
         if self._updating_ctrl_widgets:
             return
-        self._updating_ctrl_widgets = True
-        word = 0
-        if self.info_enable_chk.isChecked():
-            word |= 0x1
-        if self.err_enable_chk.isChecked():
-            word |= 0x2
-        self.ctrl_write_spin.setValue(word)
-        self._updating_ctrl_widgets = False
         self._set_control_dirty(True)
 
     def _set_control_dirty(self, dirty):
@@ -360,7 +336,11 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.apply_ctrl_btn.setText("Apply Control *" if self._ctrl_dirty else "Apply Control")
 
     def _apply_control(self):
-        word = int(self.ctrl_write_spin.value())
+        word = 0
+        if self.info_enable_chk.isChecked():
+            word |= 0x1
+        if self.err_enable_chk.isChecked():
+            word |= 0x2
         try:
             self.client.put(self._pv("MCU-RTLog-Ctrl"), word, wait=True)
             self._log(f"Applied logger control word {word}")
@@ -387,9 +367,8 @@ class RtLogWindow(QtWidgets.QMainWindow):
 
     def _refresh_control_state(self, ctrl_rb_text, info_text, err_text):
         self._updating_ctrl_widgets = True
-        ctrl_rb = _parse_int(ctrl_rb_text, default=self.ctrl_write_spin.value())
+        ctrl_rb = _parse_int(ctrl_rb_text, default=0)
         self.ctrl_rb_edit.setText(str(ctrl_rb_text))
-        self.ctrl_write_spin.setValue(ctrl_rb)
         self.info_enable_chk.setChecked(_truthy_pv(info_text))
         self.err_enable_chk.setChecked(_truthy_pv(err_text))
         self._updating_ctrl_widgets = False
