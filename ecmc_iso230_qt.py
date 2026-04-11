@@ -34,6 +34,7 @@ APP_LAUNCH_AXIS = "Axis Cfg App"
 APP_LAUNCH_CONTROLLER = "Cntrl Cfg App"
 APP_LAUNCH_MOTION = "Motion App"
 APP_LAUNCH_DAQ = "DAQ App"
+APP_LAUNCH_RTLOG = "RT Logger App"
 APP_LAUNCH_CAQTDM_MAIN = "caqtdm Main"
 APP_LAUNCH_CAQTDM_AXIS = "caqtdm Axis"
 
@@ -901,6 +902,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.open_app_combo.addItem(APP_LAUNCH_CONTROLLER, "controller")
         self.open_app_combo.addItem(APP_LAUNCH_MOTION, "motion")
         self.open_app_combo.addItem(APP_LAUNCH_DAQ, "daq")
+        self.open_app_combo.addItem(APP_LAUNCH_RTLOG, "rtlog")
         self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_MAIN, "caqtdm_main")
         self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_AXIS, "caqtdm_axis")
         for btn in (
@@ -1455,6 +1457,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 self._open_motion_window()
             elif action == "daq":
                 self._open_daq_window()
+            elif action == "rtlog":
+                self._open_rtlog_window()
             elif action == "caqtdm_main":
                 self._open_caqtdm_main_panel()
             elif action == "caqtdm_axis":
@@ -1481,6 +1485,24 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self._log(f"Started DAQ window (prefix {prefix})")
         except Exception as ex:
             self._log(f"Failed to start DAQ window: {ex}")
+
+    def _open_rtlog_window(self):
+        script = Path(__file__).with_name("start_rtlog.sh")
+        if not script.exists():
+            self._log(f"Launcher not found: {script.name}")
+            return
+        prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
+        axis_id = self._axis_id_text()
+        try:
+            subprocess.Popen(
+                ["bash", str(script), str(prefix), str(axis_id)],
+                cwd=str(script.parent),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._log(f"Started RT logger window (prefix {prefix})")
+        except Exception as ex:
+            self._log(f"Failed to start RT logger window: {ex}")
 
     def _open_caqtdm_main_panel(self):
         ioc_prefix = self.prefix_edit.text().strip() or self.default_prefix or ""

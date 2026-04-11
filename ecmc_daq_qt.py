@@ -33,6 +33,7 @@ APP_LAUNCH_AXIS = "Axis Cfg App"
 APP_LAUNCH_CONTROLLER = "Cntrl Cfg App"
 APP_LAUNCH_MOTION = "Motion App"
 APP_LAUNCH_ISO230 = "ISO230 App"
+APP_LAUNCH_RTLOG = "RT Logger App"
 APP_LAUNCH_CAQTDM_MAIN = "caqtdm Main"
 
 
@@ -992,6 +993,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         self.open_app_combo.addItem(APP_LAUNCH_CONTROLLER, "controller")
         self.open_app_combo.addItem(APP_LAUNCH_MOTION, "motion")
         self.open_app_combo.addItem(APP_LAUNCH_ISO230, "iso230")
+        self.open_app_combo.addItem(APP_LAUNCH_RTLOG, "rtlog")
         self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_MAIN, "caqtdm_main")
 
         top_row.addWidget(QtWidgets.QLabel("IOC Prefix"))
@@ -1234,6 +1236,8 @@ class DaqWindow(QtWidgets.QMainWindow):
                 self._open_script_window("start_mtn.sh", "motion")
             elif action == "iso230":
                 self._open_script_window("start_iso230.sh", "iso230")
+            elif action == "rtlog":
+                self._open_script_window("start_rtlog.sh", "rt logger")
             elif action == "caqtdm_main":
                 self._open_caqtdm_main_panel()
         finally:
