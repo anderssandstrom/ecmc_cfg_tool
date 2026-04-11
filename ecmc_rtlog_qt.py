@@ -326,6 +326,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.filter_mode_combo.addItem("Send None", FILTER_MODE_NONE)
         self.filter_mode_combo.addItem("Send All", FILTER_MODE_ALL)
         self.filter_mode_combo.addItem("Selected Objects", FILTER_MODE_SELECTED)
+        self.filter_mode_combo.setCurrentIndex(0)
         self.filter_mode_combo.setMinimumWidth(180)
         self.filter_mode_combo.currentIndexChanged.connect(self._sync_filter_from_widgets)
 
@@ -417,6 +418,15 @@ class RtLogWindow(QtWidgets.QMainWindow):
         history_layout = QtWidgets.QVBoxLayout(history_group)
         history_layout.setContentsMargins(6, 6, 6, 6)
         history_layout.setSpacing(4)
+        history_top = QtWidgets.QHBoxLayout()
+        history_top.setSpacing(4)
+        history_top.addStretch(1)
+        self.clear_history_btn = QtWidgets.QPushButton("Clear Log")
+        self.clear_history_btn.setAutoDefault(False)
+        self.clear_history_btn.setDefault(False)
+        self.clear_history_btn.clicked.connect(self._clear_history)
+        history_top.addWidget(self.clear_history_btn)
+        history_layout.addLayout(history_top)
         self.history_list = QtWidgets.QListWidget()
         self.history_list.setAlternatingRowColors(True)
         self.history_list.setSpacing(0)
@@ -464,7 +474,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
     def _set_filter_controls_enabled(self):
         self.filter_group.setEnabled(self._filter_supported)
         selected_mode_data = self.filter_mode_combo.currentData()
-        selected_mode = (FILTER_MODE_ALL if selected_mode_data is None else int(selected_mode_data)) == FILTER_MODE_SELECTED
+        selected_mode = (FILTER_MODE_NONE if selected_mode_data is None else int(selected_mode_data)) == FILTER_MODE_SELECTED
         self.filter_index_spin.setEnabled(self._filter_supported and selected_mode)
         self.filter_clear_btn.setEnabled(self._filter_supported and selected_mode)
         for chk in self.filter_type_checks.values():
@@ -631,7 +641,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         if self._updating_filter_widgets:
             return
         mode_data = self.filter_mode_combo.currentData()
-        mode = FILTER_MODE_ALL if mode_data is None else int(mode_data)
+        mode = FILTER_MODE_NONE if mode_data is None else int(mode_data)
         mask = self._selected_filter_mask()
         index_value = int(self.filter_index_spin.value())
         self._set_filter_controls_enabled()
@@ -689,7 +699,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
             self.filter_group.setEnabled(False)
             return
         self._updating_filter_widgets = True
-        mode_value = _parse_int(mode_text, default=FILTER_MODE_ALL)
+        mode_value = _parse_int(mode_text, default=FILTER_MODE_NONE)
         mask_value = _parse_int(mask_text, default=0)
         index_value = _parse_int(index_text, default=-1)
         combo_index = self.filter_mode_combo.findData(mode_value)
@@ -731,7 +741,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
             self._log(f"Failed to read log PVs: {ex}")
             return
 
-        filter_mode_rb = self._read_optional_text("MCU-RTLog-FilterMode-RB", "1")
+        filter_mode_rb = self._read_optional_text("MCU-RTLog-FilterMode-RB", "0")
         filter_mask_rb = self._read_optional_text("MCU-RTLog-FilterMask-RB", "0")
         filter_index_rb = self._read_optional_text("MCU-RTLog-FilterIndex-RB", "-1")
         source_type_rb = self._read_optional_text("MCU-RTLog-SrcType", "")
