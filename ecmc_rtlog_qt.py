@@ -871,6 +871,12 @@ class RtLogWindow(QtWidgets.QMainWindow):
             self._log(f"Failed to start caQtDM main panel: {ex}")
 
     def closeEvent(self, event):
+        if self._filter_supported:
+            try:
+                self.client.put(self._pv("MCU-RTLog-FilterMode"), FILTER_MODE_NONE, wait=False)
+                self._log("Set asyn log filter to Send None on close")
+            except Exception as ex:
+                self._log(f"Failed to set asyn log filter to Send None on close: {ex}")
         try:
             self._poll_timer.stop()
         except Exception:
