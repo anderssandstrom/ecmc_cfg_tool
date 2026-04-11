@@ -451,7 +451,8 @@ class RtLogWindow(QtWidgets.QMainWindow):
 
     def _set_filter_controls_enabled(self):
         self.filter_group.setEnabled(self._filter_supported)
-        selected_mode = self.filter_mode_combo.currentData() == FILTER_MODE_SELECTED
+        selected_mode_data = self.filter_mode_combo.currentData()
+        selected_mode = (FILTER_MODE_ALL if selected_mode_data is None else int(selected_mode_data)) == FILTER_MODE_SELECTED
         self.filter_index_spin.setEnabled(self._filter_supported and selected_mode)
         for chk in self.filter_type_checks.values():
             chk.setEnabled(self._filter_supported and selected_mode)
@@ -606,7 +607,8 @@ class RtLogWindow(QtWidgets.QMainWindow):
     def _sync_filter_from_widgets(self, _value=None):
         if self._updating_filter_widgets:
             return
-        mode = int(self.filter_mode_combo.currentData() or FILTER_MODE_ALL)
+        mode_data = self.filter_mode_combo.currentData()
+        mode = FILTER_MODE_ALL if mode_data is None else int(mode_data)
         mask = self._selected_filter_mask()
         index_value = int(self.filter_index_spin.value())
         self._set_filter_controls_enabled()
