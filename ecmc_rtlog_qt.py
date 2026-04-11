@@ -93,7 +93,6 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self._last_count = None
         self._history_limit = max(10, int(history_limit or 200))
         self._updating_ctrl_widgets = False
-        self._ctrl_dirty = False
 
         self._build_ui(timeout=float(timeout), poll_ms=int(poll_ms or 250), launch_axis_id=launch_axis_id)
         self._log(f"Connected via backend: {self.client.backend}")
@@ -212,16 +211,12 @@ class RtLogWindow(QtWidgets.QMainWindow):
 
         self.info_enable_chk = QtWidgets.QCheckBox("INFO Enabled")
         self.err_enable_chk = QtWidgets.QCheckBox("ERROR Enabled")
-        self.apply_ctrl_btn = QtWidgets.QPushButton("Apply Control")
-        self.apply_ctrl_btn.setAutoDefault(False)
-        self.apply_ctrl_btn.setDefault(False)
-        self.apply_ctrl_btn.clicked.connect(self._apply_control)
         self.info_enable_chk.toggled.connect(self._sync_word_from_checks)
         self.err_enable_chk.toggled.connect(self._sync_word_from_checks)
 
         ctrl.addWidget(self.info_enable_chk, 0, 0)
         ctrl.addWidget(self.err_enable_chk, 0, 1)
-        ctrl.addWidget(self.apply_ctrl_btn, 0, 2)
+        ctrl.setColumnStretch(2, 1)
         layout.addWidget(self.control_group)
 
         self.status_group = QtWidgets.QGroupBox("RT Logger Status")
@@ -329,13 +324,6 @@ class RtLogWindow(QtWidgets.QMainWindow):
     def _sync_word_from_checks(self, _checked=False):
         if self._updating_ctrl_widgets:
             return
-        self._set_control_dirty(True)
-
-    def _set_control_dirty(self, dirty):
-        self._ctrl_dirty = bool(dirty)
-        self.apply_ctrl_btn.setText("Apply Control *" if self._ctrl_dirty else "Apply Control")
-
-    def _apply_control(self):
         word = 0
         if self.info_enable_chk.isChecked():
             word |= 0x1
@@ -344,7 +332,6 @@ class RtLogWindow(QtWidgets.QMainWindow):
         try:
             self.client.put(self._pv("MCU-RTLog-Ctrl"), word, wait=True)
             self._log(f"Applied logger control word {word}")
-            self._set_control_dirty(False)
             self.refresh_status()
         except Exception as ex:
             self._log(f"Failed to write logger control word: {ex}")
@@ -372,7 +359,6 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.info_enable_chk.setChecked(_truthy_pv(info_text))
         self.err_enable_chk.setChecked(_truthy_pv(err_text))
         self._updating_ctrl_widgets = False
-        self._set_control_dirty(False)
 
     def refresh_status(self):
         try:
@@ -396,8 +382,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.drop_count_edit.setText(drop_count)
         self.last_msg_edit.setPlainText(msg)
         self.ctrl_rb_edit.setText(str(ctrl_rb))
-        if not self._ctrl_dirty:
-            self._refresh_control_state(ctrl_rb, info_ena, err_ena)
+        self._refresh_control_state(ctrl_rb, info_ena, err_ena)
         self.setWindowTitle(f"{self._base_title} [{self.prefix_edit.text().strip() or self.default_prefix or 'IOC:ECMC'}]")
 
         if self._last_count is None:
