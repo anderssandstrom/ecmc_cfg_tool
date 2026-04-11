@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import ast
 import subprocess
 import sys
 from datetime import datetime
@@ -43,6 +44,41 @@ def _truthy_pv(value):
         return float(s) != 0.0
     except Exception:
         return False
+
+
+def _decode_waveform_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, (bytes, bytearray)):
+        raw = bytes(value)
+        if b"\x00" in raw:
+            raw = raw.split(b"\x00", 1)[0]
+        return raw.decode("utf-8", errors="replace")
+
+    text = str(value).strip()
+    if not text:
+        return ""
+    if not (text.startswith("[") and text.endswith("]")):
+        return text
+    try:
+        parsed = ast.literal_eval(text)
+    except Exception:
+        return text
+    if not isinstance(parsed, (list, tuple)):
+        return text
+    try:
+        vals = []
+        for item in parsed:
+            iv = int(item)
+            if iv == 0:
+                break
+            if 0 <= iv <= 255:
+                vals.append(iv)
+            else:
+                return text
+        return bytes(vals).decode("utf-8", errors="replace")
+    except Exception:
+        return text
 
 
 class RtLogWindow(QtWidgets.QMainWindow):
@@ -345,7 +381,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         try:
             level = self._get_pv_text("MCU-RTLog-Level")
             level_text = self._get_pv_text("MCU-RTLog-LevelTxt")
-            msg = self._get_pv_text("MCU-RTLog-Msg")
+            msg = _decode_waveform_text(self.client.get(self._pv("MCU-RTLog-Msg"), as_string=True))
             count = _parse_int(self._get_pv_text("MCU-RTLog-Cnt"), default=0)
             drop_count = self._get_pv_text("MCU-RTLog-DropCnt")
             ctrl_rb = self._get_pv_text("MCU-RTLog-Ctrl-RB")
