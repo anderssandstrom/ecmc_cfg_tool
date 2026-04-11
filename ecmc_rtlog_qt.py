@@ -33,6 +33,31 @@ LEVEL_COLORS = {
     "ERROR": "#b91c1c",
 }
 
+FILTER_MODE_NONE = 0
+FILTER_MODE_ALL = 1
+FILTER_MODE_SELECTED = 2
+
+SOURCE_TYPE_OPTIONS = [
+    ("Axis Family", 1),
+    ("Axis Base", 2),
+    ("Axis Sequencer", 3),
+    ("Axis Data", 4),
+    ("Axis Monitor", 5),
+    ("Axis Encoder", 6),
+    ("Axis Drive", 7),
+    ("Axis PID", 8),
+    ("Axis Trajectory", 9),
+    ("Axis PVT", 10),
+    ("Motor Family", 11),
+    ("Motor Axis", 12),
+    ("Motor Controller", 13),
+    ("Master/Slave", 14),
+    ("EtherCAT", 15),
+    ("PLC", 16),
+]
+
+SOURCE_TYPE_LABELS = {value: label for label, value in SOURCE_TYPE_OPTIONS}
+
 LOG_LINE_RE = re.compile(
     r"^(?P<path>.+?)/(?P<func>[^/:]+):(?P<line>\d+):\s*"
     r"(?P<level>INFO|ERROR|WARNING):\s*(?P<body>.*)$"
@@ -124,6 +149,9 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self._last_count = None
         self._history_limit = max(10, int(history_limit or 200))
         self._updating_ctrl_widgets = False
+        self._updating_filter_widgets = False
+        self._filter_supported = True
+        self._filter_missing_logged = False
         self._monitor_pvs = []
         self._monitor_mode = False
         self._refresh_pending = False
@@ -262,6 +290,44 @@ class RtLogWindow(QtWidgets.QMainWindow):
         ctrl.setColumnStretch(2, 1)
         layout.addWidget(self.control_group)
 
+        self.filter_group = QtWidgets.QGroupBox("Asyn Filter")
+        flt = QtWidgets.QGridLayout(self.filter_group)
+        flt.setContentsMargins(6, 6, 6, 6)
+        flt.setHorizontalSpacing(4)
+        flt.setVerticalSpacing(4)
+
+        self.filter_mode_combo = QtWidgets.QComboBox()
+        self.filter_mode_combo.addItem("Send None", FILTER_MODE_NONE)
+        self.filter_mode_combo.addItem("Send All", FILTER_MODE_ALL)
+        self.filter_mode_combo.addItem("Selected Objects", FILTER_MODE_SELECTED)
+        self.filter_mode_combo.currentIndexChanged.connect(self._sync_filter_from_widgets)
+
+        self.filter_index_spin = QtWidgets.QSpinBox()
+        self.filter_index_spin.setRange(-1, 9999)
+        self.filter_index_spin.setSpecialValueText("All")
+        self.filter_index_spin.setValue(-1)
+        self.filter_index_spin.valueChanged.connect(self._sync_filter_from_widgets)
+
+        self.filter_type_checks = {}
+        filter_checks_widget = QtWidgets.QWidget()
+        filter_checks_layout = QtWidgets.QGridLayout(filter_checks_widget)
+        filter_checks_layout.setContentsMargins(0, 0, 0, 0)
+        filter_checks_layout.setHorizontalSpacing(8)
+        filter_checks_layout.setVerticalSpacing(2)
+        for idx, (label, type_value) in enumerate(SOURCE_TYPE_OPTIONS):
+            chk = QtWidgets.QCheckBox(label)
+            chk.toggled.connect(self._sync_filter_from_widgets)
+            self.filter_type_checks[type_value] = chk
+            filter_checks_layout.addWidget(chk, idx // 3, idx % 3)
+
+        flt.addWidget(QtWidgets.QLabel("Mode"), 0, 0)
+        flt.addWidget(self.filter_mode_combo, 0, 1)
+        flt.addWidget(QtWidgets.QLabel("Index"), 0, 2)
+        flt.addWidget(self.filter_index_spin, 0, 3)
+        flt.addWidget(filter_checks_widget, 1, 0, 1, 4)
+        flt.setColumnStretch(4, 1)
+        layout.addWidget(self.filter_group)
+
         self.status_group = QtWidgets.QGroupBox("Log Status")
         status = QtWidgets.QGridLayout(self.status_group)
         status.setContentsMargins(6, 6, 6, 6)
@@ -280,6 +346,10 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.drop_count_edit.setReadOnly(True)
         self.ctrl_rb_edit = QtWidgets.QLineEdit()
         self.ctrl_rb_edit.setReadOnly(True)
+        self.source_type_edit = QtWidgets.QLineEdit()
+        self.source_type_edit.setReadOnly(True)
+        self.source_index_edit = QtWidgets.QLineEdit()
+        self.source_index_edit.setReadOnly(True)
         self.last_msg_edit = QtWidgets.QPlainTextEdit()
         self.last_msg_edit.setReadOnly(True)
         self.last_msg_edit.setMaximumHeight(64)
@@ -297,8 +367,12 @@ class RtLogWindow(QtWidgets.QMainWindow):
         status.addWidget(self.drop_count_edit, 2, 1)
         status.addWidget(QtWidgets.QLabel("Control RB"), 2, 2)
         status.addWidget(self.ctrl_rb_edit, 2, 3)
-        status.addWidget(QtWidgets.QLabel("Last Message"), 3, 0)
-        status.addWidget(self.last_msg_edit, 3, 1, 1, 3)
+        status.addWidget(QtWidgets.QLabel("Source Type"), 3, 0)
+        status.addWidget(self.source_type_edit, 3, 1)
+        status.addWidget(QtWidgets.QLabel("Source Index"), 3, 2)
+        status.addWidget(self.source_index_edit, 3, 3)
+        status.addWidget(QtWidgets.QLabel("Last Message"), 4, 0)
+        status.addWidget(self.last_msg_edit, 4, 1, 1, 3)
         layout.addWidget(self.status_group)
 
         history_group = QtWidgets.QGroupBox("Buffered Log Messages")
@@ -349,6 +423,12 @@ class RtLogWindow(QtWidgets.QMainWindow):
         if hasattr(self, "_poll_timer"):
             self._poll_timer.setInterval(max(50, int(value or 250)))
 
+    def _set_filter_controls_enabled(self):
+        selected_mode = self.filter_mode_combo.currentData() == FILTER_MODE_SELECTED
+        self.filter_index_spin.setEnabled(self._filter_supported and selected_mode)
+        for chk in self.filter_type_checks.values():
+            chk.setEnabled(self._filter_supported and selected_mode)
+
     def _schedule_monitor_refresh(self):
         if self._refresh_pending:
             return
@@ -390,6 +470,11 @@ class RtLogWindow(QtWidgets.QMainWindow):
             self._pv("MCU-RTLog-Ctrl-RB"),
             self._pv("MCU-RTLog-InfoEna"),
             self._pv("MCU-RTLog-ErrEna"),
+            self._pv("MCU-RTLog-FilterMode-RB"),
+            self._pv("MCU-RTLog-FilterMask-RB"),
+            self._pv("MCU-RTLog-FilterIndex-RB"),
+            self._pv("MCU-RTLog-SrcType"),
+            self._pv("MCU-RTLog-SrcIndex"),
         ]
         self._monitor_pvs = []
         for name in pv_names:
@@ -468,6 +553,36 @@ class RtLogWindow(QtWidgets.QMainWindow):
         except Exception as ex:
             self._log(f"Failed to write log control word: {ex}")
 
+    def _selected_filter_mask(self):
+        mask = 0
+        for type_value, chk in self.filter_type_checks.items():
+            if chk.isChecked():
+                mask |= (1 << int(type_value))
+        return mask
+
+    def _sync_filter_from_widgets(self, _value=None):
+        if self._updating_filter_widgets:
+            return
+        mode = int(self.filter_mode_combo.currentData() or FILTER_MODE_ALL)
+        mask = self._selected_filter_mask()
+        index_value = int(self.filter_index_spin.value())
+        self._set_filter_controls_enabled()
+        if not self._filter_supported:
+            return
+        try:
+            self.client.put(self._pv("MCU-RTLog-FilterMode"), mode, wait=True)
+            self.client.put(self._pv("MCU-RTLog-FilterMask"), mask, wait=True)
+            self.client.put(self._pv("MCU-RTLog-FilterIndex"), index_value, wait=True)
+            self._log(f"Applied asyn log filter: mode={mode}, mask={mask}, index={index_value}")
+            if self._monitor_mode:
+                self._schedule_monitor_refresh()
+            else:
+                self.refresh_status()
+        except Exception as ex:
+            self._filter_supported = False
+            self.filter_group.setEnabled(False)
+            self._log(f"Asyn log filter PVs unavailable: {ex}")
+
     def _append_history_item(self, text, level_text="INFO", synthetic=False):
         stamp = datetime.now().strftime("%H:%M:%S")
         prefix = f"[{stamp}]"
@@ -493,6 +608,29 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.err_enable_chk.setChecked(_truthy_pv(err_text))
         self._updating_ctrl_widgets = False
 
+    def _refresh_filter_state(self, mode_text, mask_text, index_text):
+        if not self._filter_supported:
+            self.filter_group.setEnabled(False)
+            return
+        self._updating_filter_widgets = True
+        mode_value = _parse_int(mode_text, default=FILTER_MODE_ALL)
+        mask_value = _parse_int(mask_text, default=0)
+        index_value = _parse_int(index_text, default=-1)
+        combo_index = self.filter_mode_combo.findData(mode_value)
+        if combo_index >= 0:
+            self.filter_mode_combo.setCurrentIndex(combo_index)
+        self.filter_index_spin.setValue(index_value)
+        for type_value, chk in self.filter_type_checks.items():
+            chk.setChecked((mask_value & (1 << int(type_value))) != 0)
+        self._updating_filter_widgets = False
+        self._set_filter_controls_enabled()
+
+    def _read_optional_text(self, suffix, default=""):
+        try:
+            return self._get_pv_text(suffix)
+        except Exception:
+            return default
+
     def refresh_status(self):
         try:
             level = self._get_pv_text("MCU-RTLog-Level")
@@ -507,6 +645,12 @@ class RtLogWindow(QtWidgets.QMainWindow):
             self._log(f"Failed to read log PVs: {ex}")
             return
 
+        filter_mode_rb = self._read_optional_text("MCU-RTLog-FilterMode-RB", "1")
+        filter_mask_rb = self._read_optional_text("MCU-RTLog-FilterMask-RB", "0")
+        filter_index_rb = self._read_optional_text("MCU-RTLog-FilterIndex-RB", "-1")
+        source_type_rb = self._read_optional_text("MCU-RTLog-SrcType", "")
+        source_index_rb = self._read_optional_text("MCU-RTLog-SrcIndex", "")
+
         backend_label = str(self.client.backend or "")
         if backend_label:
             mode_text = "monitor" if self._monitor_mode else "poll"
@@ -519,7 +663,11 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.drop_count_edit.setText(drop_count)
         self.last_msg_edit.setPlainText(msg)
         self.ctrl_rb_edit.setText(str(ctrl_rb))
+        source_type_value = _parse_int(source_type_rb, default=-1)
+        self.source_type_edit.setText(SOURCE_TYPE_LABELS.get(source_type_value, str(source_type_rb or "")))
+        self.source_index_edit.setText(str(source_index_rb))
         self._refresh_control_state(ctrl_rb, info_ena, err_ena)
+        self._refresh_filter_state(filter_mode_rb, filter_mask_rb, filter_index_rb)
         self.setWindowTitle(f"{self._base_title} [{self.prefix_edit.text().strip() or self.default_prefix or 'IOC:ECMC'}]")
 
         if self._last_count is None:
