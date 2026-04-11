@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import ast
+import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -25,6 +27,11 @@ LEVEL_COLORS = {
     "INFO": "#1d4ed8",
     "ERROR": "#b91c1c",
 }
+
+LOG_LINE_RE = re.compile(
+    r"^(?P<path>.+?)/(?P<func>[^/:]+):(?P<line>\d+):\s*"
+    r"(?P<level>INFO|ERROR|WARNING):\s*(?P<body>.*)$"
+)
 
 
 def _parse_int(value, default=0):
@@ -60,6 +67,23 @@ def _decode_waveform_text(value):
         return ""
     if not (text.startswith("[") and text.endswith("]")):
         return text
+
+
+def _compact_log_text(text, fallback_level="INFO"):
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    m = LOG_LINE_RE.match(raw)
+    if not m:
+        return raw
+    path = m.group("path").strip()
+    func = m.group("func").strip()
+    line = m.group("line").strip()
+    level = (m.group("level") or fallback_level or "INFO").strip().upper()
+    body = (m.group("body") or "").strip()
+    body = re.sub(r"^(INFO|ERROR|WARNING):\s*", "", body)
+    file_name = os.path.basename(path)
+    return f"{level} {file_name}:{line} {func} | {body}"
     try:
         parsed = ast.literal_eval(text)
     except Exception:
@@ -267,8 +291,12 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.history_list.setAlternatingRowColors(True)
         self.history_list.setSpacing(0)
         self.history_list.setUniformItemSizes(False)
+        self.history_list.setWordWrap(False)
+        self.history_list.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
+        self.history_list.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollPerPixel)
         self.history_list.setStyleSheet(
-            "QListWidget::item { padding-top: 0px; padding-bottom: 0px; margin: 0px; }"
+            "QListWidget { font-size: 11px; } "
+            "QListWidget::item { padding-top: 0px; padding-bottom: 0px; margin: 0px; min-height: 16px; }"
         )
         history_layout.addWidget(self.history_list, stretch=1)
         layout.addWidget(history_group, stretch=1)
@@ -345,7 +373,8 @@ class RtLogWindow(QtWidgets.QMainWindow):
         stamp = datetime.now().strftime("%H:%M:%S")
         prefix = f"[{stamp}]"
         level = str(level_text or "INFO").strip().upper() or "INFO"
-        line = f"{prefix} {level}: {text}" if not synthetic else f"{prefix} {text}"
+        compact_text = _compact_log_text(text, fallback_level=level)
+        line = f"{prefix} {compact_text}" if not synthetic else f"{prefix} {text}"
         item = QtWidgets.QListWidgetItem(line)
         color = "#6b7280" if synthetic else LEVEL_COLORS.get(level, "#1f2937")
         item.setForeground(QtGui.QBrush(QtGui.QColor(color)))
