@@ -177,6 +177,10 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self._filter_supported = True
         self._filter_missing_logged = False
         self._last_filter_rb_state = None
+        self._axis_dbg_supported = True
+        self._axis_dbg_missing_logged = False
+        self._last_axis_dbg_state = None
+        self._updating_axis_dbg_widgets = False
         self._monitor_pvs = []
         self._monitor_mode = False
         self._refresh_pending = False
@@ -195,6 +199,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self._refresh_timer.timeout.connect(self._run_scheduled_refresh)
 
         self.prefix_edit.editingFinished.connect(self._reconnect_live_updates)
+        self.launch_axis_edit.editingFinished.connect(self.refresh_status)
         self._detect_filter_support()
         self._configure_live_updates()
         QtCore.QTimer.singleShot(0, self.refresh_status)
@@ -310,10 +315,13 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.err_enable_chk = QtWidgets.QCheckBox("ERROR Enabled")
         self.info_enable_chk.toggled.connect(self._sync_word_from_checks)
         self.err_enable_chk.toggled.connect(self._sync_word_from_checks)
+        self.axis_dbg_chk = QtWidgets.QCheckBox("Axis Debug Printouts")
+        self.axis_dbg_chk.toggled.connect(self._write_axis_dbg_enabled)
 
         ctrl.addWidget(self.info_enable_chk, 0, 0)
         ctrl.addWidget(self.err_enable_chk, 0, 1)
-        ctrl.setColumnStretch(2, 1)
+        ctrl.addWidget(self.axis_dbg_chk, 0, 2)
+        ctrl.setColumnStretch(3, 1)
         layout.addWidget(self.control_group)
 
         self.filter_group = QtWidgets.QGroupBox("Asyn Filter")
@@ -603,6 +611,9 @@ class RtLogWindow(QtWidgets.QMainWindow):
     def _pv(self, suffix):
         return _join_prefix_pv(self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC", suffix)
 
+    def _axis_dbg_pv(self):
+        return self._pv(f"Axis{self._current_axis_id()}-DbgPrntEna")
+
     def _get_pv_text(self, suffix):
         return str(self.client.get(self._pv(suffix), as_string=True) or "").strip()
 
@@ -629,6 +640,45 @@ class RtLogWindow(QtWidgets.QMainWindow):
                 self.refresh_status()
         except Exception as ex:
             self._log(f"Failed to write log control word: {ex}")
+
+    def _set_axis_dbg_controls_enabled(self):
+        self.axis_dbg_chk.setEnabled(self._axis_dbg_supported)
+
+    def _write_axis_dbg_enabled(self, checked):
+        if self._updating_axis_dbg_widgets:
+            return
+        axis_id = self._current_axis_id()
+        try:
+            self.client.put(self._axis_dbg_pv(), 1 if checked else 0, wait=False)
+            if self._monitor_mode:
+                self._schedule_monitor_refresh()
+            else:
+                self.refresh_status()
+        except Exception as ex:
+            self._axis_dbg_supported = False
+            self._set_axis_dbg_controls_enabled()
+            if not self._axis_dbg_missing_logged:
+                self._log(f"Axis debug PV unavailable for Axis {axis_id}: {ex}")
+                self._axis_dbg_missing_logged = True
+
+    def _refresh_axis_dbg_state(self):
+        axis_id = self._current_axis_id()
+        try:
+            axis_dbg_text = self._get_pv_text(f"Axis{axis_id}-DbgPrntEna")
+            self._axis_dbg_supported = True
+            self._axis_dbg_missing_logged = False
+            enabled = _truthy_pv(axis_dbg_text)
+            self._updating_axis_dbg_widgets = True
+            self.axis_dbg_chk.setChecked(enabled)
+            self._updating_axis_dbg_widgets = False
+            self._set_axis_dbg_controls_enabled()
+            self._last_axis_dbg_state = (axis_id, enabled)
+        except Exception as ex:
+            self._axis_dbg_supported = False
+            self._set_axis_dbg_controls_enabled()
+            if not self._axis_dbg_missing_logged:
+                self._log(f"Axis debug PV unavailable for Axis {axis_id}: {ex}")
+                self._axis_dbg_missing_logged = True
 
     def _selected_filter_mask(self):
         mask = 0
@@ -758,6 +808,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.count_edit.setText(str(count))
         self.drop_count_edit.setText(drop_count)
         self.last_msg_edit.setPlainText(msg)
+        self._refresh_axis_dbg_state()
         self.ctrl_rb_edit.setText(str(ctrl_rb))
         source_type_value = _parse_int(source_type_rb, default=-1)
         self.source_type_edit.setText(SOURCE_TYPE_LABELS.get(source_type_value, str(source_type_rb or "")))
