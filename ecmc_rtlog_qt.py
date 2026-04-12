@@ -32,6 +32,7 @@ LEVEL_COLORS = {
     "INFO": "#1d4ed8",
     "WARNING": "#b45309",
     "ERROR": "#b91c1c",
+    "DEBUG": "#4b5563",
 }
 
 FILTER_MODE_NONE = 0
@@ -61,7 +62,7 @@ SOURCE_TYPE_LABELS = {value: label for label, value in SOURCE_TYPE_OPTIONS}
 
 LOG_LINE_RE = re.compile(
     r"^(?P<path>.+?)/(?P<func>[^/:]+):(?P<line>\d+):\s*"
-    r"(?P<level>INFO|ERROR|WARNING):\s*(?P<body>.*)$"
+    r"(?P<level>INFO|ERROR|WARNING|DEBUG):\s*(?P<body>.*)$"
 )
 
 
@@ -164,7 +165,7 @@ def _compact_log_text(text, fallback_level="INFO"):
     line = m.group("line").strip()
     level = (m.group("level") or fallback_level or "INFO").strip().upper()
     body = (m.group("body") or "").strip()
-    body = re.sub(r"^(INFO|ERROR|WARNING):\s*", "", body)
+    body = re.sub(r"^(INFO|ERROR|WARNING|DEBUG):\s*", "", body)
     file_name = os.path.basename(path)
     return f"{level} {file_name}:{line} {func} | {body}"
 
@@ -334,17 +335,20 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self.info_enable_chk = QtWidgets.QCheckBox("INFO Enabled")
         self.warn_enable_chk = QtWidgets.QCheckBox("WARNING Enabled")
         self.err_enable_chk = QtWidgets.QCheckBox("ERROR Enabled")
+        self.dbg_enable_chk = QtWidgets.QCheckBox("DEBUG Enabled")
         self.info_enable_chk.toggled.connect(self._sync_word_from_checks)
         self.warn_enable_chk.toggled.connect(self._sync_word_from_checks)
         self.err_enable_chk.toggled.connect(self._sync_word_from_checks)
+        self.dbg_enable_chk.toggled.connect(self._sync_word_from_checks)
         self.axis_dbg_chk = QtWidgets.QCheckBox("Axis Debug Printouts")
         self.axis_dbg_chk.toggled.connect(self._write_axis_dbg_enabled)
 
         ctrl.addWidget(self.info_enable_chk, 0, 0)
         ctrl.addWidget(self.warn_enable_chk, 0, 1)
         ctrl.addWidget(self.err_enable_chk, 0, 2)
-        ctrl.addWidget(self.axis_dbg_chk, 0, 3)
-        ctrl.setColumnStretch(4, 1)
+        ctrl.addWidget(self.dbg_enable_chk, 0, 3)
+        ctrl.addWidget(self.axis_dbg_chk, 0, 4)
+        ctrl.setColumnStretch(5, 1)
         layout.addWidget(self.control_group)
 
         self.filter_group = QtWidgets.QGroupBox("Asyn Filter")
@@ -578,6 +582,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
             self._pv("MCU-RTLog-InfoEna"),
             self._pv("MCU-RTLog-WarnEna"),
             self._pv("MCU-RTLog-ErrEna"),
+            self._pv("MCU-RTLog-DbgEna"),
             self._pv("MCU-RTLog-FilterMode-RB"),
             self._pv("MCU-RTLog-FilterMask-RB"),
             self._pv("MCU-RTLog-FilterIndex-RB"),
@@ -730,6 +735,8 @@ class RtLogWindow(QtWidgets.QMainWindow):
             word |= 0x2
         if self.err_enable_chk.isChecked():
             word |= 0x4
+        if self.dbg_enable_chk.isChecked():
+            word |= 0x8
         try:
             self.client.put(self._pv("MCU-RTLog-Ctrl"), word, wait=True)
             self._log(f"Applied log control word {word}")
@@ -837,13 +844,14 @@ class RtLogWindow(QtWidgets.QMainWindow):
         while self.history_list.count() > self._history_limit:
             self.history_list.takeItem(self.history_list.count() - 1)
 
-    def _refresh_control_state(self, ctrl_rb_text, info_text, warn_text, err_text):
+    def _refresh_control_state(self, ctrl_rb_text, info_text, warn_text, err_text, dbg_text):
         self._updating_ctrl_widgets = True
         ctrl_rb = _parse_int(ctrl_rb_text, default=0)
         self.ctrl_rb_edit.setText(str(ctrl_rb_text))
         self.info_enable_chk.setChecked(_truthy_pv(info_text))
         self.warn_enable_chk.setChecked(_truthy_pv(warn_text))
         self.err_enable_chk.setChecked(_truthy_pv(err_text))
+        self.dbg_enable_chk.setChecked(_truthy_pv(dbg_text))
         self._updating_ctrl_widgets = False
 
     def _refresh_filter_state(self, mode_text, mask_text, index_text):
@@ -890,6 +898,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
             info_ena = self._get_pv_text("MCU-RTLog-InfoEna")
             warn_ena = self._get_pv_text("MCU-RTLog-WarnEna")
             err_ena = self._get_pv_text("MCU-RTLog-ErrEna")
+            dbg_ena = self._get_pv_text("MCU-RTLog-DbgEna")
         except Exception as ex:
             self._log(f"Failed to read log PVs: {ex}")
             return
@@ -915,7 +924,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         source_type_value = _parse_int(source_type_rb, default=-1)
         self.source_type_edit.setText(SOURCE_TYPE_LABELS.get(source_type_value, str(source_type_rb or "")))
         self.source_index_edit.setText(str(source_index_rb))
-        self._refresh_control_state(ctrl_rb, info_ena, warn_ena, err_ena)
+        self._refresh_control_state(ctrl_rb, info_ena, warn_ena, err_ena, dbg_ena)
         self._refresh_filter_state(filter_mode_rb, filter_mask_rb, filter_index_rb)
         self.setWindowTitle(f"{self._base_title} [{self.prefix_edit.text().strip() or self.default_prefix or 'IOC:ECMC'}]")
 
