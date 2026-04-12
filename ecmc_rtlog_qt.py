@@ -30,6 +30,7 @@ APP_LAUNCH_CAQTDM_MAIN = "caqtdm Main"
 
 LEVEL_COLORS = {
     "INFO": "#1d4ed8",
+    "WARNING": "#b45309",
     "ERROR": "#b91c1c",
 }
 
@@ -130,6 +131,15 @@ def _filter_mode_label(mode_value):
     return "Send All"
 
 
+def _normalize_axis_object_id(value):
+    s = str(value or "").strip().strip('"')
+    if not s:
+        return ""
+    if re.fullmatch(r"[+-]?\d+\.0+", s):
+        return s.split(".", 1)[0].lstrip("+")
+    return s.lstrip("+")
+
+
 def _mask_labels(mask_value):
     labels = []
     try:
@@ -174,6 +184,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self._history_limit = max(10, int(history_limit or 200))
         self._updating_ctrl_widgets = False
         self._updating_filter_widgets = False
+        self._axis_combo_updating = False
         self._filter_supported = True
         self._filter_missing_logged = False
         self._last_filter_rb_state = None
@@ -199,9 +210,9 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self._refresh_timer.timeout.connect(self._run_scheduled_refresh)
 
         self.prefix_edit.editingFinished.connect(self._reconnect_live_updates)
-        self.launch_axis_edit.editingFinished.connect(self.refresh_status)
         self._detect_filter_support()
         self._configure_live_updates()
+        QtCore.QTimer.singleShot(0, self._refresh_axis_pick_combo)
         QtCore.QTimer.singleShot(0, self.refresh_status)
 
     def _build_ui(self, timeout, poll_ms, launch_axis_id):
@@ -264,8 +275,15 @@ class RtLogWindow(QtWidgets.QMainWindow):
 
         self.prefix_edit = QtWidgets.QLineEdit(self.default_prefix or "IOC:ECMC")
         self.launch_axis_edit = QtWidgets.QLineEdit(str(launch_axis_id or "1").strip() or "1")
-        self.launch_axis_edit.setMaximumWidth(80)
-        self.launch_axis_edit.editingFinished.connect(self._refresh_axis_dbg_state)
+        self.launch_axis_edit.setVisible(False)
+        self.axis_pick_combo = QtWidgets.QComboBox()
+        self.axis_pick_combo.setMinimumWidth(170)
+        self.axis_pick_combo.setMaximumWidth(260)
+        self.axis_pick_combo.activated.connect(self._on_axis_combo_activated)
+        self.axis_refresh_btn = QtWidgets.QPushButton("Refresh Axis")
+        self.axis_refresh_btn.setAutoDefault(False)
+        self.axis_refresh_btn.setDefault(False)
+        self.axis_refresh_btn.clicked.connect(self._refresh_axis_pick_combo)
         self.timeout_edit = CompactDoubleSpinBox()
         self.timeout_edit.setRange(0.1, 60.0)
         self.timeout_edit.setDecimals(1)
@@ -293,7 +311,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         cfg.addWidget(QtWidgets.QLabel("IOC Prefix"), 0, 0)
         cfg.addWidget(self.prefix_edit, 0, 1)
         cfg.addWidget(QtWidgets.QLabel("Launch Axis"), 0, 2)
-        cfg.addWidget(self.launch_axis_edit, 0, 3)
+        cfg.addWidget(self.axis_pick_combo, 0, 3)
         cfg.addWidget(QtWidgets.QLabel("Timeout [s]"), 0, 4)
         cfg.addWidget(self.timeout_edit, 0, 5)
 
@@ -301,8 +319,9 @@ class RtLogWindow(QtWidgets.QMainWindow):
         cfg.addWidget(self.poll_spin, 1, 1)
         cfg.addWidget(QtWidgets.QLabel("History Limit"), 1, 2)
         cfg.addWidget(self.history_spin, 1, 3)
-        cfg.addWidget(refresh_btn, 1, 4)
-        cfg.addWidget(clear_history_btn, 1, 5)
+        cfg.addWidget(self.axis_refresh_btn, 1, 4)
+        cfg.addWidget(refresh_btn, 1, 5)
+        cfg.addWidget(clear_history_btn, 1, 6)
         self.cfg_group.setVisible(False)
         layout.addWidget(self.cfg_group)
 
@@ -313,16 +332,19 @@ class RtLogWindow(QtWidgets.QMainWindow):
         ctrl.setVerticalSpacing(4)
 
         self.info_enable_chk = QtWidgets.QCheckBox("INFO Enabled")
+        self.warn_enable_chk = QtWidgets.QCheckBox("WARNING Enabled")
         self.err_enable_chk = QtWidgets.QCheckBox("ERROR Enabled")
         self.info_enable_chk.toggled.connect(self._sync_word_from_checks)
+        self.warn_enable_chk.toggled.connect(self._sync_word_from_checks)
         self.err_enable_chk.toggled.connect(self._sync_word_from_checks)
         self.axis_dbg_chk = QtWidgets.QCheckBox("Axis Debug Printouts")
         self.axis_dbg_chk.toggled.connect(self._write_axis_dbg_enabled)
 
         ctrl.addWidget(self.info_enable_chk, 0, 0)
-        ctrl.addWidget(self.err_enable_chk, 0, 1)
-        ctrl.addWidget(self.axis_dbg_chk, 0, 2)
-        ctrl.setColumnStretch(3, 1)
+        ctrl.addWidget(self.warn_enable_chk, 0, 1)
+        ctrl.addWidget(self.err_enable_chk, 0, 2)
+        ctrl.addWidget(self.axis_dbg_chk, 0, 3)
+        ctrl.setColumnStretch(4, 1)
         layout.addWidget(self.control_group)
 
         self.filter_group = QtWidgets.QGroupBox("Asyn Filter")
@@ -554,6 +576,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
             self._pv("MCU-RTLog-DropCnt"),
             self._pv("MCU-RTLog-Ctrl-RB"),
             self._pv("MCU-RTLog-InfoEna"),
+            self._pv("MCU-RTLog-WarnEna"),
             self._pv("MCU-RTLog-ErrEna"),
             self._pv("MCU-RTLog-FilterMode-RB"),
             self._pv("MCU-RTLog-FilterMask-RB"),
@@ -594,6 +617,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self._last_count = None
         self._detect_filter_support()
         self._configure_live_updates()
+        self._refresh_axis_pick_combo()
         self.refresh_status()
 
     def _set_history_limit(self, value):
@@ -609,11 +633,83 @@ class RtLogWindow(QtWidgets.QMainWindow):
         t = datetime.now().strftime("%H:%M:%S")
         self.app_log.appendPlainText(f"[{t}] {msg}")
 
+    def _get_pv_best_effort(self, pv_name, as_string=False):
+        try:
+            return self.client.get(pv_name, as_string=as_string)
+        except Exception:
+            return ""
+
     def _pv(self, suffix):
         return _join_prefix_pv(self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC", suffix)
 
     def _axis_dbg_pv(self):
         return self._pv(f"Axis{self._current_axis_id()}-DbgPrntEna")
+
+    def _sync_axis_combo_to_axis_id(self, axis_id):
+        if not hasattr(self, "axis_pick_combo"):
+            return
+        want = str(axis_id or "").strip()
+        if not want:
+            return
+        idx = self.axis_pick_combo.findData(want, role=QtCore.Qt.UserRole)
+        if idx >= 0:
+            self._axis_combo_updating = True
+            self.axis_pick_combo.setCurrentIndex(idx)
+            self._axis_combo_updating = False
+
+    def _discover_axes_from_ioc(self):
+        prefix = self.prefix_edit.text().strip() or self.default_prefix
+        if not prefix:
+            return []
+        cur = _normalize_axis_object_id(
+            self._get_pv_best_effort(_join_prefix_pv(prefix, "MCU-Cfg-AX-FrstObjId"), as_string=True) or ""
+        )
+        out = []
+        seen = set()
+        while cur and cur != "-1":
+            axis_id = str(cur).strip()
+            if not axis_id or axis_id in seen:
+                break
+            if not re.fullmatch(r"\d+", axis_id):
+                break
+            seen.add(axis_id)
+            motor_name = str(
+                self._get_pv_best_effort(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-Nam"), as_string=True) or ""
+            ).strip().strip('"')
+            out.append({"axis_id": axis_id, "motor_name": motor_name})
+            cur = _normalize_axis_object_id(
+                self._get_pv_best_effort(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-NxtObjId"), as_string=True) or ""
+            )
+        return out
+
+    def _refresh_axis_pick_combo(self):
+        if not hasattr(self, "axis_pick_combo"):
+            return
+        current_axis = self._current_axis_id()
+        self._axis_combo_updating = True
+        self.axis_pick_combo.clear()
+        axes = self._discover_axes_from_ioc()
+        if axes:
+            for ax in axes:
+                axis_id = str(ax.get("axis_id", "") or "").strip()
+                motor_name = str(ax.get("motor_name", "") or "").strip()
+                label = f"Axis {axis_id}"
+                if motor_name:
+                    label += f" | {motor_name}"
+                self.axis_pick_combo.addItem(label, axis_id)
+        elif current_axis:
+            self.axis_pick_combo.addItem(f"Axis {current_axis}", current_axis)
+        self._axis_combo_updating = False
+        self._sync_axis_combo_to_axis_id(current_axis)
+
+    def _on_axis_combo_activated(self, _index):
+        if self._axis_combo_updating:
+            return
+        axis_id = str(self.axis_pick_combo.currentData(QtCore.Qt.UserRole) or "").strip()
+        if not axis_id:
+            return
+        self.launch_axis_edit.setText(axis_id)
+        self._refresh_axis_dbg_state()
 
     def _get_pv_text(self, suffix):
         return str(self.client.get(self._pv(suffix), as_string=True) or "").strip()
@@ -630,8 +726,10 @@ class RtLogWindow(QtWidgets.QMainWindow):
         word = 0
         if self.info_enable_chk.isChecked():
             word |= 0x1
-        if self.err_enable_chk.isChecked():
+        if self.warn_enable_chk.isChecked():
             word |= 0x2
+        if self.err_enable_chk.isChecked():
+            word |= 0x4
         try:
             self.client.put(self._pv("MCU-RTLog-Ctrl"), word, wait=True)
             self._log(f"Applied log control word {word}")
@@ -739,11 +837,12 @@ class RtLogWindow(QtWidgets.QMainWindow):
         while self.history_list.count() > self._history_limit:
             self.history_list.takeItem(self.history_list.count() - 1)
 
-    def _refresh_control_state(self, ctrl_rb_text, info_text, err_text):
+    def _refresh_control_state(self, ctrl_rb_text, info_text, warn_text, err_text):
         self._updating_ctrl_widgets = True
         ctrl_rb = _parse_int(ctrl_rb_text, default=0)
         self.ctrl_rb_edit.setText(str(ctrl_rb_text))
         self.info_enable_chk.setChecked(_truthy_pv(info_text))
+        self.warn_enable_chk.setChecked(_truthy_pv(warn_text))
         self.err_enable_chk.setChecked(_truthy_pv(err_text))
         self._updating_ctrl_widgets = False
 
@@ -789,6 +888,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
             drop_count = self._get_pv_text("MCU-RTLog-DropCnt")
             ctrl_rb = self._get_pv_text("MCU-RTLog-Ctrl-RB")
             info_ena = self._get_pv_text("MCU-RTLog-InfoEna")
+            warn_ena = self._get_pv_text("MCU-RTLog-WarnEna")
             err_ena = self._get_pv_text("MCU-RTLog-ErrEna")
         except Exception as ex:
             self._log(f"Failed to read log PVs: {ex}")
@@ -815,7 +915,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         source_type_value = _parse_int(source_type_rb, default=-1)
         self.source_type_edit.setText(SOURCE_TYPE_LABELS.get(source_type_value, str(source_type_rb or "")))
         self.source_index_edit.setText(str(source_index_rb))
-        self._refresh_control_state(ctrl_rb, info_ena, err_ena)
+        self._refresh_control_state(ctrl_rb, info_ena, warn_ena, err_ena)
         self._refresh_filter_state(filter_mode_rb, filter_mask_rb, filter_index_rb)
         self.setWindowTitle(f"{self._base_title} [{self.prefix_edit.text().strip() or self.default_prefix or 'IOC:ECMC'}]")
 
@@ -867,7 +967,14 @@ class RtLogWindow(QtWidgets.QMainWindow):
         return self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
 
     def _current_axis_id(self):
-        return self.launch_axis_edit.text().strip() or "1"
+        axis_id = self.launch_axis_edit.text().strip()
+        if axis_id:
+            return axis_id
+        if hasattr(self, "axis_pick_combo"):
+            axis_id = str(self.axis_pick_combo.currentData(QtCore.Qt.UserRole) or "").strip()
+            if axis_id:
+                return axis_id
+        return "1"
 
     def _open_script(self, script_name, label, args=None):
         script = Path(__file__).with_name(script_name)
