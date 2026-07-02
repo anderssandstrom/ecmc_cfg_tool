@@ -75,34 +75,23 @@ class EpicsClient:
         msg = str(ex).lower()
         return ('cannot find epics ca dll' in msg) or ('cannot load ca dll' in msg)
 
-    def _fallback_to_cli_if_possible(self, ex):
-        if self.backend in {'pyepics', 'epicsPV'} and self._cli_available and self._is_missing_ca_dll_error(ex):
+    def _fallback_if_backend_unavailable(self, ex):
+        """Change backend only when the Channel Access library cannot load."""
+        if self.backend not in {'pyepics', 'epicsPV'} or not self._is_missing_ca_dll_error(ex):
+            return False
+
+        if self.backend == 'epicsPV':
+            self._epicspv_mod = None
+            self._epicspv_cache = {}
+            if self._epics is not None:
+                self.backend = 'pyepics'
+                return True
+
+        if self._cli_available:
             self.backend = 'cli'
             self._epics = None
             self._epicspv_mod = None
             self._epicspv_cache = {}
-            return True
-        return False
-
-    def _fallback_from_epicspv_if_possible(self):
-        if self.backend != 'epicsPV':
-            return False
-        self._epicspv_mod = None
-        self._epicspv_cache = {}
-        if self._epics is not None:
-            self.backend = 'pyepics'
-            return True
-        if self._cli_available:
-            self.backend = 'cli'
-            return True
-        return False
-
-    def _fallback_from_pyepics_if_possible(self):
-        if self.backend != 'pyepics':
-            return False
-        self._epics = None
-        if self._cli_available:
-            self.backend = 'cli'
             return True
         return False
 
@@ -173,10 +162,9 @@ class EpicsClient:
                     obj.putw(value)
                 return
             except Exception as ex:
-                if not self._fallback_from_epicspv_if_possible():
-                    if not self._fallback_to_cli_if_possible(ex):
-                        raise
-                return self.put(pv, value, wait=wait)
+                if self._fallback_if_backend_unavailable(ex):
+                    return self.put(pv, value, wait=wait)
+                raise
 
         if self.backend == 'pyepics':
             try:
@@ -185,10 +173,9 @@ class EpicsClient:
                     raise RuntimeError(f'caput failed for {pv}')
                 return
             except Exception as ex:
-                if not self._fallback_from_pyepics_if_possible():
-                    if not self._fallback_to_cli_if_possible(ex):
-                        raise
-                return self.put(pv, value, wait=wait)
+                if self._fallback_if_backend_unavailable(ex):
+                    return self.put(pv, value, wait=wait)
+                raise
 
         cmd = [str(self._caput_bin or 'caput'), '-t']
         # In CLI mode, allow non-blocking puts for bulk operations.
@@ -215,10 +202,9 @@ class EpicsClient:
                     raise RuntimeError(f'caget failed for {pv}')
                 return str(val)
             except Exception as ex:
-                if not self._fallback_from_epicspv_if_possible():
-                    if not self._fallback_to_cli_if_possible(ex):
-                        raise
-                return self.get(pv, as_string=as_string)
+                if self._fallback_if_backend_unavailable(ex):
+                    return self.get(pv, as_string=as_string)
+                raise
 
         if self.backend == 'pyepics':
             try:
@@ -227,10 +213,9 @@ class EpicsClient:
                     raise RuntimeError(f'caget failed for {pv}')
                 return str(val)
             except Exception as ex:
-                if not self._fallback_from_pyepics_if_possible():
-                    if not self._fallback_to_cli_if_possible(ex):
-                        raise
-                return self.get(pv, as_string=as_string)
+                if self._fallback_if_backend_unavailable(ex):
+                    return self.get(pv, as_string=as_string)
+                raise
 
         # Prefer a clean value-only output to avoid PV/alarm text mixing
         # into application-level parsing (e.g. axis object-id discovery).

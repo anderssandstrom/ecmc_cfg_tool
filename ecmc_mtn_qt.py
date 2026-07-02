@@ -216,6 +216,8 @@ class MiniTrendWidget(QtWidgets.QWidget):
 
 class _MotionPvMixin:
     def _cli_caget_value(self, pv):
+        if getattr(self.client, "backend", None) != "cli":
+            return ""
         try:
             proc = subprocess.run(
                 ["caget", "-t", "-w", str(float(getattr(self.client, "timeout", 2.0))), pv],

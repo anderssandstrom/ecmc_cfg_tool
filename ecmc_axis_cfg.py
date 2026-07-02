@@ -1722,6 +1722,8 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         return m.group(1) if m else ""
 
     def _cli_caget_value(self, pv):
+        if getattr(self.client, "backend", None) != "cli":
+            return ""
         try:
             proc = subprocess.run(
                 ["caget", "-t", "-w", str(float(getattr(self.client, "timeout", 2.0))), pv],
