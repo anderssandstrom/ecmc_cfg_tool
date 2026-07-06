@@ -93,6 +93,8 @@ monitoring.stall.time.actual.stallAtTime,GetAxisMonStallAtTime(<axisIndex>),
 monitoring.target.enable,GetAxisMonEnableAtTargetMon(<axisIndex>),"Cfg.SetAxisMonEnableAtTargetMon(<axisIndex>,<value>)"
 monitoring.target.time,GetAxisMonAtTargetTime(<axisIndex>),"Cfg.SetAxisMonAtTargetTime(<axisIndex>,<value>)"
 monitoring.target.tolerance,GetAxisMonAtTargetTol(<axisIndex>),"Cfg.SetAxisMonAtTargetTol(<axisIndex>,<value>)"
+monitoring.target.slaveControlDeadband.tolerance,GetAxisMonSlvCtrlDbTol(<axisIndex>),"Cfg.SetAxisMonSlvCtrlDbTol(<axisIndex>,<value>)"
+monitoring.target.slaveControlDeadband.time,GetAxisMonSlvCtrlDbTime(<axisIndex>),"Cfg.SetAxisMonSlvCtrlDbTime(<axisIndex>,<value>)"
 monitoring.velocity.enable,GetAxisMonEnableMaxVel(<axisIndex>),"Cfg.SetAxisMonEnableMaxVel(<axisIndex>,<value>)"
 monitoring.velocity.max,GetAxisMonMaxVel(<axisIndex>),"Cfg.SetAxisMonMaxVel(<axisIndex>,<value>)"
 monitoring.velocity.time.drive,GetAxisMonMaxVelDriveILDelay(<axisIndex>),"Cfg.SetAxisMonMaxVelDriveILDelay(<axisIndex>,<value>)"

@@ -218,6 +218,9 @@ monitoring:
     enable: true                                      # Enable at target monitoring (needs to be enabled if using motor record)
     tolerance: 0.5                                    # Allowed tolerance
     time: 10                                          # Filter time inside tolerance to be at target
+    slaveControlDeadband:
+      tolerance: 0.5                                  # Defaults to target tolerance; normally configure this tighter
+      time: 10                                        # Defaults to target time
   velocity:
     enable: false                                     # Enable velocity monitoring
     max: 100                                          # Allowed max velocity
