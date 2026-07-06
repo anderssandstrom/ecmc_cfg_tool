@@ -4,7 +4,7 @@ axis.autoEnable.disableTimeout,GetAxisAutoDisableAfterTime(<axisIndex>),"Cfg.Set
 axis.autoEnable.enableTimeout,GetAxisAutoEnableTimeout(<axisIndex>),"Cfg.SetAxisAutoEnableTimeout(<axisIndex>,<timeS>)"
 axis.autoEnable.autoEnableEnable,"GetAxisEnableAutoEnable(<axisIndex>)","Cfg.SetAxisEnableAutoEnable(<axisIndex>,<enable>)"
 axis.autoEnable.autoDisableEnable,GetAxisEnableAutoDisable(<axisIndex>),"Cfg.SetAxisEnableAutoDisable(<axisIndex>,<enable>)"
-axis.autoEnable.autoDisableLatchAtTarget,"GetAxisAutoDisableLatchAtTarget(<axisIndex>)","Cfg.SetAxisAutoDisableLatchAtTarget(<axisIndex>,<enable>)"
+axis.autoEnable.autoDisableLatchAtTarget,"GetAxisAutoDisableAtTgtLtch(<axisIndex>)","Cfg.SetAxisAutoDisableAtTgtLtch(<axisIndex>,<enable>)"
 axis.features.allowSrcChangeWhenEnabled,GetAxisSrcChgEn(<axisIndex>),"Cfg.SetAxisSrcChgEn(<axisIndex>,<allow>)"
 axis.features.allowedFunctions.constantVelocity,GetAxisEnableConstVel(<axisIndex>),"Cfg.SetAxisEnableConstVel(<axisIndex>,<value>)"
 axis.features.allowedFunctions.homing,GetAxisEnableHome(<axisIndex>),"Cfg.SetAxisEnableHome(<axisIndex>,<value>)"
