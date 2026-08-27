@@ -140,6 +140,8 @@ controller:
   Ki: 0.02                                             # Ki integral gain
   Kd: 0                                                # Kd derivative gain
   Kff: 1                                               # Feed forward gain
+  resetIAtRmp: false                                   # Reset PID integral part while internal trajectory is busy
+  freezeIAtRmp: false                                  # Freeze PID integral part while internal trajectory is busy
   deadband:
     tol: 0.01                                          # Stop control if within this distance from target for the below time
     time: 100

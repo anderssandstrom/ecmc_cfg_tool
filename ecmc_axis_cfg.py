@@ -291,6 +291,8 @@ EXPLICIT_PATH_TO_BASE = {
     "controller.Ki": "AxisCntrlKi",
     "controller.Kd": "AxisCntrlKd",
     "controller.Kff": "AxisCntrlKff",
+    "controller.resetIAtRmp": "AxisCntrlResetIAtRmp",
+    "controller.freezeIAtRmp": "AxisCntrlFreezeIAtRmp",
     "controller.deadband.tol": "AxisCntrlDeadband",
     "controller.deadband.time": "AxisCntrlDeadbandTime",
     "controller.limits.minOutput": "AxisCntrlOutLL",
