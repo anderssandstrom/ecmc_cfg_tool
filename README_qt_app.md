@@ -12,6 +12,7 @@ This folder now contains:
 - `ecmc_mtn_qt.py` / `start_mtn.sh` (motor-record motion app)
 - `ecmc_iso230_qt.py` / `start_iso230.sh` / `start_iso230_standalone.sh` (ISO 230-style bidirectional test app)
 - `ecmc_daq_qt.py` / `start_daq.sh` (timestamp-derived DAQ viewer for numeric PVs with FFT analysis)
+- `ecmc_sdo_qt.py` / `start_sdo.sh` (remote EtherCAT SDO browser over SSH)
 
 ## Applications
 
@@ -188,6 +189,31 @@ Example:
 ```bash
 ./start_daq.sh IOC:ECMC AXIS7-PosAct AXIS7-Enc01-PosAct
 ```
+
+### Remote EtherCAT SDO browser
+
+The SDO browser reads a slave's object dictionary over SSH and presents its
+indexes and subindexes as a searchable tree. Readable entries can be uploaded;
+writable entries can be downloaded after confirmation.
+
+Select an index and use `Read Selected` to read all readable subindexes. Select
+an individual subindex to operate on only that entry. `Write Selected` writes
+the filled values below the selected index or subindex after confirmation.
+`Report / ecmc Snippet` previews, copies, or saves a Markdown report for all
+session-known values or the current selection, including generated
+`ecmcConfigOrDie "Cfg.EcAddSdo(...)"` commands where the value is representable.
+
+```bash
+./start_sdo.sh <ssh-host> <master-id> <slave-position>
+./start_sdo.sh c6025a 0 3
+./start_sdo.sh --demo
+```
+
+The host may also be supplied through `ETHERCAT_HOST`. Master and slave default
+to `0` and can be changed in the window before refreshing. OpenSSH connection
+multiplexing keeps the authenticated SSH session alive for 10 minutes after the
+last command, so repeated reads and writes do not prompt for the password again.
+Demo mode loads a bundled object dictionary and does not make an SSH connection.
 
 ## Axis selection behavior (axis / controller / motion / ISO230 apps)
 
