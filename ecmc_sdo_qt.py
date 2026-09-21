@@ -174,6 +174,10 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         self.show_zero_bit.setToolTip("Show SDO entries with 0 bit length")
         self.show_zero_bit.toggled.connect(self._apply_filter)
         filter_row.addWidget(self.show_zero_bit)
+        self.show_subindex = QtWidgets.QCheckBox("Show SubIndex")
+        self.show_subindex.setToolTip('Show SDO entries whose name contains "SubIndex"')
+        self.show_subindex.toggled.connect(self._apply_filter)
+        filter_row.addWidget(self.show_subindex)
         layout.addLayout(filter_row)
 
         self.tree = QtWidgets.QTreeWidget()
@@ -421,7 +425,11 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             return
         readable_count = sum(
             1 for i in range(item.childCount())
-            if (self._entry(item.child(i)) is not None and self._entry(item.child(i)).readable)
+            if (
+                not item.child(i).isHidden()
+                and self._entry(item.child(i)) is not None
+                and self._entry(item.child(i)).readable
+            )
         )
         menu = QtWidgets.QMenu(self)
         read_action = menu.addAction(f"Read All Under Index ({readable_count})")
@@ -442,7 +450,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         for selected in self.tree.selectedItems():
             items = [selected]
             if self._entry(selected) is None:
-                items = [selected.child(i) for i in range(selected.childCount())]
+                items = [selected.child(i) for i in range(selected.childCount()) if not selected.child(i).isHidden()]
             for item in items:
                 entry = self._entry(item)
                 if entry is not None and id(item) not in seen:
@@ -593,6 +601,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
     def _apply_filter(self, _text=None):
         needle = self.search.text().strip().lower()
         show_zero_bit = self.show_zero_bit.isChecked()
+        show_subindex = self.show_subindex.isChecked()
         for i in range(self.tree.topLevelItemCount()):
             parent = self.tree.topLevelItem(i)
             parent_match = needle in " ".join(parent.text(c).lower() for c in range(5))
@@ -601,8 +610,9 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
                 child = parent.child(j)
                 entry = self._entry(child)
                 zero_bit_hidden = entry is not None and not entry.has_data and not show_zero_bit
+                subindex_hidden = entry is not None and "subindex" in entry.name.lower() and not show_subindex
                 matches = parent_match or not needle or needle in " ".join(child.text(c).lower() for c in range(5))
-                matches = matches and not zero_bit_hidden
+                matches = matches and not zero_bit_hidden and not subindex_hidden
                 child.setHidden(not matches)
                 visible_children += int(matches)
             parent.setHidden(bool(needle) and not parent_match and visible_children == 0)
