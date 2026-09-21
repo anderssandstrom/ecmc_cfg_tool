@@ -33,6 +33,30 @@ def read_pv_group(client, prefix: str, rows: list[tuple[str, str]]) -> list[dict
     return values
 
 
+def update_object_counts(snapshot: dict) -> None:
+    count_labels = {
+        "hardware": "Hardware objects",
+        "axes": "Motion axes",
+        "axis_groups": "Axis groups",
+        "state_machines": "State machines",
+        "plcs": "PLCs",
+        "plugins": "Plugins",
+        "data_storages": "Data storages",
+        "cpp_logic": "CppLogic",
+        "safety_plugins": "SafetyPlugin",
+    }
+    for group in snapshot.get("ecmc", []):
+        if group.get("name") != "Object Counts":
+            continue
+        items = group.setdefault("items", [])
+        existing = {item.get("label") for item in items}
+        for key, label in count_labels.items():
+            if label in existing:
+                continue
+            items.append({"label": label, "pv": "", "value": str(len(snapshot.get(key, [])))})
+        return
+
+
 def linked_ids(client, first_pv: str, next_pv, limit=1000) -> list[str]:
     current = object_id(text_value(client, first_pv))
     result = []
@@ -47,8 +71,9 @@ def linked_ids(client, first_pv: str, next_pv, limit=1000) -> list[str]:
 def discover_ioc(client, prefix: str, ssh_host_pv: str = "") -> dict:
     prefix = str(prefix).strip().rstrip(":")
     snapshot = {
-        "prefix": prefix, "master": "0", "ec_rows": "1", "ssh_host": "", "ecmc": [], "axes": [], "hardware": [], "plcs": [],
-        "plugins": [], "data_storages": [], "cpp_logic": [], "safety_plugins": []
+        "prefix": prefix, "master": "0", "ec_rows": "1", "ssh_host": "", "ecmc": [], "axes": [],
+        "axis_groups": [], "state_machines": [], "hardware": [], "plcs": [], "plugins": [],
+        "data_storages": [], "cpp_logic": [], "safety_plugins": []
     }
     if ssh_host_pv:
         pv = ssh_host_pv if ":" in ssh_host_pv else join_pv(prefix, ssh_host_pv)
@@ -134,6 +159,23 @@ def discover_ioc(client, prefix: str, ssh_host_pv: str = "") -> dict:
             {"id": item_id, "name": name or f"Axis {item_id}", "motor": motor, "axis_type": axis_type}
         )
 
+    group_count = object_id(text_value(client, join_pv(prefix, "MCU-Cfg-AXGRP-Cnt")))
+    for item_id in range(int(group_count or "0")):
+        name = text_value(client, join_pv(prefix, f"MCU-Cfg-AXGRP{item_id}-Nam"))
+        axes = text_value(client, join_pv(prefix, f"MCU-Cfg-AXGRP{item_id}-Axes"))
+        snapshot["axis_groups"].append(
+            {"id": str(item_id), "name": name or f"Axis Group {item_id}", "axes": axes}
+        )
+
+    sm_ids = linked_ids(
+        client,
+        join_pv(prefix, "MCU-Cfg-SM-FrstObjId"),
+        lambda item_id: join_pv(prefix, f"MCU-Cfg-SM{item_id}-NxtObjId"),
+    )
+    snapshot["state_machines"] = [
+        {"id": item_id, "name": f"State Machine {item_id}"} for item_id in sm_ids
+    ]
+
     hardware_ids = linked_ids(
         client,
         join_pv(prefix, "MCU-Cfg-EC-FrstObjId"),
@@ -186,11 +228,12 @@ def discover_ioc(client, prefix: str, ssh_host_pv: str = "") -> dict:
         snapshot["safety_plugins"].append(
             {"id": "0", "name": "SafetyPlugin", "loaded": safety_loaded, "group_count": group_count}
         )
+    update_object_counts(snapshot)
     return snapshot
 
 
 def demo_ioc(prefix="DEMO:ECMC") -> dict:
-    return {
+    snapshot = {
         "prefix": prefix,
         "master": "0",
         "ec_rows": "8",
@@ -243,9 +286,13 @@ def demo_ioc(prefix="DEMO:ECMC") -> dict:
             {"id": "1", "name": "Axis1", "motor": "DEMO:Axis1", "axis_type": "REAL"},
             {"id": "2", "name": "VirtualAxis", "motor": "DEMO:VirtualAxis", "axis_type": "VIRTUAL"},
         ],
+        "axis_groups": [{"id": "0", "name": "Demo group", "axes": "1,2"}],
+        "state_machines": [{"id": "0", "name": "State Machine 0"}],
         "plcs": [{"id": "0", "name": "Main PLC"}],
         "plugins": [{"id": "0", "name": "Plugin 0"}],
         "data_storages": [{"id": "0", "name": "Position capture"}],
         "cpp_logic": [{"id": "0", "name": "CppLogic 0", "rate_ms": "1.0"}],
         "safety_plugins": [{"id": "0", "name": "SafetyPlugin", "loaded": "1", "group_count": "2"}],
     }
+    update_object_counts(snapshot)
+    return snapshot

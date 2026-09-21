@@ -23,6 +23,8 @@ The IOC navigator follows the configuration PV linked lists and presents
 Hardware, Motion, PLCs, Plugins, Data Storage, CppLogic, and SafetyPlugin in one
 filterable tree. Double-click opens the default tool; right-click exposes all
 actions valid for that object.
+When present, Axis Groups and Master/Slave State Machines are shown as their own
+branches with overview and panel launch actions.
 Context menus list Python apps first, then caQtDM panels after a separator, and
 use user-facing panel names instead of raw `.ui` filenames.
 
@@ -48,6 +50,9 @@ those Python tools as separate windows instead. caQtDM panels still open as
 external windows.
 If a live EPICS connection is unavailable, embedded tool launch errors are shown
 in the workspace rather than opening an unexpected separate window.
+Thread timing under `ecmc / IOC` is grouped into Period, Send, Execute, and
+Latency PVs. Right-click the Thread heading to print all thread PVs, a subgroup
+to graph its min/max pair, or one PV to graph only that signal.
 Demo mode populates every navigator branch without reading any PVs.
 When the remote SDO browser is opened from a hardware row, the navigator asks
 for the SSH server/host and pre-fills it from the optional hostname PV or the

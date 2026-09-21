@@ -74,26 +74,30 @@ class IocNavigator(QtWidgets.QMainWindow):
         layout = QtWidgets.QVBoxLayout(root)
 
         workspace = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        workspace.setChildrenCollapsible(False)
+        workspace.setHandleWidth(8)
         layout.addWidget(workspace, 1)
 
         navigator = QtWidgets.QWidget()
         navigator.setMinimumWidth(280)
-        navigator.setMaximumWidth(430)
         nav_layout = QtWidgets.QVBoxLayout(navigator)
         workspace.addWidget(navigator)
 
-        top = QtWidgets.QHBoxLayout()
+        ioc_row = QtWidgets.QHBoxLayout()
         self.prefix_edit = QtWidgets.QLineEdit(prefix)
         self.prefix_edit.setPlaceholderText("IOC prefix")
         self.refresh_btn = QtWidgets.QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh)
         self.embed_tools_check = QtWidgets.QCheckBox("Open Python tools in tabs")
         self.embed_tools_check.setChecked(True)
-        top.addWidget(QtWidgets.QLabel("IOC"))
-        top.addWidget(self.prefix_edit, 1)
-        top.addWidget(self.embed_tools_check)
-        top.addWidget(self.refresh_btn)
-        nav_layout.addLayout(top)
+        ioc_row.addWidget(QtWidgets.QLabel("IOC"))
+        ioc_row.addWidget(self.prefix_edit, 1)
+        nav_layout.addLayout(ioc_row)
+
+        action_row = QtWidgets.QHBoxLayout()
+        action_row.addWidget(self.embed_tools_check, 1)
+        action_row.addWidget(self.refresh_btn)
+        nav_layout.addLayout(action_row)
 
         host_pv_row = QtWidgets.QHBoxLayout()
         self.host_pv_edit = QtWidgets.QLineEdit(ssh_host_pv)
@@ -105,7 +109,13 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.filter_edit = QtWidgets.QLineEdit()
         self.filter_edit.setPlaceholderText("Filter objects...")
         self.filter_edit.textChanged.connect(self._filter_tree)
-        nav_layout.addWidget(self.filter_edit)
+        filter_row = QtWidgets.QHBoxLayout()
+        filter_row.addWidget(self.filter_edit, 1)
+        self.collapse_tree_btn = QtWidgets.QPushButton("Collapse")
+        self.collapse_tree_btn.setToolTip("Collapse or expand the navigator tree")
+        self.collapse_tree_btn.clicked.connect(self._toggle_tree_collapsed)
+        filter_row.addWidget(self.collapse_tree_btn)
+        nav_layout.addLayout(filter_row)
 
         self.tree = QtWidgets.QTreeWidget()
         self.tree.setHeaderLabels(["Object", "ID", "Type / Panel", "PV / Motor"])
@@ -205,6 +215,8 @@ class IocNavigator(QtWidgets.QMainWindow):
         specs = [
             ("Hardware", "hardware", "hardware"),
             ("Motion", "axes", "axis"),
+            ("Axis Groups", "axis_groups", "axis_group"),
+            ("State Machines", "state_machines", "state_machine"),
             ("PLCs", "plcs", "plc"),
             ("Plugins", "plugins", "plugin"),
             ("Data Storage", "data_storages", "data_storage"),
@@ -218,13 +230,18 @@ class IocNavigator(QtWidgets.QMainWindow):
             font = parent.font(0)
             font.setBold(True)
             parent.setFont(0, font)
-            parent.setData(0, self.DATA_ROLE, {"kind": f"{kind}_group"})
+            group_kind = "motion_group" if kind == "axis" else f"{kind}_group"
+            parent.setData(0, self.DATA_ROLE, {"kind": group_kind})
             self.tree.addTopLevelItem(parent)
             for obj in objects:
                 if kind == "hardware":
                     columns = [obj["name"], obj["id"], obj["panel"], obj["pv_base"]]
                 elif kind == "axis":
                     columns = [obj["name"], obj["id"], obj.get("axis_type", ""), obj.get("motor", "")]
+                elif kind == "axis_group":
+                    columns = [obj["name"], obj["id"], "Axis Group", obj.get("axes", "")]
+                elif kind == "state_machine":
+                    columns = [obj["name"], obj["id"], "State Machine", ""]
                 elif kind == "cpp_logic":
                     columns = [obj["name"], obj["id"], "C++ Logic", f"{obj.get('rate_ms', '')} ms"]
                 elif kind == "safety_plugin":
@@ -251,8 +268,15 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.tree.addTopLevelItem(parent)
         for group in groups:
             group_item = QtWidgets.QTreeWidgetItem([group.get("name", "Info"), "", "", ""])
-            group_item.setData(0, self.DATA_ROLE, {"kind": "ecmc_info_group"})
+            group_item.setData(
+                0,
+                self.DATA_ROLE,
+                {"kind": "ecmc_info_group", "name": group.get("name", "Info"), "items": group.get("items", [])},
+            )
             parent.addChild(group_item)
+            if group.get("name") == "Thread":
+                self._add_thread_info(group_item, group.get("items", []))
+                continue
             for info in group.get("items", []):
                 label = info.get("label", "")
                 value = info.get("value", "")
@@ -261,6 +285,30 @@ class IocNavigator(QtWidgets.QMainWindow):
                 item.setData(0, self.DATA_ROLE, {"kind": "ecmc_info", **info})
                 group_item.addChild(item)
         parent.setExpanded(True)
+
+    def _add_thread_info(self, parent, items):
+        items_by_suffix = {}
+        for info in items:
+            pv = info.get("pv", "")
+            suffix = pv.rsplit(":", 1)[-1]
+            items_by_suffix[suffix] = info
+
+        for name in ("Period", "Send", "Execute", "Latency"):
+            group_item = QtWidgets.QTreeWidgetItem([name, "", "", ""])
+            group_item.setData(0, self.DATA_ROLE, {"kind": "ecmc_thread_group", "name": name})
+            parent.addChild(group_item)
+            for suffix in self.THREAD_TIMING_GROUPS[name]:
+                info = items_by_suffix.get(suffix) or {
+                    "label": self._thread_label_from_suffix(suffix),
+                    "pv": f"{self._prefix()}:{suffix}",
+                    "value": "",
+                }
+                label = info.get("label", "")
+                value = info.get("value", "")
+                pv = info.get("pv", "")
+                item = QtWidgets.QTreeWidgetItem([label, "", value, pv])
+                item.setData(0, self.DATA_ROLE, {"kind": "ecmc_info", **info})
+                group_item.addChild(item)
 
     def _filter_tree(self, _text=None):
         needle = self.filter_edit.text().strip().lower()
@@ -281,6 +329,59 @@ class IocNavigator(QtWidgets.QMainWindow):
             item.setExpanded(True)
         return own_match or child_match
 
+    def _toggle_tree_collapsed(self):
+        if self.collapse_tree_btn.text() == "Collapse":
+            self.tree.collapseAll()
+            self.collapse_tree_btn.setText("Expand")
+        else:
+            self.tree.expandAll()
+            self.collapse_tree_btn.setText("Collapse")
+
+    def _is_status_item(self, item):
+        parent = item.parent() if item else None
+        data = parent.data(0, self.DATA_ROLE) if parent else {}
+        return data.get("kind") == "ecmc_info_group" and data.get("name") == "Status"
+
+    def _update_status_values(self, status_item):
+        if not status_item:
+            return
+        client = EpicsClient(timeout=max(self.timeout, 1.0))
+        updated = 0
+        for row in range(status_item.childCount()):
+            child = status_item.child(row)
+            data = child.data(0, self.DATA_ROLE) or {}
+            pv = data.get("pv", "")
+            if not pv:
+                continue
+            try:
+                value = str(client.get(pv, as_string=True) or "").strip().strip('"')
+            except Exception as ex:
+                QtWidgets.QMessageBox.warning(self, "Status update failed", f"Could not read {pv}.\n\n{ex}")
+                return
+            data["value"] = value
+            child.setData(0, self.DATA_ROLE, data)
+            child.setText(2, value)
+            updated += 1
+        self.statusBar().showMessage(f"Updated {updated} status values", 5000)
+
+    def _reset_status_errors(self, status_item):
+        reset_pv = _join_prefix_pv(self._prefix(), "MCU-ErrRst")
+        answer = QtWidgets.QMessageBox.question(
+            self,
+            "Reset Error PV",
+            f"Write 1 to {reset_pv}?",
+        )
+        if answer != QtWidgets.QMessageBox.Yes:
+            return
+        try:
+            client = EpicsClient(timeout=max(self.timeout, 1.0))
+            client.put(reset_pv, 1, wait=True)
+        except Exception as ex:
+            QtWidgets.QMessageBox.warning(self, "Reset failed", f"Could not write 1 to {reset_pv}.\n\n{ex}")
+            return
+        self.statusBar().showMessage(f"Wrote 1 to {reset_pv}", 5000)
+        self._update_status_values(status_item)
+
     def _context_menu(self, pos):
         item = self.tree.itemAt(pos)
         data = item.data(0, self.DATA_ROLE) if item else None
@@ -296,6 +397,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             menu.addSeparator()
             self._menu_action(menu, "Open Axis Panel", lambda: self._open_axis_panel(data, "ecmcAxis.ui"))
             self._menu_action(menu, "Open Axis Expert Panel", lambda: self._open_axis_panel(data, "ecmcAxisExpert.ui"))
+            self._menu_action(menu, "Open Motor Record Panel", lambda: self._open_motor_record_panel(data))
         elif kind == "hardware":
             self._menu_action(menu, "Open Remote SDO Browser", lambda: self._open_sdo(data))
             menu.addSeparator()
@@ -306,8 +408,65 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._menu_action(menu, "Open RT Log App", self._open_rtlog)
             menu.addSeparator()
             self._menu_action(menu, "Open Main Panel", self._open_main_panel)
+        elif kind == "ecmc_info_group" and data.get("name") == "Thread":
+            self._menu_action(menu, "Print All Thread PVs", lambda: self._print_thread_pvs(data.get("items", [])))
+            menu.addSeparator()
+            self._menu_action(menu, "Graph All Thread Timing", self._open_thread_timing_graph)
+        elif kind == "ecmc_info_group" and data.get("name") == "Status":
+            self._menu_action(
+                menu,
+                "Update Status Values",
+                lambda _checked=False, tree_item=item: self._update_status_values(tree_item),
+            )
+            self._menu_action(
+                menu,
+                "Reset Error PV",
+                lambda _checked=False, tree_item=item: self._reset_status_errors(tree_item),
+            )
+        elif kind == "ecmc_thread_group":
+            group_name = data.get("name", "")
+            self._menu_action(
+                menu,
+                f"Graph {group_name} Timing",
+                lambda _checked=False, name=group_name: self._open_thread_group_graph(name),
+            )
+            menu.addSeparator()
+            self._menu_action(menu, "Graph All Thread Timing", self._open_thread_timing_graph)
+        elif kind == "ecmc_info" and self._is_thread_timing_pv(data.get("pv", "")):
+            self._menu_action(
+                menu,
+                "Graph This PV",
+                lambda: self._open_daq([data["pv"]], title=data.get("label", "Thread PV")),
+            )
+            menu.addSeparator()
+            self._menu_action(menu, "Graph All Thread Timing", self._open_thread_timing_graph)
+        elif kind == "ecmc_info" and self._is_status_item(item):
+            self._menu_action(
+                menu,
+                "Update Status Values",
+                lambda _checked=False, tree_item=item.parent(): self._update_status_values(tree_item),
+            )
+            self._menu_action(
+                menu,
+                "Reset Error PV",
+                lambda _checked=False, tree_item=item.parent(): self._reset_status_errors(tree_item),
+            )
         elif kind == "plc":
             self._menu_action(menu, "Open PLC Panel", lambda: self._open_object_panel("ecmcPLCxx.ui", data))
+        elif kind == "axis_group":
+            self._menu_action(menu, "Open Axis Group Overview", lambda: self._open_axes_for_group(data))
+            menu.addSeparator()
+            self._menu_action(menu, "Open Axis Group Panel", lambda: self._open_axis_group_panel(data))
+        elif kind == "motion_group":
+            self._menu_action(menu, "Open Motion Axes Overview", self._open_motion_overview)
+        elif kind == "axis_group_group":
+            self._menu_action(menu, "Open Axis Groups Overview", self._open_axis_groups_overview)
+        elif kind == "state_machine":
+            self._menu_action(menu, "Open State Machine Axis Overview", lambda: self._open_axes_for_state_machine(data))
+            menu.addSeparator()
+            self._menu_action(menu, "Open State Machine Panel", lambda: self._open_state_machine_panel(data))
+        elif kind == "state_machine_group":
+            self._menu_action(menu, "Open State Machines Overview", self._open_state_machines_overview)
         elif kind == "plugin":
             self._menu_action(menu, "Open Plugin Panel", lambda: self._open_object_panel("ecmcPLGxx.ui", data))
         elif kind == "data_storage":
@@ -340,6 +499,16 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._open_hardware_overview()
         elif kind == "plc":
             self._open_object_panel("ecmcPLCxx.ui", data)
+        elif kind == "axis_group":
+            self._open_axes_for_group(data)
+        elif kind == "motion_group":
+            self._open_motion_overview()
+        elif kind == "axis_group_group":
+            self._open_axis_groups_overview()
+        elif kind == "state_machine":
+            self._open_state_machine_panel(data)
+        elif kind == "state_machine_group":
+            self._open_state_machines_overview()
         elif kind == "plugin":
             self._open_object_panel("ecmcPLGxx.ui", data)
         elif kind == "data_storage":
@@ -501,12 +670,86 @@ class IocNavigator(QtWidgets.QMainWindow):
             return
         self._open_script("start_iso230.sh", data["id"])
 
-    def _open_daq(self, separate=False):
+    THREAD_TIMING_GROUPS = {
+        "Period": ("MCU-ThdPrdMin", "MCU-ThdPrdMax"),
+        "Send": ("MCU-ThdSndMin", "MCU-ThdSndMax"),
+        "Execute": ("MCU-ThdExeMin", "MCU-ThdExeMax"),
+        "Latency": ("MCU-ThdLatMin", "MCU-ThdLatMax"),
+    }
+
+    def _is_thread_timing_pv(self, pv):
+        return any(token in str(pv) for token in ("MCU-ThdPrd", "MCU-ThdLat", "MCU-ThdExe", "MCU-ThdSnd"))
+
+    def _thread_pvs(self, suffixes):
+        return [f"{self._prefix()}:{suffix}" for suffix in suffixes]
+
+    def _thread_label_from_suffix(self, suffix):
+        labels = {
+            "MCU-ThdPrdMin": "Period min",
+            "MCU-ThdPrdMax": "Period max",
+            "MCU-ThdSndMin": "Send min",
+            "MCU-ThdSndMax": "Send max",
+            "MCU-ThdExeMin": "Execute min",
+            "MCU-ThdExeMax": "Execute max",
+            "MCU-ThdLatMin": "Latency min",
+            "MCU-ThdLatMax": "Latency max",
+        }
+        return labels.get(suffix, suffix)
+
+    def _print_thread_pvs(self, items):
+        lines = ["Thread PVs", ""]
+        for info in items:
+            label = info.get("label", "")
+            value = info.get("value", "")
+            pv = info.get("pv", "")
+            if value != "":
+                lines.append(f"{pv}\t{label}\t{value}")
+            else:
+                lines.append(f"{pv}\t{label}")
+        text = "\n".join(lines)
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("Thread PVs")
+        dialog.resize(760, 520)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        edit = QtWidgets.QPlainTextEdit()
+        edit.setReadOnly(True)
+        edit.setPlainText(text)
+        layout.addWidget(edit, 1)
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+        copy_button = buttons.addButton("Copy", QtWidgets.QDialogButtonBox.ActionRole)
+        copy_button.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(text))
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
+
+    def _open_thread_timing_graph(self):
+        suffixes = []
+        for group_suffixes in self.THREAD_TIMING_GROUPS.values():
+            suffixes.extend(group_suffixes)
+        self._open_daq(self._thread_pvs(suffixes), title="All Thread Timing")
+
+    def _open_thread_group_graph(self, group_name):
+        suffixes = self.THREAD_TIMING_GROUPS.get(group_name, ())
+        if suffixes:
+            self._open_daq(self._thread_pvs(suffixes), title=f"Thread {group_name}")
+
+    def _open_thread_latency_graph(self):
+        self._open_thread_group_graph("Latency")
+
+    def _open_thread_execute_graph(self):
+        self._open_thread_group_graph("Execute")
+
+    def _open_daq(self, initial_pvs=None, separate=False, title=None):
+        initial_pvs = list(initial_pvs or [])
         if self.embed_tools_check.isChecked() and not separate:
-            window = DaqWindow(default_prefix=self._prefix(), initial_pvs=[], timeout=max(self.timeout, 2.0))
-            self._add_tool_tab(window, "DAQ / FFT")
+            window = DaqWindow(default_prefix=self._prefix(), initial_pvs=initial_pvs, timeout=max(self.timeout, 2.0))
+            self._add_tool_tab(window, title or ("PV Graph" if initial_pvs else "DAQ / FFT"))
             return
-        self._open_script_no_object("start_daq.sh")
+        if initial_pvs:
+            script = self.app_dir / "start_daq.sh"
+            self._spawn(["bash", str(script), self._prefix(), *initial_pvs], self.app_dir)
+        else:
+            self._open_script_no_object("start_daq.sh")
 
     def _open_rtlog(self, data=None, separate=False):
         axis_id = str((data or {}).get("id", "1"))
@@ -531,6 +774,13 @@ class IocNavigator(QtWidgets.QMainWindow):
         macro = f"DEV={motor_prefix},IOC={self._prefix()},Axis={name},AX_ID={data['id']}"
         self._caqtdm(panel, macro)
 
+    def _open_motor_record_panel(self, data):
+        motor = data.get("motor", "")
+        motor_prefix, _, name = motor.rpartition(":")
+        macro = f"DEV={motor_prefix},IOC={self._prefix()},Axis={name},AX_ID={data['id']}"
+        panel = "ecmc_motorx_all.ui" if (self.caqtdm_dir / "ecmc_motorx_all.ui").exists() else "motorx_all.ui"
+        self._caqtdm(panel, macro)
+
     def _open_hardware_panel(self, data):
         slave = f"{int(data['id']):03d}"
         macro = (
@@ -543,6 +793,50 @@ class IocNavigator(QtWidgets.QMainWindow):
         item_id = int(data["id"])
         macro = f"SYS={self._prefix()},IOC={self._prefix()},ID_1={item_id},ID_2={item_id:02d}"
         self._caqtdm(panel, macro)
+
+    def _open_axis_group_panel(self, data):
+        self._caqtdm("ecmcAxesGrpxx.ui", f"IOC={self._prefix()},GRP_ID={int(data['id'])}")
+
+    def _open_state_machine_panel(self, data):
+        item_id = int(data["id"])
+        macro = f"SYS={self._prefix()},IOC={self._prefix()},ID_1={item_id},ID_2={item_id:02d}"
+        self._caqtdm("ecmcSMxx.ui", macro)
+
+    def _overview_script(self, script_name):
+        local = self.caqtdm_dir / script_name
+        if local.exists():
+            return str(local)
+        return f"/ioc/modules/qt/{script_name}"
+
+    def _open_axis_groups_overview(self):
+        self._spawn(["python3", self._overview_script("ecmc_start_axesgroup_overview.py"), "--rows", "1", self._prefix()], self.caqtdm_dir)
+
+    def _open_motion_overview(self):
+        self._spawn(
+            ["python3", self._overview_script("ecmc_start_axis_overview.py"), "--rows", "1", self._prefix()],
+            self.caqtdm_dir,
+        )
+
+    def _open_state_machines_overview(self):
+        self._spawn(["python3", self._overview_script("ecmc_start_sm_overview.py"), "--rows", "1", self._prefix()], self.caqtdm_dir)
+
+    def _open_axes_for_group(self, data):
+        self._spawn(
+            [
+                "python3", self._overview_script("ecmc_start_axis_overview.py"),
+                "--rows", "1", "--grp_id", str(data["id"]), self._prefix(),
+            ],
+            self.caqtdm_dir,
+        )
+
+    def _open_axes_for_state_machine(self, data):
+        self._spawn(
+            [
+                "python3", self._overview_script("ecmc_start_axis_overview.py"),
+                "--rows", "1", "--sm_id_mst", str(data["id"]), self._prefix(),
+            ],
+            self.caqtdm_dir,
+        )
 
     def _open_cpp_logic(self, data):
         self._caqtdm("ecmcCppLogic.ui", f"IOC={self._prefix()},CPP_ID={int(data['id'])}")
