@@ -13,8 +13,30 @@ This folder now contains:
 - `ecmc_iso230_qt.py` / `start_iso230.sh` / `start_iso230_standalone.sh` (ISO 230-style bidirectional test app)
 - `ecmc_daq_qt.py` / `start_daq.sh` (timestamp-derived DAQ viewer for numeric PVs with FFT analysis)
 - `ecmc_sdo_qt.py` / `start_sdo.sh` (remote EtherCAT SDO browser over SSH)
+- `ecmc_ioc_navigator.py` / `start_ioc.sh` (live IOC object tree and app launcher)
 
 ## Applications
+
+### IOC navigator
+
+The IOC navigator follows the configuration PV linked lists and presents
+Hardware, Motion, PLCs, Plugins, Data Storage, CppLogic, and SafetyPlugin in one
+filterable tree. Double-click opens the default tool; right-click exposes all
+actions valid for that object.
+
+```bash
+./start_ioc.sh <ioc-prefix> [ssh-host]
+./start_ioc.sh IOC:ECMC c6025a
+./start_ioc.sh --demo
+```
+
+Axis actions open the motion, axis configuration, controller, ISO230, or caQtDM
+axis tools, including `ecmcAxis.ui` and `ecmcAxisExpert.ui`. Hardware actions open the configured caQtDM slave panel or the
+remote SDO browser. PLC and plugin actions open their caQtDM panels.
+Demo mode populates every navigator branch without reading any PVs.
+The SSH host can be entered manually or read from an optional hostname PV. Its
+default suffix is `MCU-Cfg-Host`; change it in the window if another name is
+introduced later. A missing hostname PV does not prevent IOC discovery.
 
 ### Stream
 
