@@ -83,6 +83,9 @@ def build_ssh_command(host: str, arguments: Sequence[str], binary: str = DEFAULT
         "-o", "ControlMaster=auto",
         "-o", f"ControlPersist={SSH_CONTROL_PERSIST_SECONDS}",
         "-o", f"ControlPath={SSH_CONTROL_PATH}",
+        "-o", "ConnectTimeout=10",
+        "-o", "ServerAliveInterval=10",
+        "-o", "ServerAliveCountMax=2",
         host,
         build_remote_command(arguments, binary),
     ]

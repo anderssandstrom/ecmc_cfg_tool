@@ -236,8 +236,11 @@ to `0` and can be changed in the window before refreshing. OpenSSH connection
 multiplexing keeps the authenticated SSH session alive for 10 minutes after the
 last command, so repeated reads and writes do not prompt for the password again.
 The remote executable defaults to `/opt/etherlab/bin/ethercat` and can be changed
-in the window. SSH password and key-passphrase requests use a Qt popup. The
+in the window. SSH password and key-passphrase requests appear in the SDO
+browser's own Qt window through a private local socket. The
 default command timeout is 120 seconds to allow time for authentication.
+Connection establishment has a 10-second timeout, and an in-progress command
+can be stopped with `Cancel` (including a selected-index read or write sequence).
 Demo mode loads a bundled object dictionary and does not make an SSH connection.
 
 ## Axis selection behavior (axis / controller / motion / ISO230 apps)

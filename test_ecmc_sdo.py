@@ -33,6 +33,7 @@ class SdoTests(unittest.TestCase):
         self.assertEqual(command[0], "ssh")
         self.assertIn("ControlMaster=auto", command)
         self.assertIn("ControlPersist=600", command)
+        self.assertIn("ConnectTimeout=10", command)
         self.assertEqual(command[-2:], [
             "c6025a", "/opt/etherlab/bin/ethercat download -p 1 0x2000 0 string 'hello world'"
         ])

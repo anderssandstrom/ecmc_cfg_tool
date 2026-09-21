@@ -6,7 +6,7 @@ source "${SCRIPT_DIR}/qt_runtime.sh"
 
 if [ "${ECMC_SDO_ASKPASS:-}" = "1" ]; then
   cd "${SCRIPT_DIR}"
-  PYTHON_BIN="$(find_qt_python)" || exit 1
+  PYTHON_BIN="${ECMC_SDO_PYTHON:-python3}"
   exec "${PYTHON_BIN}" ecmc_sdo_askpass.py "${1:-SSH authentication}"
 fi
 
