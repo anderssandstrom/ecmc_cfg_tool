@@ -39,7 +39,7 @@ browser. PLC and plugin actions open their caQtDM panels.
 Demo mode populates every navigator branch without reading any PVs.
 When the remote SDO browser is opened from a hardware row, the navigator asks
 for the SSH server/host and pre-fills it from the optional hostname PV or the
-last used value. The default hostname PV suffix is `MCU-Cfg-Host`; change it in
+last used value. The default hostname PV suffix is `MCU-Cfg-Hostname`; change it in
 the window if another name is introduced later. A missing hostname PV does not
 prevent IOC discovery.
 

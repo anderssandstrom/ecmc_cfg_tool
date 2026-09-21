@@ -36,7 +36,7 @@ class IocNavigator(QtWidgets.QMainWindow):
     DATA_ROLE = int(QtCore.Qt.UserRole)
 
     def __init__(
-        self, prefix="IOC:ECMC", ssh_host="", ssh_host_pv="MCU-Cfg-Host", timeout=1.0, caqtdm_dir="", demo=False
+        self, prefix="IOC:ECMC", ssh_host="", ssh_host_pv="MCU-Cfg-Hostname", timeout=1.0, caqtdm_dir="", demo=False
     ):
         super().__init__()
         self.setWindowTitle("ecmc IOC Navigator")
@@ -345,7 +345,7 @@ def main():
     parser.add_argument("prefix", nargs="?", default="IOC:ECMC", help="IOC PV prefix")
     parser.add_argument("--ssh-host", default="", help="SSH host used by the SDO browser")
     parser.add_argument(
-        "--ssh-host-pv", default="MCU-Cfg-Host", help="optional hostname PV or suffix read during refresh"
+        "--ssh-host-pv", default="MCU-Cfg-Hostname", help="optional hostname PV or suffix read during refresh"
     )
     parser.add_argument("--timeout", type=float, default=1.0, help="PV read timeout")
     parser.add_argument("--caqtdm-dir", default="", help="directory containing ecmc caQtDM panels")

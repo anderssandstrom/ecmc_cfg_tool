@@ -15,7 +15,7 @@ fi
 
 PREFIX="${1:-${PREFIX:-IOC:ECMC}}"
 SSH_HOST="${2:-${ETHERCAT_HOST:-}}"
-SSH_HOST_PV="${ETHERCAT_HOST_PV:-MCU-Cfg-Host}"
+SSH_HOST_PV="${ETHERCAT_HOST_PV:-MCU-Cfg-Hostname}"
 
 cd "${SCRIPT_DIR}"
 PYTHON_BIN="$(find_qt_python)" || {
