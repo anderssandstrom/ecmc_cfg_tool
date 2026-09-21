@@ -158,11 +158,16 @@ def ecmc_add_sdo_line(slave: str, entry: SdoEntry, value: str) -> str:
     size = entry_byte_size(entry)
     normalized = normalized_upload_value(value)
     label = f"{entry.index}:{entry.subindex[2:]} {entry.name}".strip()
+    comment = (
+        f"# {label} | type={entry.data_type} | bits={entry.bit_length} | "
+        f"access={entry.access} | value={normalized}"
+    )
     if size is None or size > 4:
-        return f"# Unsupported by Cfg.EcAddSdo: {label}, {entry.bit_length}, value={normalized}"
+        return f"{comment}\n# Unsupported by Cfg.EcAddSdo: {label}, {entry.bit_length}, value={normalized}"
     if not re.fullmatch(r"[-+]?(?:0[xX][0-9a-fA-F]+|\d+)", normalized):
-        return f"# Non-integer value requires another SDO command: {label}, value={normalized}"
+        return f"{comment}\n# Non-integer value requires another SDO command: {label}, value={normalized}"
     return (
+        f"{comment}\n"
         f'ecmcConfigOrDie "Cfg.EcAddSdo(${{ECMC_EC_SLAVE_NUM={slave}}},'
         f'{entry.index},{entry.subindex},{normalized},{size})"'
     )

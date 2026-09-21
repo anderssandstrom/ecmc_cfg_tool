@@ -78,6 +78,7 @@ class SdoTests(unittest.TestCase):
         self.assertEqual(normalized_upload_value("0x0006 6\n"), "6")
         self.assertEqual(
             ecmc_add_sdo_line("3", entry, "0x0006 6"),
+            "# 0x6040:00 Control word | type=uint16 | bits=16 bit | access=rwrwrw | value=6\n"
             'ecmcConfigOrDie "Cfg.EcAddSdo(${ECMC_EC_SLAVE_NUM=3},0x6040,0x00,6,2)"',
         )
 
@@ -86,6 +87,7 @@ class SdoTests(unittest.TestCase):
         self.assertEqual(entry_byte_size(entry), 1)
         self.assertEqual(
             ecmc_add_sdo_line("4", entry, "1"),
+            "# 0x2000:01 Enable | type=bool | bits=1 bit | access=rwrwrw | value=1\n"
             'ecmcConfigOrDie "Cfg.EcAddSdo(${ECMC_EC_SLAVE_NUM=4},0x2000,0x01,1,1)"',
         )
 
