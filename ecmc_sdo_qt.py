@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -11,6 +12,7 @@ from qt_compat import QtCore, QtGui, QtWidgets
 
 from ecmc_sdo import (
     SdoEntry,
+    DEFAULT_ETHERCAT_BINARY,
     build_ssh_command,
     download_arguments,
     ecmc_add_sdo_line,
@@ -26,21 +28,27 @@ class CommandSignals(QtCore.QObject):
 
 
 class CommandTask(QtCore.QRunnable):
-    def __init__(self, token, command, timeout):
+    def __init__(self, token, command, timeout, askpass):
         super().__init__()
         self.token = token
         self.command = command
         self.timeout = timeout
+        self.askpass = askpass
         self.signals = CommandSignals()
 
     def run(self):
         try:
+            environment = os.environ.copy()
+            environment["SSH_ASKPASS"] = str(self.askpass)
+            environment["SSH_ASKPASS_REQUIRE"] = "force"
+            environment["ECMC_SDO_ASKPASS"] = "1"
             result = subprocess.run(
                 self.command,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
                 check=False,
+                env=environment,
             )
             self.signals.finished.emit(self.token, result.returncode, result.stdout, result.stderr)
         except subprocess.TimeoutExpired as ex:
@@ -57,7 +65,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
     SOURCE_ROLE = ENTRY_ROLE + 2
     RAW_VALUE_ROLE = ENTRY_ROLE + 3
 
-    def __init__(self, host="", master="0", slave="0", timeout=15.0, demo=False):
+    def __init__(self, host="", master="0", slave="0", timeout=120.0, demo=False):
         super().__init__()
         self.setWindowTitle("Remote EtherCAT SDO Browser")
         self.resize(1000, 650)
@@ -93,6 +101,12 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         connection.addWidget(self.refresh_btn)
         connection.addWidget(self.example_btn)
         layout.addLayout(connection)
+
+        binary_row = QtWidgets.QHBoxLayout()
+        self.binary_edit = QtWidgets.QLineEdit(DEFAULT_ETHERCAT_BINARY)
+        binary_row.addWidget(QtWidgets.QLabel("Remote ethercat"))
+        binary_row.addWidget(self.binary_edit, 1)
+        layout.addLayout(binary_row)
 
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText("Filter by index, name, type, or access...")
@@ -164,9 +178,13 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         if connection is None:
             return
         host, _master, _slave = connection
-        command = build_ssh_command(host, arguments)
+        binary = self.binary_edit.text().strip()
+        if not binary:
+            QtWidgets.QMessageBox.warning(self, "Missing ethercat path", "Enter the remote ethercat path.")
+            return
+        command = build_ssh_command(host, arguments, binary)
         self._log("$ " + " ".join(command))
-        task = CommandTask(token, command, self.timeout)
+        task = CommandTask(token, command, self.timeout, Path(__file__).resolve().with_name("start_sdo.sh"))
         self._tasks.add(task)
 
         def done(result_token, code, stdout, stderr):
@@ -528,7 +546,7 @@ def main():
     parser.add_argument("host", nargs="?", default="", help="SSH host or user@host")
     parser.add_argument("--master", "-m", default="0", help="EtherCAT master ID")
     parser.add_argument("--slave", "-p", default="0", help="EtherCAT slave position")
-    parser.add_argument("--timeout", type=float, default=15.0, help="SSH command timeout in seconds")
+    parser.add_argument("--timeout", type=float, default=120.0, help="SSH command timeout in seconds")
     parser.add_argument("--demo", action="store_true", help="load the bundled SDO example without SSH")
     args = parser.parse_args()
 

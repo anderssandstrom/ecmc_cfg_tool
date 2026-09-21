@@ -15,6 +15,7 @@ ENTRY_RE = re.compile(
 )
 SSH_CONTROL_PATH = "/tmp/ecmc_sdo_ssh_%C"
 SSH_CONTROL_PERSIST_SECONDS = 600
+DEFAULT_ETHERCAT_BINARY = "/opt/etherlab/bin/ethercat"
 
 
 @dataclass
@@ -72,18 +73,18 @@ def parse_sdos(text: str) -> list[SdoObject]:
     return objects
 
 
-def build_remote_command(arguments: Sequence[str]) -> str:
-    return " ".join(shlex.quote(part) for part in ("ethercat", *arguments))
+def build_remote_command(arguments: Sequence[str], binary: str = DEFAULT_ETHERCAT_BINARY) -> str:
+    return " ".join(shlex.quote(part) for part in (binary, *arguments))
 
 
-def build_ssh_command(host: str, arguments: Sequence[str]) -> list[str]:
+def build_ssh_command(host: str, arguments: Sequence[str], binary: str = DEFAULT_ETHERCAT_BINARY) -> list[str]:
     return [
         "ssh",
         "-o", "ControlMaster=auto",
         "-o", f"ControlPersist={SSH_CONTROL_PERSIST_SECONDS}",
         "-o", f"ControlPath={SSH_CONTROL_PATH}",
         host,
-        build_remote_command(arguments),
+        build_remote_command(arguments, binary),
     ]
 
 

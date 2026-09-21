@@ -33,7 +33,12 @@ class SdoTests(unittest.TestCase):
         self.assertEqual(command[0], "ssh")
         self.assertIn("ControlMaster=auto", command)
         self.assertIn("ControlPersist=600", command)
-        self.assertEqual(command[-2:], ["c6025a", "ethercat download -p 1 0x2000 0 string 'hello world'"])
+        self.assertEqual(command[-2:], [
+            "c6025a", "/opt/etherlab/bin/ethercat download -p 1 0x2000 0 string 'hello world'"
+        ])
+
+    def test_remote_binary_can_be_overridden(self):
+        self.assertEqual(build_ssh_command("host", ["sdos"], "/custom/ethercat")[-1], "/custom/ethercat sdos")
 
     def test_upload_and_download_syntax(self):
         entry = SdoEntry("0x6040", "0x00", "rwrwrw", "uint16", "16 bit", "Control word")
