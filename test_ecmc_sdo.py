@@ -80,6 +80,10 @@ class SdoTests(unittest.TestCase):
         entry = SdoEntry("0x2000", "0x01", "rwrwrw", "octet_string", "32 bit", "Label")
         self.assertTrue(entry.is_text_like)
         self.assertEqual(display_upload_value(entry, "hello world with spaces\n"), "hello world with spaces")
+        self.assertEqual(
+            upload_arguments("0", "1", entry, include_type=False),
+            ["upload", "-m", "0", "-p", "1", "0x2000", "0x01"],
+        )
         arguments = download_arguments("0", "1", entry, "hello world with spaces")
         self.assertEqual(
             arguments,

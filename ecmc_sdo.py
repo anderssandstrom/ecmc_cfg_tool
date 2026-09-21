@@ -120,12 +120,12 @@ def sdos_arguments(master: str, slave: str) -> list[str]:
     return ["sdos", "-m", str(master), "-p", str(slave)]
 
 
-def upload_arguments(master: str, slave: str, entry: SdoEntry) -> list[str]:
+def upload_arguments(master: str, slave: str, entry: SdoEntry, include_type: bool = True) -> list[str]:
     arguments = [
         "upload", "-m", str(master), "-p", str(slave),
         entry.index, entry.subindex,
     ]
-    data_type = entry.effective_data_type
+    data_type = entry.effective_data_type if include_type else None
     if data_type:
         arguments.extend(["--type", data_type])
     return arguments

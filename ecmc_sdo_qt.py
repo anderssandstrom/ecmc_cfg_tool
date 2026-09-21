@@ -491,7 +491,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
                 self._read_queue.clear()
             self._run_next_selected_read()
 
-        self._run(item, upload_arguments(master, slave, entry), finished)
+        self._read_entry(item, entry, finished)
 
     def _write_selected(self):
         if self._validate_connection() is None:
@@ -545,9 +545,21 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             return
         if not entry.readable:
             return
-        host, master, slave = self._connection()
         item.setText(8, "Reading...")
-        self._run(item, upload_arguments(master, slave, entry), self._read_finished)
+        self._read_entry(item, entry, self._read_finished)
+
+    def _read_entry(self, item, entry, callback):
+        _host, master, slave = self._connection()
+
+        def typed_finished(row, code, stdout, stderr):
+            if code not in (0, 130) and entry.is_text_like:
+                row.setText(8, "Retrying untyped...")
+                self._log(f"Typed upload failed for {row.text(0)}; retrying without --type")
+                self._run(row, upload_arguments(master, slave, entry, include_type=False), callback)
+                return
+            callback(row, code, stdout, stderr)
+
+        self._run(item, upload_arguments(master, slave, entry), typed_finished)
 
     def _read_finished(self, item, code, stdout, stderr, show_dialog=True):
         if code != 0:
