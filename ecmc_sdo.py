@@ -152,6 +152,12 @@ def normalized_upload_value(output: str) -> str:
     return value
 
 
+def decode_command_output(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value or ""
+
+
 def display_upload_value(entry: SdoEntry, output: str) -> str:
     """Return the editable value for an upload result."""
     value = str(output or "").strip()

@@ -18,6 +18,7 @@ from ecmc_sdo import (
     SdoEntry,
     DEFAULT_ETHERCAT_BINARY,
     build_ssh_command,
+    decode_command_output,
     display_upload_value,
     download_arguments,
     ecmc_add_sdo_line,
@@ -75,7 +76,6 @@ class CommandTask(QtCore.QRunnable):
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
                 env=environment,
                 start_new_session=True,
             )
@@ -83,7 +83,9 @@ class CommandTask(QtCore.QRunnable):
                 self.cancel()
             stdout, stderr = self._process.communicate(timeout=self.timeout)
             code = 130 if self._cancelled.is_set() else self._process.returncode
-            self.signals.finished.emit(self.token, code, stdout, stderr)
+            self.signals.finished.emit(
+                self.token, code, decode_command_output(stdout), decode_command_output(stderr)
+            )
         except subprocess.TimeoutExpired as ex:
             if self._process is not None:
                 self.cancel()
@@ -92,8 +94,8 @@ class CommandTask(QtCore.QRunnable):
                 except subprocess.TimeoutExpired:
                     os.killpg(self._process.pid, signal.SIGKILL)
                     self._process.communicate()
-            stdout = ex.stdout.decode() if isinstance(ex.stdout, bytes) else (ex.stdout or "")
-            stderr = ex.stderr.decode() if isinstance(ex.stderr, bytes) else (ex.stderr or "")
+            stdout = decode_command_output(ex.stdout)
+            stderr = decode_command_output(ex.stderr)
             self.signals.finished.emit(self.token, 124, stdout, stderr or f"Command timed out after {self.timeout:g} s")
         except Exception as ex:
             self.signals.finished.emit(self.token, 1, "", str(ex))

@@ -4,6 +4,7 @@ from ecmc_sdo import (
     SdoEntry,
     build_ssh_command,
     build_remote_command,
+    decode_command_output,
     display_upload_value,
     download_arguments,
     ecmc_add_sdo_line,
@@ -92,6 +93,9 @@ class SdoTests(unittest.TestCase):
             "/opt/etherlab/bin/ethercat download -m 0 -p 1 0x2000 0x01 --type octet_string "
             "'hello world with spaces'",
         )
+
+    def test_command_output_decoder_tolerates_octet_bytes(self):
+        self.assertEqual(decode_command_output(b"\xe0 diagnostic message"), "� diagnostic message")
 
     def test_ecmc_snippet_uses_normalized_value_and_byte_size(self):
         entry = SdoEntry("0x6040", "0x00", "rwrwrw", "uint16", "16 bit", "Control word")
