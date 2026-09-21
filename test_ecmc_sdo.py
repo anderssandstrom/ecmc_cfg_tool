@@ -120,6 +120,18 @@ class SdoTests(unittest.TestCase):
         entry = SdoEntry("0x10f3", "0x06", "r-r-r-", "octet_string", "256 bit", "Diagnosis Message 001")
         self.assertEqual(display_upload_value(entry, value), decoded)
 
+    def test_diagnostic_message_hex_text_is_decoded(self):
+        decoded = decode_diagnostic_message("06005001100000000000")
+        self.assertIn("0x06005001100000000000", decoded)
+
+        raw = (
+            "00e0811b000000110afd4b0d04476f0b"
+            "060002010600000006000000"
+        )
+        decoded = decode_diagnostic_message(raw)
+        self.assertIn("diag_code=0x1b81e000", decoded)
+        self.assertIn("text_id=0x1100", decoded)
+
     def test_ecmc_snippet_uses_normalized_value_and_byte_size(self):
         entry = SdoEntry("0x6040", "0x00", "rwrwrw", "uint16", "16 bit", "Control word")
         self.assertEqual(normalized_upload_value("0x0006 6\n"), "6")

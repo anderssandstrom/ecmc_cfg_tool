@@ -174,7 +174,14 @@ def decode_ethercat_time(ns: int) -> str:
 
 
 def decode_diagnostic_message(raw_value: str) -> str:
-    raw = raw_value.encode("latin-1", errors="ignore").rstrip(b"\r\n")
+    text = str(raw_value or "").strip()
+    compact = re.sub(r"\s+", "", text)
+    if compact.lower().startswith("0x"):
+        compact = compact[2:]
+    if compact and len(compact) % 2 == 0 and re.fullmatch(r"[0-9a-fA-F]+", compact):
+        raw = bytes.fromhex(compact)
+    else:
+        raw = text.encode("latin-1", errors="ignore").rstrip(b"\r\n")
     if not raw or not any(raw):
         return ""
     if len(raw) < 16:
