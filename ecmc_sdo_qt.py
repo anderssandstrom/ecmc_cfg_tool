@@ -168,7 +168,13 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText("Filter by index, name, type, or access...")
         self.search.textChanged.connect(self._apply_filter)
-        layout.addWidget(self.search)
+        filter_row = QtWidgets.QHBoxLayout()
+        filter_row.addWidget(self.search, 1)
+        self.show_zero_bit = QtWidgets.QCheckBox("Show 0-bit")
+        self.show_zero_bit.setToolTip("Show SDO entries with 0 bit length")
+        self.show_zero_bit.toggled.connect(self._apply_filter)
+        filter_row.addWidget(self.show_zero_bit)
+        layout.addLayout(filter_row)
 
         self.tree = QtWidgets.QTreeWidget()
         self.tree.setColumnCount(9)
@@ -176,6 +182,8 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         self.tree.setAlternatingRowColors(True)
         self.tree.setUniformRowHeights(False)
         self.tree.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._context_menu)
         header = self.tree.header()
         header.setStretchLastSection(False)
         header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
@@ -407,6 +415,27 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
     def _entry(self, item):
         return item.data(0, self.ENTRY_ROLE) if item is not None else None
 
+    def _context_menu(self, pos):
+        item = self.tree.itemAt(pos)
+        if item is None or self._entry(item) is not None:
+            return
+        readable_count = sum(
+            1 for i in range(item.childCount())
+            if (self._entry(item.child(i)) is not None and self._entry(item.child(i)).readable)
+        )
+        menu = QtWidgets.QMenu(self)
+        read_action = menu.addAction(f"Read All Under Index ({readable_count})")
+        read_action.setEnabled(readable_count > 0)
+        read_action.triggered.connect(lambda _checked=False, row=item: self._read_index(row))
+        menu.exec_(self.tree.viewport().mapToGlobal(pos)) if hasattr(menu, "exec_") else menu.exec(self.tree.viewport().mapToGlobal(pos))
+
+    def _read_index(self, item):
+        if item is None or self._entry(item) is not None:
+            return
+        self.tree.clearSelection()
+        item.setSelected(True)
+        self._read_selected()
+
     def _selected_entry_items(self):
         rows = []
         seen = set()
@@ -502,10 +531,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
     def _read_item(self, item, _column=0):
         entry = self._entry(item)
         if entry is None:
-            if item is not None:
-                self.tree.clearSelection()
-                item.setSelected(True)
-                self._read_selected()
+            self._read_index(item)
             return
         if not entry.readable:
             return
@@ -566,13 +592,17 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
 
     def _apply_filter(self, _text=None):
         needle = self.search.text().strip().lower()
+        show_zero_bit = self.show_zero_bit.isChecked()
         for i in range(self.tree.topLevelItemCount()):
             parent = self.tree.topLevelItem(i)
             parent_match = needle in " ".join(parent.text(c).lower() for c in range(5))
             visible_children = 0
             for j in range(parent.childCount()):
                 child = parent.child(j)
+                entry = self._entry(child)
+                zero_bit_hidden = entry is not None and not entry.has_data and not show_zero_bit
                 matches = parent_match or not needle or needle in " ".join(child.text(c).lower() for c in range(5))
+                matches = matches and not zero_bit_hidden
                 child.setHidden(not matches)
                 visible_children += int(matches)
             parent.setHidden(bool(needle) and not parent_match and visible_children == 0)

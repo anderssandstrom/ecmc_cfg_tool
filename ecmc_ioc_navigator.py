@@ -230,6 +230,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._menu_action(menu, "Open Remote SDO Browser", lambda: self._open_sdo(data))
         elif kind == "ecmc_group":
             self._menu_action(menu, "Open ecmcMain.ui", self._open_main_panel)
+            self._menu_action(menu, "Open Command Parser", self._open_command_parser)
         elif kind == "plc":
             self._menu_action(menu, "Open caQtDM PLC Panel", lambda: self._open_object_panel("ecmcPLCxx.ui", data))
         elif kind == "plugin":
@@ -290,6 +291,10 @@ class IocNavigator(QtWidgets.QMainWindow):
 
     def _open_main_panel(self):
         self._caqtdm("ecmcMain.ui", f"IOC={self._prefix()}")
+
+    def _open_command_parser(self):
+        script = self.app_dir / "start.sh"
+        self._spawn(["bash", str(script), self._prefix()], self.app_dir)
 
     def _open_axis_panel(self, data, panel="ecmcAxis.ui"):
         motor = data.get("motor", "")
