@@ -84,7 +84,7 @@ class CommandTask(QtCore.QRunnable):
             stdout, stderr = self._process.communicate(timeout=self.timeout)
             code = 130 if self._cancelled.is_set() else self._process.returncode
             self.signals.finished.emit(
-                self.token, code, decode_command_output(stdout), decode_command_output(stderr)
+                self.token, code, decode_command_output(stdout, preserve_bytes=True), decode_command_output(stderr)
             )
         except subprocess.TimeoutExpired as ex:
             if self._process is not None:
@@ -94,7 +94,7 @@ class CommandTask(QtCore.QRunnable):
                 except subprocess.TimeoutExpired:
                     os.killpg(self._process.pid, signal.SIGKILL)
                     self._process.communicate()
-            stdout = decode_command_output(ex.stdout)
+            stdout = decode_command_output(ex.stdout, preserve_bytes=True)
             stderr = decode_command_output(ex.stderr)
             self.signals.finished.emit(self.token, 124, stdout, stderr or f"Command timed out after {self.timeout:g} s")
         except Exception as ex:

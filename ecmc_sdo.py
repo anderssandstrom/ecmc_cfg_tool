@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import shlex
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Sequence
 
 
@@ -59,6 +60,13 @@ class SdoEntry:
     def is_text_like(self) -> bool:
         data_type = self.data_type.lower().replace("_", " ")
         return "string" in data_type or "octet" in data_type
+
+    @property
+    def is_diagnostic_message(self) -> bool:
+        try:
+            return int(self.index, 16) == 0x10F3 and int(self.subindex, 16) >= 0x06 and self.is_text_like
+        except ValueError:
+            return False
 
 
 @dataclass
@@ -152,15 +160,46 @@ def normalized_upload_value(output: str) -> str:
     return value
 
 
-def decode_command_output(value) -> str:
+def decode_command_output(value, preserve_bytes: bool = False) -> str:
     if isinstance(value, bytes):
+        if preserve_bytes:
+            return value.decode("latin-1")
         return value.decode("utf-8", errors="replace")
     return value or ""
+
+
+def decode_ethercat_time(ns: int) -> str:
+    dt = datetime.fromtimestamp(ns / 1000000000) + timedelta(days=10957)
+    return dt.isoformat(sep=" ", timespec="seconds")
+
+
+def decode_diagnostic_message(raw_value: str) -> str:
+    raw = raw_value.encode("latin-1", errors="ignore").rstrip(b"\r\n")
+    if not raw or not any(raw):
+        return ""
+    if len(raw) < 16:
+        return "0x" + raw.hex()
+    diag_code = int.from_bytes(raw[0:4], byteorder="little")
+    flags = int.from_bytes(raw[4:6], byteorder="little")
+    text_id = int.from_bytes(raw[6:8], byteorder="little")
+    timestamp = decode_ethercat_time(int.from_bytes(raw[8:16], byteorder="little"))
+    dynamic = raw[16:]
+    parts = [
+        f"diag_code=0x{diag_code:08x}",
+        f"flags=0x{flags:04x}",
+        f"text_id=0x{text_id:04x}",
+        f"time={timestamp}",
+    ]
+    if dynamic:
+        parts.append(f"dynamic=0x{dynamic.hex()}")
+    return ", ".join(parts)
 
 
 def display_upload_value(entry: SdoEntry, output: str) -> str:
     """Return the editable value for an upload result."""
     value = str(output or "").strip()
+    if entry.is_diagnostic_message:
+        return decode_diagnostic_message(value)
     if entry.is_text_like:
         return value
     return normalized_upload_value(value)

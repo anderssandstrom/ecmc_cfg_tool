@@ -5,6 +5,7 @@ from ecmc_sdo import (
     build_ssh_command,
     build_remote_command,
     decode_command_output,
+    decode_diagnostic_message,
     display_upload_value,
     download_arguments,
     ecmc_add_sdo_line,
@@ -100,6 +101,24 @@ class SdoTests(unittest.TestCase):
 
     def test_command_output_decoder_tolerates_octet_bytes(self):
         self.assertEqual(decode_command_output(b"\xe0 diagnostic message"), "� diagnostic message")
+        self.assertEqual(decode_command_output(b"\xe0 diagnostic message", preserve_bytes=True), "\xe0 diagnostic message")
+
+    def test_diagnostic_message_octet_string_is_decoded(self):
+        raw = bytes([
+            0x00, 0xE0, 0x81, 0x1B, 0x00, 0x00, 0x00, 0x11,
+            0x0A, 0xFD, 0x4B, 0x0D, 0x04, 0x47, 0x6F, 0x0B,
+            0x06, 0x00, 0x02, 0x01, 0x06, 0x00, 0x00, 0x00,
+            0x06, 0x00, 0x00, 0x00,
+        ])
+        value = raw.decode("latin-1")
+        decoded = decode_diagnostic_message(value)
+        self.assertIn("diag_code=0x1b81e000", decoded)
+        self.assertIn("flags=0x0000", decoded)
+        self.assertIn("text_id=0x1100", decoded)
+        self.assertIn("dynamic=0x060002010600000006000000", decoded)
+
+        entry = SdoEntry("0x10f3", "0x06", "r-r-r-", "octet_string", "256 bit", "Diagnosis Message 001")
+        self.assertEqual(display_upload_value(entry, value), decoded)
 
     def test_ecmc_snippet_uses_normalized_value_and_byte_size(self):
         entry = SdoEntry("0x6040", "0x00", "rwrwrw", "uint16", "16 bit", "Control word")
