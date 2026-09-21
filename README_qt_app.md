@@ -31,8 +31,11 @@ actions valid for that object.
 ```
 
 Axis actions open the motion, axis configuration, controller, ISO230, or caQtDM
-axis tools, including `ecmcAxis.ui` and `ecmcAxisExpert.ui`. Hardware actions open the configured caQtDM slave panel or the
-remote SDO browser. PLC and plugin actions open their caQtDM panels.
+axis tools, including `ecmcAxis.ui` and `ecmcAxisExpert.ui`. The `ecmc / IOC`
+node summarizes the main-panel PVs, including version, thread, object count,
+and status information, and can open `ecmcMain.ui` from its right-click menu.
+Hardware actions open the configured caQtDM slave panel or the remote SDO
+browser. PLC and plugin actions open their caQtDM panels.
 Demo mode populates every navigator branch without reading any PVs.
 When the remote SDO browser is opened from a hardware row, the navigator asks
 for the SSH server/host and pre-fills it from the optional hostname PV or the

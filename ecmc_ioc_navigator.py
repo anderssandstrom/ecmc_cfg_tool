@@ -130,6 +130,7 @@ class IocNavigator(QtWidgets.QMainWindow):
 
     def _populate(self, snapshot):
         self.tree.clear()
+        self._add_ecmc_info(snapshot)
         specs = [
             ("Hardware", "hardware", "hardware"),
             ("Motion", "axes", "axis"),
@@ -169,17 +170,45 @@ class IocNavigator(QtWidgets.QMainWindow):
             f"Discovered {total} objects on {snapshot.get('prefix', '')} (EtherCAT master {snapshot.get('master', '0')})"
         )
 
+    def _add_ecmc_info(self, snapshot):
+        groups = snapshot.get("ecmc", [])
+        parent = QtWidgets.QTreeWidgetItem(["ecmc / IOC", "", "Main", snapshot.get("prefix", "")])
+        font = parent.font(0)
+        font.setBold(True)
+        parent.setFont(0, font)
+        parent.setData(0, self.DATA_ROLE, {"kind": "ecmc_group"})
+        self.tree.addTopLevelItem(parent)
+        for group in groups:
+            group_item = QtWidgets.QTreeWidgetItem([group.get("name", "Info"), "", "", ""])
+            group_item.setData(0, self.DATA_ROLE, {"kind": "ecmc_info_group"})
+            parent.addChild(group_item)
+            for info in group.get("items", []):
+                label = info.get("label", "")
+                value = info.get("value", "")
+                pv = info.get("pv", "")
+                item = QtWidgets.QTreeWidgetItem([label, "", value, pv])
+                item.setData(0, self.DATA_ROLE, {"kind": "ecmc_info", **info})
+                group_item.addChild(item)
+        parent.setExpanded(True)
+
     def _filter_tree(self, _text=None):
         needle = self.filter_edit.text().strip().lower()
         for i in range(self.tree.topLevelItemCount()):
             parent = self.tree.topLevelItem(i)
-            visible = 0
-            for j in range(parent.childCount()):
-                child = parent.child(j)
-                match = not needle or needle in " ".join(child.text(c).lower() for c in range(4))
-                child.setHidden(not match)
-                visible += int(match)
-            parent.setHidden(bool(needle) and visible == 0)
+            visible = self._filter_item(parent, needle)
+            parent.setHidden(bool(needle) and not visible)
+
+    def _filter_item(self, item, needle):
+        own_match = not needle or needle in " ".join(item.text(c).lower() for c in range(4))
+        child_match = False
+        for i in range(item.childCount()):
+            child = item.child(i)
+            visible = self._filter_item(child, needle)
+            child.setHidden(bool(needle) and not visible)
+            child_match = child_match or visible
+        if needle and child_match:
+            item.setExpanded(True)
+        return own_match or child_match
 
     def _context_menu(self, pos):
         item = self.tree.itemAt(pos)
@@ -199,6 +228,8 @@ class IocNavigator(QtWidgets.QMainWindow):
         elif kind == "hardware":
             self._menu_action(menu, "Open Dedicated caQtDM Panel", lambda: self._open_hardware_panel(data))
             self._menu_action(menu, "Open Remote SDO Browser", lambda: self._open_sdo(data))
+        elif kind == "ecmc_group":
+            self._menu_action(menu, "Open ecmcMain.ui", self._open_main_panel)
         elif kind == "plc":
             self._menu_action(menu, "Open caQtDM PLC Panel", lambda: self._open_object_panel("ecmcPLCxx.ui", data))
         elif kind == "plugin":
@@ -224,6 +255,8 @@ class IocNavigator(QtWidgets.QMainWindow):
         kind = data.get("kind")
         if kind == "axis":
             self._open_script("start_mtn.sh", data["id"])
+        elif kind == "ecmc_group":
+            self._open_main_panel()
         elif kind == "hardware":
             self._open_hardware_panel(data)
         elif kind == "plc":

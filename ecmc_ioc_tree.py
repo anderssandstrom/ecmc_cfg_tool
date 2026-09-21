@@ -24,6 +24,15 @@ def text_value(client, pv: str) -> str:
         return ""
 
 
+def read_pv_group(client, prefix: str, rows: list[tuple[str, str]]) -> list[dict]:
+    values = []
+    for label, suffix in rows:
+        pv = join_pv(prefix, suffix)
+        value = text_value(client, pv)
+        values.append({"label": label, "pv": pv, "value": value})
+    return values
+
+
 def linked_ids(client, first_pv: str, next_pv, limit=1000) -> list[str]:
     current = object_id(text_value(client, first_pv))
     result = []
@@ -38,7 +47,7 @@ def linked_ids(client, first_pv: str, next_pv, limit=1000) -> list[str]:
 def discover_ioc(client, prefix: str, ssh_host_pv: str = "") -> dict:
     prefix = str(prefix).strip().rstrip(":")
     snapshot = {
-        "prefix": prefix, "master": "0", "ssh_host": "", "axes": [], "hardware": [], "plcs": [],
+        "prefix": prefix, "master": "0", "ssh_host": "", "ecmc": [], "axes": [], "hardware": [], "plcs": [],
         "plugins": [], "data_storages": [], "cpp_logic": [], "safety_plugins": []
     }
     if ssh_host_pv:
@@ -47,6 +56,67 @@ def discover_ioc(client, prefix: str, ssh_host_pv: str = "") -> dict:
 
     master = object_id(text_value(client, join_pv(prefix, "MCU-Cfg-EC-Mst")))
     snapshot["master"] = master if master and master != "-1" else "0"
+    master_id = snapshot["master"]
+
+    snapshot["ecmc"] = [
+        {
+            "name": "General",
+            "items": read_pv_group(client, prefix, [
+                ("IOC prefix", f"m{master_id}-Prefix"),
+                ("Config info", "MCU-Cfg-Info"),
+                ("Naming", "MCU-Cfg-Naming"),
+                ("Mode", "MCU-Cfg-Mode"),
+                ("Engineering mode", "MCU-Cfg-Eng-Mode"),
+                ("PV time", "MCU-Cfg-PV-Time"),
+                ("Config time", "MCU-Cfg-Time"),
+                ("Realtime rate", "MCU-Cfg-Rate"),
+                ("EtherCAT master", "MCU-Cfg-EC-Mst"),
+            ]),
+        },
+        {
+            "name": "Versions",
+            "items": read_pv_group(client, prefix, [
+                ("EPICS version", f"m{master_id}-Epics-Ver"),
+                ("ecmccfg version", f"m{master_id}-Ecmccfg-Ver"),
+            ]),
+        },
+        {
+            "name": "Thread",
+            "items": read_pv_group(client, prefix, [
+                ("Period min", "MCU-ThdPrdMin"),
+                ("Period max", "MCU-ThdPrdMax"),
+                ("Latency min", "MCU-ThdLatMin"),
+                ("Latency max", "MCU-ThdLatMax"),
+                ("Execute min", "MCU-ThdExeMin"),
+                ("Execute max", "MCU-ThdExeMax"),
+                ("Send min", "MCU-ThdSndMin"),
+                ("Send max", "MCU-ThdSndMax"),
+                ("Average frequency", "MCU-ThdFrqAvg"),
+                ("RT priority OK", "MCU-ThdRTPrioOK"),
+                ("Memory locked", "MCU-ThdMemLocked"),
+            ]),
+        },
+        {
+            "name": "Object Counts",
+            "items": read_pv_group(client, prefix, [
+                ("Axes", "MCU-Cfg-AX-Cnt"),
+                ("Axis groups", "MCU-Cfg-AXGRP-Cnt"),
+                ("Sequences", "MCU-Cfg-SEQ-Cnt"),
+                ("PLCs", "MCU-Cfg-PLC-Cnt"),
+                ("Plugins", "MCU-Cfg-PLG-Cnt"),
+                ("Data storages", "MCU-Cfg-DS-Cnt"),
+                ("EtherCAT slaves", "MCU-Cfg-EC-Slv-Cnt"),
+                ("EtherCAT domains", "MCU-Cfg-EC-Dom-Cnt"),
+            ]),
+        },
+        {
+            "name": "Status",
+            "items": read_pv_group(client, prefix, [
+                ("Error id", "MCU-ErrId"),
+                ("Error message", "MCU-ErrMsg"),
+            ]),
+        },
+    ]
 
     axis_ids = linked_ids(
         client,
@@ -62,7 +132,6 @@ def discover_ioc(client, prefix: str, ssh_host_pv: str = "") -> dict:
             {"id": item_id, "name": name or f"Axis {item_id}", "motor": motor, "axis_type": axis_type}
         )
 
-    master_id = snapshot["master"]
     hardware_ids = linked_ids(
         client,
         join_pv(prefix, "MCU-Cfg-EC-FrstObjId"),
@@ -123,6 +192,46 @@ def demo_ioc(prefix="DEMO:ECMC") -> dict:
         "prefix": prefix,
         "master": "0",
         "ssh_host": "demo-host",
+        "ecmc": [
+            {
+                "name": "General",
+                "items": [
+                    {"label": "IOC prefix", "pv": f"{prefix}:m0-Prefix", "value": prefix},
+                    {"label": "Realtime rate", "pv": f"{prefix}:MCU-Cfg-Rate", "value": "1000"},
+                    {"label": "EtherCAT master", "pv": f"{prefix}:MCU-Cfg-EC-Mst", "value": "0"},
+                ],
+            },
+            {
+                "name": "Versions",
+                "items": [
+                    {"label": "EPICS version", "pv": f"{prefix}:m0-Epics-Ver", "value": "demo-epics"},
+                    {"label": "ecmccfg version", "pv": f"{prefix}:m0-Ecmccfg-Ver", "value": "demo-ecmccfg"},
+                ],
+            },
+            {
+                "name": "Thread",
+                "items": [
+                    {"label": "Period min", "pv": f"{prefix}:MCU-ThdPrdMin", "value": "999000"},
+                    {"label": "Period max", "pv": f"{prefix}:MCU-ThdPrdMax", "value": "1001000"},
+                    {"label": "Average frequency", "pv": f"{prefix}:MCU-ThdFrqAvg", "value": "1000.000"},
+                    {"label": "RT priority OK", "pv": f"{prefix}:MCU-ThdRTPrioOK", "value": "Yes"},
+                ],
+            },
+            {
+                "name": "Object Counts",
+                "items": [
+                    {"label": "Axes", "pv": f"{prefix}:MCU-Cfg-AX-Cnt", "value": "2"},
+                    {"label": "EtherCAT slaves", "pv": f"{prefix}:MCU-Cfg-EC-Slv-Cnt", "value": "2"},
+                ],
+            },
+            {
+                "name": "Status",
+                "items": [
+                    {"label": "Error id", "pv": f"{prefix}:MCU-ErrId", "value": "0"},
+                    {"label": "Error message", "pv": f"{prefix}:MCU-ErrMsg", "value": ""},
+                ],
+            },
+        ],
         "hardware": [
             {"id": "0", "name": "EK1100", "pv_base": "m0s000", "panel": "EK1100"},
             {"id": "1", "name": "EL7041", "pv_base": "m0s001", "panel": "EL70x1"},
