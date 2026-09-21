@@ -3,6 +3,8 @@ import unittest
 from ecmc_sdo import (
     SdoEntry,
     build_ssh_command,
+    build_remote_command,
+    display_upload_value,
     download_arguments,
     ecmc_add_sdo_line,
     entry_byte_size,
@@ -71,6 +73,24 @@ class SdoTests(unittest.TestCase):
         self.assertEqual(
             upload_arguments("0", "1", entry),
             ["upload", "-m", "0", "-p", "1", "0x7002", "0x03", "--type", "uint24"],
+        )
+
+    def test_octet_string_values_keep_spaces_and_are_quoted(self):
+        entry = SdoEntry("0x2000", "0x01", "rwrwrw", "octet_string", "32 bit", "Label")
+        self.assertTrue(entry.is_text_like)
+        self.assertEqual(display_upload_value(entry, "hello world with spaces\n"), "hello world with spaces")
+        arguments = download_arguments("0", "1", entry, "hello world with spaces")
+        self.assertEqual(
+            arguments,
+            [
+                "download", "-m", "0", "-p", "1", "0x2000", "0x01",
+                "--type", "octet_string", "hello world with spaces",
+            ],
+        )
+        self.assertEqual(
+            build_remote_command(arguments),
+            "/opt/etherlab/bin/ethercat download -m 0 -p 1 0x2000 0x01 --type octet_string "
+            "'hello world with spaces'",
         )
 
     def test_ecmc_snippet_uses_normalized_value_and_byte_size(self):

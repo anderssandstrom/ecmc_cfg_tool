@@ -18,9 +18,9 @@ from ecmc_sdo import (
     SdoEntry,
     DEFAULT_ETHERCAT_BINARY,
     build_ssh_command,
+    display_upload_value,
     download_arguments,
     ecmc_add_sdo_line,
-    normalized_upload_value,
     parse_sdos,
     sdos_arguments,
     upload_arguments,
@@ -553,7 +553,8 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             self._command_error("SDO upload failed", code, stdout, stderr, show_dialog)
             return
         raw_value = stdout.strip()
-        value = normalized_upload_value(raw_value)
+        entry = self._entry(item)
+        value = display_upload_value(entry, raw_value) if entry is not None else raw_value
         editor = self.tree.itemWidget(item, 5)
         if editor is not None:
             editor.setText(value)

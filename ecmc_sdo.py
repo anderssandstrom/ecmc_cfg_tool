@@ -55,6 +55,11 @@ class SdoEntry:
             return None
         return f"uint{byte_size * 8}"
 
+    @property
+    def is_text_like(self) -> bool:
+        data_type = self.data_type.lower().replace("_", " ")
+        return "string" in data_type or "octet" in data_type
+
 
 @dataclass
 class SdoObject:
@@ -147,6 +152,14 @@ def normalized_upload_value(output: str) -> str:
     return value
 
 
+def display_upload_value(entry: SdoEntry, output: str) -> str:
+    """Return the editable value for an upload result."""
+    value = str(output or "").strip()
+    if entry.is_text_like:
+        return value
+    return normalized_upload_value(value)
+
+
 def entry_byte_size(entry: SdoEntry) -> int | None:
     bits = entry.bit_count
     if bits is None:
@@ -156,7 +169,7 @@ def entry_byte_size(entry: SdoEntry) -> int | None:
 
 def ecmc_add_sdo_line(slave: str, entry: SdoEntry, value: str) -> str:
     size = entry_byte_size(entry)
-    normalized = normalized_upload_value(value)
+    normalized = display_upload_value(entry, value)
     label = f"{entry.index}:{entry.subindex[2:]} {entry.name}".strip()
     comment = (
         f"# {label} | type={entry.data_type} | bits={entry.bit_length} | "
