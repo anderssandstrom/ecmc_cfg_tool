@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import json
 import os
 import signal
 import socket
@@ -9,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import io
 from datetime import datetime
 from pathlib import Path
 
@@ -198,7 +201,17 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.Fixed)
             self.tree.setColumnWidth(column, width)
         self.tree.itemDoubleClicked.connect(self._read_item)
-        layout.addWidget(self.tree, 1)
+        self.tree.itemSelectionChanged.connect(self._update_details)
+
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        splitter.addWidget(self.tree)
+        self.details = QtWidgets.QPlainTextEdit()
+        self.details.setReadOnly(True)
+        self.details.setMaximumBlockCount(2000)
+        splitter.addWidget(self.details)
+        splitter.setStretchFactor(0, 4)
+        splitter.setStretchFactor(1, 1)
+        layout.addWidget(splitter, 1)
 
         self.log = QtWidgets.QPlainTextEdit()
         self.log.setReadOnly(True)
@@ -439,6 +452,46 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         read_action.triggered.connect(lambda _checked=False, row=item: self._read_index(row))
         menu.exec_(self.tree.viewport().mapToGlobal(pos)) if hasattr(menu, "exec_") else menu.exec(self.tree.viewport().mapToGlobal(pos))
 
+    def _update_details(self):
+        selected = self.tree.selectedItems()
+        if not selected:
+            self.details.setPlainText("")
+            return
+        item = selected[0]
+        entry = self._entry(item)
+        if entry is None:
+            self.details.setPlainText(
+                f"Index: {item.text(0)}\n"
+                f"Name: {item.text(1)}\n"
+                f"Subindexes: {item.childCount()}\n"
+                f"Visible readable: {sum(1 for i in range(item.childCount()) if not item.child(i).isHidden() and self._entry(item.child(i)) and self._entry(item.child(i)).readable)}"
+            )
+            return
+        editor = self.tree.itemWidget(item, 5)
+        value = editor.text().strip() if editor is not None else ""
+        raw = str(item.data(0, self.RAW_VALUE_ROLE) or "")
+        source = str(item.data(0, self.SOURCE_ROLE) or "")
+        _host, master, slave = self._connection()
+        details = [
+            f"Index: {entry.index}",
+            f"Subindex: {entry.subindex}",
+            f"Name: {entry.name}",
+            f"Type: {entry.data_type}",
+            f"Effective type: {entry.effective_data_type or '(none)'}",
+            f"Bits: {entry.bit_length}",
+            f"Access: {entry.access}",
+            f"Readable: {'yes' if entry.readable else 'no'}",
+            f"Writable: {'yes' if entry.writable else 'no'}",
+            f"Status: {item.text(8)}",
+            f"Source: {source or '(none)'}",
+            f"Value: {value}",
+            f"Raw upload: {raw}",
+            "Upload command: " + " ".join(upload_arguments(master, slave, entry)),
+        ]
+        if entry.writable:
+            details.append("Download command: " + " ".join(download_arguments(master, slave, entry, value or "<value>")))
+        self.details.setPlainText("\n".join(details))
+
     def _read_index(self, item):
         if item is None or self._entry(item) is not None:
             return
@@ -484,6 +537,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         item, entry = self._read_queue.pop(0)
         _host, master, slave = self._connection()
         item.setText(8, "Reading...")
+        self._update_details()
 
         def finished(row, code, stdout, stderr):
             self._read_finished(row, code, stdout, stderr, show_dialog=False)
@@ -510,7 +564,15 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         answer = QtWidgets.QMessageBox.question(
             self,
             "Confirm SDO writes",
-            f"Write {len(rows)} selected SDO entr{'y' if len(rows) == 1 else 'ies'}?",
+            (
+                f"Write {len(rows)} selected SDO entr{'y' if len(rows) == 1 else 'ies'}?\n\n"
+                + "\n".join(
+                    f"{entry.index}:{entry.subindex[2:]} {entry.name} = {value}"
+                    for _item, entry, value in rows[:12]
+                )
+                + ("\n..." if len(rows) > 12 else "")
+                + "\n\nThis writes to the EtherCAT slave."
+            ),
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
             QtWidgets.QMessageBox.No,
         )
@@ -553,8 +615,9 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
 
         def typed_finished(row, code, stdout, stderr):
             if code not in (0, 130) and entry.is_text_like:
-                row.setText(8, "Retrying untyped...")
+                row.setText(8, "Retrying without type")
                 self._log(f"Typed upload failed for {row.text(0)}; retrying without --type")
+                self._update_details()
                 self._run(row, upload_arguments(master, slave, entry, include_type=False), callback)
                 return
             callback(row, code, stdout, stderr)
@@ -564,6 +627,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
     def _read_finished(self, item, code, stdout, stderr, show_dialog=True):
         if code != 0:
             item.setText(8, "Read failed")
+            self._update_details()
             self._command_error("SDO upload failed", code, stdout, stderr, show_dialog)
             return
         raw_value = stdout.strip()
@@ -576,6 +640,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         item.setData(0, self.SOURCE_ROLE, "read")
         item.setData(0, self.RAW_VALUE_ROLE, raw_value)
         item.setText(8, "Read")
+        self._update_details()
         self.statusBar().showMessage(f"Read {item.text(0)}", 3000)
 
     def _write_item(self, item):
@@ -587,10 +652,18 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         if not value:
             QtWidgets.QMessageBox.warning(self, "Missing value", "Enter a value before writing.")
             return
+        old_value = str(item.data(0, self.RAW_VALUE_ROLE) or "")
         answer = QtWidgets.QMessageBox.question(
             self,
             "Confirm SDO write",
-            f"Write {value} to {entry.index}:{entry.subindex[2:]} ({entry.name})?",
+            (
+                f"Write SDO {entry.index}:{entry.subindex[2:]} ({entry.name})?\n\n"
+                f"Type: {entry.data_type}\n"
+                f"Access: {entry.access}\n"
+                f"Current/session value: {old_value or '(not read)'}\n"
+                f"New value: {value}\n\n"
+                "This writes to the EtherCAT slave."
+            ),
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
             QtWidgets.QMessageBox.No,
         )
@@ -603,6 +676,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
     def _write_finished(self, item, code, stdout, stderr, show_dialog=True):
         if code != 0:
             item.setText(8, "Write failed")
+            self._update_details()
             self._command_error("SDO download failed", code, stdout, stderr, show_dialog)
             return
         item.setText(8, "Written")
@@ -612,6 +686,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage(f"Wrote {item.text(0)}", 3000)
         if stdout.strip():
             self._log(stdout.strip())
+        self._update_details()
 
     def _apply_filter(self, _text=None):
         needle = self.search.text().strip().lower()
@@ -692,6 +767,41 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         lines.extend(["```", ""])
         return "\n".join(lines)
 
+    def _report_rows(self, selected_only=False):
+        rows = []
+        for item, entry, value in self._known_rows(selected_only):
+            rows.append({
+                "index": entry.index,
+                "subindex": entry.subindex,
+                "name": entry.name,
+                "type": entry.data_type,
+                "bits": entry.bit_length,
+                "access": entry.access,
+                "source": str(item.data(0, self.SOURCE_ROLE) or "session"),
+                "value": value,
+                "raw_upload": str(item.data(0, self.RAW_VALUE_ROLE) or ""),
+            })
+        return rows
+
+    def _report_csv(self, selected_only=False):
+        output = io.StringIO()
+        fieldnames = ["index", "subindex", "name", "type", "bits", "access", "source", "value", "raw_upload"]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(self._report_rows(selected_only))
+        return output.getvalue()
+
+    def _report_json(self, selected_only=False):
+        host, master, slave = self._connection()
+        payload = {
+            "generated": datetime.now().isoformat(timespec="seconds"),
+            "host": host,
+            "master": master,
+            "slave": slave,
+            "entries": self._report_rows(selected_only),
+        }
+        return json.dumps(payload, indent=2)
+
     def _show_report(self):
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle("SDO Report and ecmc Configuration")
@@ -701,6 +811,11 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         scope.addItem("All read or written values", False)
         scope.addItem("Selected read or written values", True)
         layout.addWidget(scope)
+        fmt = QtWidgets.QComboBox()
+        fmt.addItem("Markdown report", "md")
+        fmt.addItem("CSV", "csv")
+        fmt.addItem("JSON", "json")
+        layout.addWidget(fmt)
         preview = QtWidgets.QPlainTextEdit()
         preview.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
         layout.addWidget(preview, 1)
@@ -715,11 +830,24 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         layout.addLayout(buttons)
 
         def refresh_preview():
-            preview.setPlainText(self._report_text(bool(scope.currentData())))
+            selected_only = bool(scope.currentData())
+            kind = fmt.currentData()
+            if kind == "csv":
+                preview.setPlainText(self._report_csv(selected_only))
+            elif kind == "json":
+                preview.setPlainText(self._report_json(selected_only))
+            else:
+                preview.setPlainText(self._report_text(selected_only))
 
         def save_report():
+            kind = fmt.currentData()
+            filename = {
+                "csv": "ethercat_sdo_report.csv",
+                "json": "ethercat_sdo_report.json",
+            }.get(kind, "ethercat_sdo_report.md")
+            filters = "CSV (*.csv);;JSON (*.json);;Markdown (*.md);;Text (*.txt)"
             path, _chosen_filter = QtWidgets.QFileDialog.getSaveFileName(
-                dialog, "Save SDO report", "ethercat_sdo_report.md", "Markdown (*.md);;Text (*.txt)"
+                dialog, "Save SDO report", filename, filters
             )
             if path:
                 try:
@@ -728,6 +856,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
                     QtWidgets.QMessageBox.critical(dialog, "Could not save report", str(ex))
 
         scope.currentIndexChanged.connect(lambda _index: refresh_preview())
+        fmt.currentIndexChanged.connect(lambda _index: refresh_preview())
         copy_btn.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(preview.toPlainText()))
         save_btn.clicked.connect(save_report)
         close_btn.clicked.connect(dialog.accept)

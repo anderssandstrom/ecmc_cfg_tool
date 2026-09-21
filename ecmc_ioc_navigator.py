@@ -2,14 +2,22 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from qt_compat import QtCore, QtWidgets
-from ecmc_stream_qt import EpicsClient
+from ecmc_stream_qt import EpicsClient, MainWindow as StreamWindow, _join_prefix_pv
+from ecmc_axis_cfg import AxisYamlConfigWindow
+from ecmc_mtn_qt import MotionWindow
+from ecmc_cntrl_qt import CntrlWindow
+from ecmc_iso230_qt import Iso230Window
+from ecmc_daq_qt import DaqWindow
+from ecmc_rtlog_qt import RtLogWindow
 from ecmc_ioc_tree import demo_ioc, discover_ioc
+from ecmc_sdo_qt import SdoBrowserWindow
 
 
 class DiscoverySignals(QtCore.QObject):
@@ -40,7 +48,7 @@ class IocNavigator(QtWidgets.QMainWindow):
     ):
         super().__init__()
         self.setWindowTitle("ecmc IOC Navigator")
-        self.resize(760, 620)
+        self.resize(980, 700)
         self.timeout = float(timeout)
         self.app_dir = Path(__file__).resolve().parent
         default_qt = self.app_dir.parent / "ecmccfg" / "qt"
@@ -50,6 +58,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._tasks = set()
         self._snapshot = {}
         self._ssh_host = ssh_host
+        self._embedded_tools = []
         self._build_ui(prefix, ssh_host, ssh_host_pv)
         if demo:
             self._snapshot = demo_ioc(prefix)
@@ -64,27 +73,39 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.setCentralWidget(root)
         layout = QtWidgets.QVBoxLayout(root)
 
+        workspace = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        layout.addWidget(workspace, 1)
+
+        navigator = QtWidgets.QWidget()
+        navigator.setMinimumWidth(280)
+        navigator.setMaximumWidth(430)
+        nav_layout = QtWidgets.QVBoxLayout(navigator)
+        workspace.addWidget(navigator)
+
         top = QtWidgets.QHBoxLayout()
         self.prefix_edit = QtWidgets.QLineEdit(prefix)
         self.prefix_edit.setPlaceholderText("IOC prefix")
         self.refresh_btn = QtWidgets.QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh)
+        self.embed_tools_check = QtWidgets.QCheckBox("Open Python tools in tabs")
+        self.embed_tools_check.setChecked(True)
         top.addWidget(QtWidgets.QLabel("IOC"))
         top.addWidget(self.prefix_edit, 1)
+        top.addWidget(self.embed_tools_check)
         top.addWidget(self.refresh_btn)
-        layout.addLayout(top)
+        nav_layout.addLayout(top)
 
         host_pv_row = QtWidgets.QHBoxLayout()
         self.host_pv_edit = QtWidgets.QLineEdit(ssh_host_pv)
         self.host_pv_edit.setPlaceholderText("Optional hostname PV or suffix")
         host_pv_row.addWidget(QtWidgets.QLabel("SSH host PV"))
         host_pv_row.addWidget(self.host_pv_edit, 1)
-        layout.addLayout(host_pv_row)
+        nav_layout.addLayout(host_pv_row)
 
         self.filter_edit = QtWidgets.QLineEdit()
         self.filter_edit.setPlaceholderText("Filter objects...")
         self.filter_edit.textChanged.connect(self._filter_tree)
-        layout.addWidget(self.filter_edit)
+        nav_layout.addWidget(self.filter_edit)
 
         self.tree = QtWidgets.QTreeWidget()
         self.tree.setHeaderLabels(["Object", "ID", "Type / Panel", "PV / Motor"])
@@ -93,15 +114,65 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.tree.customContextMenuRequested.connect(self._context_menu)
         self.tree.itemDoubleClicked.connect(self._default_action)
         header = self.tree.header()
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
-        layout.addWidget(self.tree, 1)
+        for column in range(4):
+            header.setSectionResizeMode(column, QtWidgets.QHeaderView.Interactive)
+        self.tree.setColumnWidth(0, 190)
+        self.tree.setColumnWidth(1, 55)
+        self.tree.setColumnWidth(2, 115)
+        self.tree.setColumnWidth(3, 210)
+        nav_layout.addWidget(self.tree, 1)
 
         hint = QtWidgets.QLabel("Double-click an object for its default panel, or right-click for all available actions.")
-        layout.addWidget(hint)
+        nav_layout.addWidget(hint)
+
+        right = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right)
+        self.tabs = QtWidgets.QTabWidget()
+        self.tabs.setTabsClosable(True)
+        self.tabs.tabCloseRequested.connect(self._close_tool_tab)
+        self.tool_scroll = QtWidgets.QScrollArea()
+        self.tool_scroll.setWidgetResizable(True)
+        self.tool_scroll.setWidget(self.tabs)
+        right_layout.addWidget(self.tool_scroll, 1)
+        self._add_workspace_placeholder()
+        workspace.addWidget(right)
+        workspace.setSizes([330, 650])
         self.statusBar().showMessage("Ready")
+
+    def _add_workspace_placeholder(self):
+        placeholder = QtWidgets.QLabel("Open a Python tool from the navigator to show it here.")
+        placeholder.setAlignment(QtCore.Qt.AlignCenter)
+        placeholder.setProperty("placeholder", True)
+        self.tabs.addTab(placeholder, "Workspace")
+
+    def _add_tool_tab(self, widget, title):
+        if self.tabs.count() == 1 and self.tabs.widget(0).property("placeholder"):
+            old = self.tabs.widget(0)
+            self.tabs.removeTab(0)
+            old.deleteLater()
+        widget.setParent(self.tabs)
+        self._embedded_tools.append(widget)
+        index = self.tabs.addTab(widget, title)
+        self.tabs.setCurrentIndex(index)
+        self.statusBar().showMessage(f"Opened tab: {title}", 5000)
+
+    def _add_error_tab(self, title, message):
+        pane = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(pane)
+        label = QtWidgets.QLabel(str(message))
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        layout.addStretch(1)
+        self._add_tool_tab(pane, title)
+
+    def _close_tool_tab(self, index):
+        widget = self.tabs.widget(index)
+        self.tabs.removeTab(index)
+        if widget in self._embedded_tools:
+            self._embedded_tools.remove(widget)
+        widget.close()
+        if self.tabs.count() == 0:
+            self._add_workspace_placeholder()
 
     def refresh(self):
         prefix = self.prefix_edit.text().strip().rstrip(":")
@@ -218,32 +289,37 @@ class IocNavigator(QtWidgets.QMainWindow):
         menu = QtWidgets.QMenu(self)
         kind = data.get("kind")
         if kind == "axis":
-            self._menu_action(menu, "Open Motion App", lambda: self._open_script("start_mtn.sh", data["id"]))
-            self._menu_action(menu, "Open Axis Config App", lambda: self._open_script("start_axis.sh", data["id"]))
-            self._menu_action(menu, "Open Controller App", lambda: self._open_script("start_cntrl.sh", data["id"]))
-            self._menu_action(menu, "Open ISO230 App", lambda: self._open_script("start_iso230.sh", data["id"]))
+            self._menu_action(menu, "Open Motion App", lambda: self._open_motion(data))
+            self._menu_action(menu, "Open Axis Config App", lambda: self._open_axis_config(data))
+            self._menu_action(menu, "Open Controller App", lambda: self._open_controller(data))
+            self._menu_action(menu, "Open ISO230 App", lambda: self._open_iso230(data))
             menu.addSeparator()
-            self._menu_action(menu, "Open ecmcAxis.ui", lambda: self._open_axis_panel(data, "ecmcAxis.ui"))
-            self._menu_action(menu, "Open ecmcAxisExpert.ui", lambda: self._open_axis_panel(data, "ecmcAxisExpert.ui"))
+            self._menu_action(menu, "Open Axis Panel", lambda: self._open_axis_panel(data, "ecmcAxis.ui"))
+            self._menu_action(menu, "Open Axis Expert Panel", lambda: self._open_axis_panel(data, "ecmcAxisExpert.ui"))
         elif kind == "hardware":
-            self._menu_action(menu, "Open Dedicated caQtDM Panel", lambda: self._open_hardware_panel(data))
             self._menu_action(menu, "Open Remote SDO Browser", lambda: self._open_sdo(data))
+            menu.addSeparator()
+            self._menu_action(menu, "Open Hardware Panel", lambda: self._open_hardware_panel(data))
         elif kind == "ecmc_group":
-            self._menu_action(menu, "Open ecmcMain.ui", self._open_main_panel)
             self._menu_action(menu, "Open Command Parser", self._open_command_parser)
+            self._menu_action(menu, "Open DAQ / FFT App", self._open_daq)
+            self._menu_action(menu, "Open RT Log App", self._open_rtlog)
+            menu.addSeparator()
+            self._menu_action(menu, "Open Main Panel", self._open_main_panel)
         elif kind == "plc":
-            self._menu_action(menu, "Open caQtDM PLC Panel", lambda: self._open_object_panel("ecmcPLCxx.ui", data))
+            self._menu_action(menu, "Open PLC Panel", lambda: self._open_object_panel("ecmcPLCxx.ui", data))
         elif kind == "plugin":
-            self._menu_action(menu, "Open caQtDM Plugin Panel", lambda: self._open_object_panel("ecmcPLGxx.ui", data))
+            self._menu_action(menu, "Open Plugin Panel", lambda: self._open_object_panel("ecmcPLGxx.ui", data))
         elif kind == "data_storage":
-            self._menu_action(menu, "Open caQtDM Data Storage Panel", lambda: self._open_object_panel("ecmcDSxx.ui", data))
+            self._menu_action(menu, "Open Data Storage Panel", lambda: self._open_object_panel("ecmcDSxx.ui", data))
         elif kind == "cpp_logic":
-            self._menu_action(menu, "Open caQtDM CppLogic Panel", lambda: self._open_cpp_logic(data))
             self._menu_action(menu, "Open CppLogic Overview", self._open_cpp_logic_overview)
+            menu.addSeparator()
+            self._menu_action(menu, "Open CppLogic Panel", lambda: self._open_cpp_logic(data))
         elif kind == "safety_plugin":
             self._menu_action(menu, "Open SafetyPlugin Panel", self._open_safety_plugin)
         elif kind == "hardware_group":
-            self._menu_action(menu, "Open caQtDM Main Panel", self._open_main_panel)
+            self._menu_action(menu, "Open Hardware Overview", self._open_hardware_overview)
         if not menu.isEmpty():
             menu.exec_(self.tree.viewport().mapToGlobal(pos)) if hasattr(menu, "exec_") else menu.exec(self.tree.viewport().mapToGlobal(pos))
 
@@ -255,11 +331,13 @@ class IocNavigator(QtWidgets.QMainWindow):
         data = item.data(0, self.DATA_ROLE) or {}
         kind = data.get("kind")
         if kind == "axis":
-            self._open_script("start_mtn.sh", data["id"])
+            self._open_motion(data)
         elif kind == "ecmc_group":
             self._open_main_panel()
         elif kind == "hardware":
             self._open_hardware_panel(data)
+        elif kind == "hardware_group":
+            self._open_hardware_overview()
         elif kind == "plc":
             self._open_object_panel("ecmcPLCxx.ui", data)
         elif kind == "plugin":
@@ -285,6 +363,10 @@ class IocNavigator(QtWidgets.QMainWindow):
         script = self.app_dir / script_name
         self._spawn(["bash", str(script), self._prefix(), str(object_id)], self.app_dir)
 
+    def _open_script_no_object(self, script_name):
+        script = self.app_dir / script_name
+        self._spawn(["bash", str(script), self._prefix()], self.app_dir)
+
     def _caqtdm(self, panel, macro, panel_dir=None):
         executable = shutil.which("caqtdm") or "caqtdm"
         self._spawn([executable, "-macro", macro, panel], panel_dir or self.caqtdm_dir)
@@ -292,9 +374,156 @@ class IocNavigator(QtWidgets.QMainWindow):
     def _open_main_panel(self):
         self._caqtdm("ecmcMain.ui", f"IOC={self._prefix()}")
 
-    def _open_command_parser(self):
+    def _ec_overview_command(self):
+        command = shutil.which("start_ecmc_overview.py")
+        if command:
+            return command
+        for candidate in (
+            "/sls/controls/bin/start_ecmc_overview.py",
+            "/sf/controls/bin/start_ecmc_overview.py",
+            "/hipa/controls/bin/start_ecmc_overview.py",
+            "/proscan/controls/bin/start_ecmc_overview.py",
+        ):
+            path = Path(candidate)
+            if path.exists() and os.access(str(path), os.X_OK):
+                return str(path)
+        return ""
+
+    def _open_hardware_overview(self):
+        command = self._ec_overview_command()
+        if not command:
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Hardware overview not found",
+                "Could not find start_ecmc_overview.py in PATH or known controls bin directories.",
+            )
+            return
+        master = str(self._snapshot.get("master", "0"))
+        rows = str(self._snapshot.get("ec_rows", "1"))
+        self._spawn([command, "--master", master, "--rows", rows, self._prefix()], self.caqtdm_dir)
+
+    def _open_command_parser(self, separate=False):
+        if self.embed_tools_check.isChecked() and not separate:
+            prefix = self._prefix()
+            window = StreamWindow(
+                catalog_path=str(self.app_dir / "ecmc_commands.json"),
+                blocklist_path=str(self.app_dir / "ecmc_commands_blocklist_all.json"),
+                default_cmd_pv=_join_prefix_pv(prefix, "MCU-Cmd.AOUT"),
+                default_qry_pv=_join_prefix_pv(prefix, "MCU-Cmd.AINP"),
+                timeout=max(self.timeout, 2.0),
+                error_db_path=str(self.app_dir / "ecmc_error_codes.json"),
+            )
+            self._add_tool_tab(window, f"Command {prefix}")
+            return
         script = self.app_dir / "start.sh"
         self._spawn(["bash", str(script), self._prefix()], self.app_dir)
+
+    def _open_motion(self, data, separate=False):
+        if self.embed_tools_check.isChecked() and not separate:
+            axis_id = str(data.get("id", ""))
+            try:
+                window = MotionWindow(self._prefix(), axis_id, max(self.timeout, 2.0), axis_id_was_provided=True)
+            except Exception as ex:
+                self._add_error_tab(f"Motion {axis_id}", f"Could not open Motion App inside the navigator.\n\n{ex}")
+                return
+            self._add_tool_tab(window, f"Motion {axis_id}")
+            return
+        self._open_script("start_mtn.sh", data["id"])
+
+    def _open_axis_config(self, data, separate=False):
+        if self.embed_tools_check.isChecked() and not separate:
+            prefix = self._prefix()
+            axis_id = str(data.get("id", ""))
+            try:
+                window = AxisYamlConfigWindow(
+                    catalog_path=str(self.app_dir / "ecmc_commands.json"),
+                    yaml_path=str(self.app_dir / "axis_template.yaml"),
+                    mapping_path="",
+                    default_cmd_pv=_join_prefix_pv(prefix, "MCU-Cmd.AOUT"),
+                    default_qry_pv=_join_prefix_pv(prefix, "MCU-Cmd.AINP"),
+                    timeout=max(self.timeout, 2.0),
+                    axis_id=axis_id,
+                    title_prefix=prefix,
+                    error_db_path=str(self.app_dir / "ecmc_error_codes.json"),
+                    axis_id_was_provided=True,
+                )
+            except Exception as ex:
+                self._add_error_tab(
+                    f"Axis {axis_id}",
+                    f"Could not open Axis Config App inside the navigator.\n\n{ex}",
+                )
+                return
+            self._add_tool_tab(window, f"Axis {axis_id}")
+            return
+        self._open_script("start_axis.sh", data["id"])
+
+    def _open_controller(self, data, separate=False):
+        if self.embed_tools_check.isChecked() and not separate:
+            prefix = self._prefix()
+            axis_id = str(data.get("id", ""))
+            sketch_image = ""
+            for name in ("original.png", "controller_sketch.png"):
+                candidate = self.app_dir / name
+                if candidate.exists():
+                    sketch_image = str(candidate)
+                    break
+            try:
+                window = CntrlWindow(
+                    catalog_path=str(self.app_dir / "ecmc_commands_cntrl.json"),
+                    default_cmd_pv=_join_prefix_pv(prefix, "MCU-Cmd.AOUT"),
+                    default_qry_pv=_join_prefix_pv(prefix, "MCU-Cmd.AINP"),
+                    timeout=max(self.timeout, 2.0),
+                    default_axis_id=axis_id,
+                    title_prefix=prefix,
+                    sketch_image_path=sketch_image,
+                    error_db_path=str(self.app_dir / "ecmc_error_codes.json"),
+                    axis_id_was_provided=True,
+                )
+            except Exception as ex:
+                self._add_error_tab(
+                    f"Controller {axis_id}",
+                    f"Could not open Controller App inside the navigator.\n\n{ex}",
+                )
+                return
+            self._add_tool_tab(window, f"Controller {axis_id}")
+            return
+        self._open_script("start_cntrl.sh", data["id"])
+
+    def _open_iso230(self, data, separate=False):
+        if self.embed_tools_check.isChecked() and not separate:
+            axis_id = str(data.get("id", ""))
+            try:
+                window = Iso230Window(self._prefix(), axis_id, max(self.timeout, 2.0), axis_id_was_provided=True)
+            except Exception as ex:
+                self._add_error_tab(f"ISO230 {axis_id}", f"Could not open ISO230 App inside the navigator.\n\n{ex}")
+                return
+            self._add_tool_tab(window, f"ISO230 {axis_id}")
+            return
+        self._open_script("start_iso230.sh", data["id"])
+
+    def _open_daq(self, separate=False):
+        if self.embed_tools_check.isChecked() and not separate:
+            window = DaqWindow(default_prefix=self._prefix(), initial_pvs=[], timeout=max(self.timeout, 2.0))
+            self._add_tool_tab(window, "DAQ / FFT")
+            return
+        self._open_script_no_object("start_daq.sh")
+
+    def _open_rtlog(self, data=None, separate=False):
+        axis_id = str((data or {}).get("id", "1"))
+        if self.embed_tools_check.isChecked() and not separate:
+            window = RtLogWindow(
+                prefix=self._prefix(),
+                timeout=max(self.timeout, 2.0),
+                poll_ms=250,
+                history_limit=200,
+                launch_axis_id=axis_id,
+            )
+            self._add_tool_tab(window, "RT Log")
+            return
+        if data is None:
+            self._open_script_no_object("start_rtlog.sh")
+        else:
+            self._open_script("start_rtlog.sh", axis_id)
 
     def _open_axis_panel(self, data, panel="ecmcAxis.ui"):
         motor = data.get("motor", "")
@@ -325,7 +554,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         panel_dir = self.safety_qt_dir if self.safety_qt_dir.exists() else self.caqtdm_dir
         self._caqtdm("ecmc_plugin_safety_main.ui", f"IOC={self._prefix()}", panel_dir)
 
-    def _open_sdo(self, data):
+    def _open_sdo(self, data, separate=False):
         default_host = self._ssh_host or self._snapshot.get("ssh_host", "")
         host, accepted = QtWidgets.QInputDialog.getText(
             self,
@@ -341,8 +570,16 @@ class IocNavigator(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Missing SSH host", "Enter the SSH host before opening the SDO browser.")
             return
         self._ssh_host = host
+        master = self._snapshot.get("master", "0")
+        slave = str(data["id"])
+        if self.embed_tools_check.isChecked() and not separate:
+            window = SdoBrowserWindow(host, master, slave)
+            hw_name = str(data.get("name") or data.get("panel") or "").strip()
+            title = f"SDO {slave} {hw_name}".strip()
+            self._add_tool_tab(window, title)
+            return
         script = self.app_dir / "start_sdo.sh"
-        self._spawn(["bash", str(script), host, self._snapshot.get("master", "0"), data["id"]], self.app_dir)
+        self._spawn(["bash", str(script), host, master, slave], self.app_dir)
 
 
 def main():

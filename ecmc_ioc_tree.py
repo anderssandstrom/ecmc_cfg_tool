@@ -47,7 +47,7 @@ def linked_ids(client, first_pv: str, next_pv, limit=1000) -> list[str]:
 def discover_ioc(client, prefix: str, ssh_host_pv: str = "") -> dict:
     prefix = str(prefix).strip().rstrip(":")
     snapshot = {
-        "prefix": prefix, "master": "0", "ssh_host": "", "ecmc": [], "axes": [], "hardware": [], "plcs": [],
+        "prefix": prefix, "master": "0", "ec_rows": "1", "ssh_host": "", "ecmc": [], "axes": [], "hardware": [], "plcs": [],
         "plugins": [], "data_storages": [], "cpp_logic": [], "safety_plugins": []
     }
     if ssh_host_pv:
@@ -57,6 +57,8 @@ def discover_ioc(client, prefix: str, ssh_host_pv: str = "") -> dict:
     master = object_id(text_value(client, join_pv(prefix, "MCU-Cfg-EC-Mst")))
     snapshot["master"] = master if master and master != "-1" else "0"
     master_id = snapshot["master"]
+    rows = object_id(text_value(client, join_pv(prefix, "MCU-Cfg-UI-EC-Rows")))
+    snapshot["ec_rows"] = rows if rows and rows != "-1" else "1"
 
     snapshot["ecmc"] = [
         {
@@ -191,6 +193,7 @@ def demo_ioc(prefix="DEMO:ECMC") -> dict:
     return {
         "prefix": prefix,
         "master": "0",
+        "ec_rows": "8",
         "ssh_host": "demo-host",
         "ecmc": [
             {

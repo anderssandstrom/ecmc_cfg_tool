@@ -23,6 +23,8 @@ The IOC navigator follows the configuration PV linked lists and presents
 Hardware, Motion, PLCs, Plugins, Data Storage, CppLogic, and SafetyPlugin in one
 filterable tree. Double-click opens the default tool; right-click exposes all
 actions valid for that object.
+Context menus list Python apps first, then caQtDM panels after a separator, and
+use user-facing panel names instead of raw `.ui` filenames.
 
 ```bash
 ./start_ioc.sh <ioc-prefix> [ssh-host]
@@ -37,6 +39,15 @@ and status information, and can open `ecmcMain.ui` or the command parser from
 its right-click menu.
 Hardware actions open the configured caQtDM slave panel or the remote SDO
 browser. PLC and plugin actions open their caQtDM panels.
+The Hardware group opens the generated EtherCAT hardware overview through
+`start_ecmc_overview.py`, matching `EC_OVERVIEW` in `ecmcOpenObject.sh`.
+With `Open Python tools in tabs` checked, the navigator stays visible on the
+left and the command parser, SDO browser, motion, controller, ISO230, DAQ/FFT,
+and RT log apps open in a tabbed workspace on the right. Uncheck it to launch
+those Python tools as separate windows instead. caQtDM panels still open as
+external windows.
+If a live EPICS connection is unavailable, embedded tool launch errors are shown
+in the workspace rather than opening an unexpected separate window.
 Demo mode populates every navigator branch without reading any PVs.
 When the remote SDO browser is opened from a hardware row, the navigator asks
 for the SSH server/host and pre-fills it from the optional hostname PV or the
@@ -227,6 +238,9 @@ writable entries can be downloaded after confirmation.
 Select an index and use `Read Selected` to read all readable subindexes. Select
 an individual subindex to operate on only that entry. `Write Selected` writes
 the filled values below the selected index or subindex after confirmation.
+The details pane shows the selected SDO metadata, value, raw upload data, and
+the exact upload/download commands. The report dialog can export Markdown, CSV,
+or JSON.
 `Report / ecmc Snippet` previews, copies, or saves a Markdown report for all
 session-known values or the current selection, including generated
 `ecmcConfigOrDie "Cfg.EcAddSdo(...)"` commands where the value is representable.
