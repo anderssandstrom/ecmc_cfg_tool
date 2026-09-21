@@ -46,6 +46,15 @@ class SdoEntry:
     def writable(self) -> bool:
         return self.has_data and "w" in self.access.lower()
 
+    @property
+    def effective_data_type(self) -> str | None:
+        if not self.data_type.lower().startswith("type "):
+            return self.data_type
+        byte_size = entry_byte_size(self)
+        if byte_size is None or byte_size == 0:
+            return None
+        return f"uint{byte_size * 8}"
+
 
 @dataclass
 class SdoObject:
@@ -111,8 +120,9 @@ def upload_arguments(master: str, slave: str, entry: SdoEntry) -> list[str]:
         "upload", "-m", str(master), "-p", str(slave),
         entry.index, entry.subindex,
     ]
-    if not entry.data_type.lower().startswith("type "):
-        arguments.extend(["--type", entry.data_type])
+    data_type = entry.effective_data_type
+    if data_type:
+        arguments.extend(["--type", data_type])
     return arguments
 
 
@@ -121,8 +131,9 @@ def download_arguments(master: str, slave: str, entry: SdoEntry, value: str) -> 
         "download", "-m", str(master), "-p", str(slave),
         entry.index, entry.subindex,
     ]
-    if not entry.data_type.lower().startswith("type "):
-        arguments.extend(["--type", entry.data_type])
+    data_type = entry.effective_data_type
+    if data_type:
+        arguments.extend(["--type", data_type])
     arguments.append(value)
     return arguments
 

@@ -49,10 +49,11 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.thread_pool = QtCore.QThreadPool.globalInstance()
         self._tasks = set()
         self._snapshot = {}
+        self._ssh_host = ssh_host
         self._build_ui(prefix, ssh_host, ssh_host_pv)
         if demo:
             self._snapshot = demo_ioc(prefix)
-            self.host_edit.setText(ssh_host or self._snapshot["ssh_host"])
+            self._ssh_host = ssh_host or self._snapshot["ssh_host"]
             self._populate(self._snapshot)
             self.statusBar().showMessage("Offline demo data loaded; launch actions are not simulated")
         else:
@@ -66,14 +67,10 @@ class IocNavigator(QtWidgets.QMainWindow):
         top = QtWidgets.QHBoxLayout()
         self.prefix_edit = QtWidgets.QLineEdit(prefix)
         self.prefix_edit.setPlaceholderText("IOC prefix")
-        self.host_edit = QtWidgets.QLineEdit(ssh_host)
-        self.host_edit.setPlaceholderText("SSH host for SDO browser")
         self.refresh_btn = QtWidgets.QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self.refresh)
         top.addWidget(QtWidgets.QLabel("IOC"))
         top.addWidget(self.prefix_edit, 1)
-        top.addWidget(QtWidgets.QLabel("SSH host"))
-        top.addWidget(self.host_edit, 1)
         top.addWidget(self.refresh_btn)
         layout.addLayout(top)
 
@@ -124,8 +121,8 @@ class IocNavigator(QtWidgets.QMainWindow):
                 QtWidgets.QMessageBox.critical(self, "IOC discovery failed", error)
                 return
             self._snapshot = snapshot
-            if snapshot.get("ssh_host") and not self.host_edit.text().strip():
-                self.host_edit.setText(snapshot["ssh_host"])
+            if snapshot.get("ssh_host") and not self._ssh_host:
+                self._ssh_host = snapshot["ssh_host"]
             self._populate(snapshot)
 
         task.signals.finished.connect(done)
@@ -291,10 +288,21 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._caqtdm("ecmc_plugin_safety_main.ui", f"IOC={self._prefix()}", panel_dir)
 
     def _open_sdo(self, data):
-        host = self.host_edit.text().strip()
+        default_host = self._ssh_host or self._snapshot.get("ssh_host", "")
+        host, accepted = QtWidgets.QInputDialog.getText(
+            self,
+            "Open Remote SDO Browser",
+            "SSH server / host:",
+            QtWidgets.QLineEdit.Normal,
+            default_host,
+        )
+        if not accepted:
+            return
+        host = host.strip()
         if not host:
             QtWidgets.QMessageBox.warning(self, "Missing SSH host", "Enter the SSH host before opening the SDO browser.")
             return
+        self._ssh_host = host
         script = self.app_dir / "start_sdo.sh"
         self._spawn(["bash", str(script), host, self._snapshot.get("master", "0"), data["id"]], self.app_dir)
 

@@ -53,11 +53,24 @@ class SdoTests(unittest.TestCase):
             ["download", "-m", "2", "-p", "7", "0x6040", "0x00", "--type", "uint16", "6"],
         )
 
-    def test_unknown_type_is_left_for_ethercat_to_infer(self):
+    def test_unknown_type_uses_unsigned_int_for_size(self):
         entry = SdoEntry("0x7002", "0x02", "r-r-r-", "type 0000", "7 bit", "Reserved")
+        self.assertEqual(entry.effective_data_type, "uint8")
         self.assertEqual(
             upload_arguments("0", "1", entry),
-            ["upload", "-m", "0", "-p", "1", "0x7002", "0x02"],
+            ["upload", "-m", "0", "-p", "1", "0x7002", "0x02", "--type", "uint8"],
+        )
+        self.assertEqual(
+            download_arguments("0", "1", entry, "1"),
+            ["download", "-m", "0", "-p", "1", "0x7002", "0x02", "--type", "uint8", "1"],
+        )
+
+    def test_unknown_type_uses_exact_byte_width(self):
+        entry = SdoEntry("0x7002", "0x03", "r-r-r-", "type 0000", "17 bit", "Reserved")
+        self.assertEqual(entry.effective_data_type, "uint24")
+        self.assertEqual(
+            upload_arguments("0", "1", entry),
+            ["upload", "-m", "0", "-p", "1", "0x7002", "0x03", "--type", "uint24"],
         )
 
     def test_ecmc_snippet_uses_normalized_value_and_byte_size(self):
