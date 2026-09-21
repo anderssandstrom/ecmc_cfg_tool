@@ -28,12 +28,23 @@ class SdoEntry:
     name: str
 
     @property
+    def bit_count(self) -> int | None:
+        match = re.search(r"(\d+)\s*bit", self.bit_length, re.IGNORECASE)
+        if not match:
+            return None
+        return int(match.group(1))
+
+    @property
+    def has_data(self) -> bool:
+        return self.bit_count != 0
+
+    @property
     def readable(self) -> bool:
-        return "r" in self.access.lower()
+        return self.has_data and "r" in self.access.lower()
 
     @property
     def writable(self) -> bool:
-        return "w" in self.access.lower()
+        return self.has_data and "w" in self.access.lower()
 
 
 @dataclass
@@ -126,10 +137,9 @@ def normalized_upload_value(output: str) -> str:
 
 
 def entry_byte_size(entry: SdoEntry) -> int | None:
-    match = re.search(r"(\d+)\s*bit", entry.bit_length, re.IGNORECASE)
-    if not match:
+    bits = entry.bit_count
+    if bits is None:
         return None
-    bits = int(match.group(1))
     return (bits + 7) // 8
 
 

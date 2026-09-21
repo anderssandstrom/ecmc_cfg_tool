@@ -368,8 +368,8 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             for entry in obj.entries:
                 self._add_entry(parent, entry)
                 entry_count += 1
-        self.tree.expandToDepth(0)
         self._apply_filter()
+        self.tree.collapseAll()
         self.summary.setText(f"{len(objects)} objects, {entry_count} entries")
         self.statusBar().showMessage(status_message, 4000)
         self._log(f"Loaded {len(objects)} objects and {entry_count} entries")
@@ -384,13 +384,22 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
 
         value_edit = QtWidgets.QLineEdit()
         value_edit.setPlaceholderText("value")
+        value_edit.setEnabled(entry.writable or entry.readable)
         self.tree.setItemWidget(item, 5, value_edit)
         read_btn = QtWidgets.QPushButton("Read")
         read_btn.setEnabled(entry.readable)
+        if not entry.has_data:
+            read_btn.setToolTip("0-bit SDO entries cannot be read")
+        elif not entry.readable:
+            read_btn.setToolTip("SDO access flags do not allow reading")
         read_btn.clicked.connect(lambda _checked=False, row=item: self._read_item(row))
         self.tree.setItemWidget(item, 6, read_btn)
         write_btn = QtWidgets.QPushButton("Write")
         write_btn.setEnabled(entry.writable)
+        if not entry.has_data:
+            write_btn.setToolTip("0-bit SDO entries cannot be written")
+        elif not entry.writable:
+            write_btn.setToolTip("SDO access flags do not allow writing")
         write_btn.clicked.connect(lambda _checked=False, row=item: self._write_item(row))
         self.tree.setItemWidget(item, 7, write_btn)
 
@@ -491,7 +500,13 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
 
     def _read_item(self, item, _column=0):
         entry = self._entry(item)
-        if entry is None or not entry.readable:
+        if entry is None:
+            if item is not None:
+                self.tree.clearSelection()
+                item.setSelected(True)
+                self._read_selected()
+            return
+        if not entry.readable:
             return
         host, master, slave = self._connection()
         item.setText(8, "Reading...")

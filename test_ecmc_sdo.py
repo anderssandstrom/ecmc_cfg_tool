@@ -5,6 +5,7 @@ from ecmc_sdo import (
     build_ssh_command,
     download_arguments,
     ecmc_add_sdo_line,
+    entry_byte_size,
     normalized_upload_value,
     parse_sdos,
     upload_arguments,
@@ -66,6 +67,21 @@ class SdoTests(unittest.TestCase):
             ecmc_add_sdo_line("3", entry, "0x0006 6"),
             'ecmcConfigOrDie "Cfg.EcAddSdo(${ECMC_EC_SLAVE_NUM=3},0x6040,0x00,6,2)"',
         )
+
+    def test_one_bit_entries_use_one_byte(self):
+        entry = SdoEntry("0x2000", "0x01", "rwrwrw", "bool", "1 bit", "Enable")
+        self.assertEqual(entry_byte_size(entry), 1)
+        self.assertEqual(
+            ecmc_add_sdo_line("4", entry, "1"),
+            'ecmcConfigOrDie "Cfg.EcAddSdo(${ECMC_EC_SLAVE_NUM=4},0x2000,0x01,1,1)"',
+        )
+
+    def test_zero_bit_entries_are_not_operable(self):
+        entry = SdoEntry("0x2000", "0x00", "rwrwrw", "uint8", "0 bit", "Number of entries")
+        self.assertEqual(entry.bit_count, 0)
+        self.assertFalse(entry.has_data)
+        self.assertFalse(entry.readable)
+        self.assertFalse(entry.writable)
 
 
 if __name__ == "__main__":
