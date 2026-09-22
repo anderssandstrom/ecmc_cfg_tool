@@ -45,6 +45,7 @@ class CommandSignals(QtCore.QObject):
 
 class AskpassSignals(QtCore.QObject):
     requested = QtCore.pyqtSignal(str, object) if hasattr(QtCore, "pyqtSignal") else QtCore.Signal(str, object)
+    debug = QtCore.pyqtSignal(str) if hasattr(QtCore, "pyqtSignal") else QtCore.Signal(str)
 
 
 class AskpassReply:
@@ -152,6 +153,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         self._askpass_closed = threading.Event()
         self._askpass_signals = AskpassSignals()
         self._askpass_signals.requested.connect(self._show_ssh_prompt)
+        self._askpass_signals.debug.connect(self._debug_log)
         self._askpass_thread = threading.Thread(target=self._serve_askpass, daemon=True)
         self._askpass_thread.start()
         self._password_dialog = None
@@ -355,14 +357,16 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
                             raise ValueError("SSH prompt too long")
                     reply = AskpassReply()
                     prompt_text = prompt.decode("utf-8")
-                    self._debug_log("SSH askpass requested: " + prompt_text.replace("\n", " "))
+                    self._askpass_signals.debug.emit("SSH askpass requested: " + prompt_text.replace("\n", " "))
                     self._askpass_signals.requested.emit(prompt_text, reply)
                     reply.ready.wait(self.timeout)
-                    self._debug_log("SSH askpass reply received" if reply.answer is not None else "SSH askpass cancelled or timed out")
+                    self._askpass_signals.debug.emit(
+                        "SSH askpass reply received" if reply.answer is not None else "SSH askpass cancelled or timed out"
+                    )
                     payload = b"\x00" if reply.answer is None else b"\x01" + reply.answer.encode("utf-8")
                     connection.sendall(payload)
                 except (OSError, UnicodeError, ValueError) as ex:
-                    self._debug_log(f"SSH askpass bridge failed: {ex}")
+                    self._askpass_signals.debug.emit(f"SSH askpass bridge failed: {ex}")
 
     def _show_ssh_prompt(self, prompt, reply):
         if self._askpass_closed.is_set() or self._active_task is None:
