@@ -322,7 +322,11 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             if self._active_task is task:
                 self._active_task = None
                 self.cancel_btn.setEnabled(False)
+            self._debug_log(
+                f"SSH callback entered: status={code}, stdout={len(stdout)} chars, stderr={len(stderr)} chars"
+            )
             callback(result_token, code, stdout, stderr)
+            self._debug_log("SSH callback returned")
 
         task.signals.debug.connect(self._debug_log)
         task.signals.finished.connect(done)
@@ -430,10 +434,13 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         self._populate_tree(text, "Offline example loaded")
 
     def _populate_tree(self, text, status_message):
+        self._debug_log(f"Parsing SDO dictionary: {len(text)} chars")
         objects = parse_sdos(text)
+        entry_total = sum(len(obj.entries) for obj in objects)
+        self._debug_log(f"Parsed SDO dictionary: {len(objects)} objects, {entry_total} entries")
         self.tree.clear()
         entry_count = 0
-        for obj in objects:
+        for obj_index, obj in enumerate(objects, start=1):
             parent = QtWidgets.QTreeWidgetItem([obj.index, obj.name, "", "", "", "", "", "", ""])
             parent.setFirstColumnSpanned(False)
             font = parent.font(0)
@@ -443,11 +450,19 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             for entry in obj.entries:
                 self._add_entry(parent, entry)
                 entry_count += 1
+                if entry_count % 100 == 0:
+                    self._debug_log(f"Built {entry_count}/{entry_total} SDO rows")
+                    QtWidgets.QApplication.processEvents()
+            if obj_index % 20 == 0:
+                QtWidgets.QApplication.processEvents()
+        self._debug_log("Applying SDO filters")
         self._apply_filter()
+        self._debug_log("Collapsing SDO tree")
         self.tree.collapseAll()
         self.summary.setText(f"{len(objects)} objects, {entry_count} entries")
         self.statusBar().showMessage(status_message, 4000)
         self._log(f"Loaded {len(objects)} objects and {entry_count} entries")
+        self._debug_log("SDO tree population finished")
 
     def _add_entry(self, parent, entry: SdoEntry):
         item = QtWidgets.QTreeWidgetItem([
