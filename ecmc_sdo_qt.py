@@ -40,6 +40,7 @@ SDO_ERROR_BG = "#fee2e2"
 
 class CommandSignals(QtCore.QObject):
     finished = QtCore.pyqtSignal(object, int, str, str) if hasattr(QtCore, "pyqtSignal") else QtCore.Signal(object, int, str, str)
+    debug = QtCore.pyqtSignal(str) if hasattr(QtCore, "pyqtSignal") else QtCore.Signal(str)
 
 
 class AskpassSignals(QtCore.QObject):
@@ -75,12 +76,14 @@ class CommandTask(QtCore.QRunnable):
     def run(self):
         try:
             environment = os.environ.copy()
+            self.signals.debug.emit("Preparing SSH environment")
             environment["SSH_ASKPASS"] = str(self.askpass)
             environment["SSH_ASKPASS_REQUIRE"] = "force"
             environment["ECMC_SDO_ASKPASS"] = "1"
             environment["ECMC_SDO_ASKPASS_SOCKET"] = self.askpass_socket
             environment["ECMC_SDO_PYTHON"] = sys.executable
             environment.setdefault("DISPLAY", ":0")
+            self.signals.debug.emit("Starting SSH process")
             self._process = subprocess.Popen(
                 self.command,
                 stdin=subprocess.DEVNULL,
@@ -89,25 +92,31 @@ class CommandTask(QtCore.QRunnable):
                 env=environment,
                 start_new_session=True,
             )
+            self.signals.debug.emit(f"SSH process started, pid={self._process.pid}")
             if self._cancelled.is_set():
                 self.cancel()
+            self.signals.debug.emit(f"Waiting for SSH command, timeout={self.timeout:g} s")
             stdout, stderr = self._process.communicate(timeout=self.timeout)
             code = 130 if self._cancelled.is_set() else self._process.returncode
+            self.signals.debug.emit(f"SSH command finished with status {code}")
             self.signals.finished.emit(
                 self.token, code, decode_command_output(stdout, preserve_bytes=True), decode_command_output(stderr)
             )
         except subprocess.TimeoutExpired as ex:
+            self.signals.debug.emit(f"SSH command timed out after {self.timeout:g} s; terminating process group")
             if self._process is not None:
                 self.cancel()
                 try:
                     self._process.communicate(timeout=5)
                 except subprocess.TimeoutExpired:
+                    self.signals.debug.emit("SSH process did not stop after SIGTERM; sending SIGKILL")
                     os.killpg(self._process.pid, signal.SIGKILL)
                     self._process.communicate()
             stdout = decode_command_output(ex.stdout, preserve_bytes=True)
             stderr = decode_command_output(ex.stderr)
             self.signals.finished.emit(self.token, 124, stdout, stderr or f"Command timed out after {self.timeout:g} s")
         except Exception as ex:
+            self.signals.debug.emit(f"SSH command worker failed: {ex}")
             self.signals.finished.emit(self.token, 1, "", str(ex))
 
 
@@ -297,6 +306,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             return
         command = build_ssh_command(host, arguments, binary)
         self._log("$ " + " ".join(command))
+        self._log(f"SSH target={host}, remote ethercat={binary}, args={' '.join(arguments)}")
         task = CommandTask(
             token, command, self.timeout, Path(__file__).resolve().with_name("start_sdo.sh"),
             self._askpass_socket_path,
@@ -312,6 +322,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
                 self.cancel_btn.setEnabled(False)
             callback(result_token, code, stdout, stderr)
 
+        task.signals.debug.connect(self._debug_log)
         task.signals.finished.connect(done)
         self.thread_pool.start(task)
 
@@ -343,15 +354,19 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
                         if len(prompt) > 4096:
                             raise ValueError("SSH prompt too long")
                     reply = AskpassReply()
-                    self._askpass_signals.requested.emit(prompt.decode("utf-8"), reply)
+                    prompt_text = prompt.decode("utf-8")
+                    self._debug_log("SSH askpass requested: " + prompt_text.replace("\n", " "))
+                    self._askpass_signals.requested.emit(prompt_text, reply)
                     reply.ready.wait(self.timeout)
+                    self._debug_log("SSH askpass reply received" if reply.answer is not None else "SSH askpass cancelled or timed out")
                     payload = b"\x00" if reply.answer is None else b"\x01" + reply.answer.encode("utf-8")
                     connection.sendall(payload)
-                except (OSError, UnicodeError, ValueError):
-                    pass
+                except (OSError, UnicodeError, ValueError) as ex:
+                    self._debug_log(f"SSH askpass bridge failed: {ex}")
 
     def _show_ssh_prompt(self, prompt, reply):
         if self._askpass_closed.is_set() or self._active_task is None:
+            self._debug_log("Ignoring SSH prompt because no active task is waiting")
             reply.ready.set()
             return
         self.statusBar().showMessage("SSH authentication required")
@@ -987,6 +1002,12 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
     def _log(self, text):
         stamp = datetime.now().strftime("%H:%M:%S")
         self.log.appendPlainText(f"[{stamp}] {text}")
+
+    def _debug_log(self, text):
+        if not self.log.isVisible():
+            self.log.setVisible(True)
+            self.log_btn.setText("Hide Log")
+        self._log("debug: " + str(text))
 
     def _toggle_log(self):
         visible = not self.log.isVisible()
