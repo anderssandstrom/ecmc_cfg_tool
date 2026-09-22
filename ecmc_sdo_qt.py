@@ -216,7 +216,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         for column, width in (
             (0, 95),
             (1, 200),
-            (2, 170),
+            (2, 85),
             (3, 34),
             (4, 34),
             (5, 80),
