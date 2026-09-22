@@ -611,7 +611,7 @@ class IocNavigator(QtWidgets.QMainWindow):
 
     def _caqtdm(self, panel, macro, panel_dir=None):
         executable = shutil.which("caqtdm") or "caqtdm"
-        self._spawn([executable, "-macro", macro, panel], panel_dir or self.caqtdm_dir)
+        self._spawn([executable, "-macro", macro, Path(panel).name], self.app_dir)
 
     def _open_main_panel(self):
         self._caqtdm("ecmcMain.ui", f"IOC={self._prefix()}")
