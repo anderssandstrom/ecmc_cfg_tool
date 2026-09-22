@@ -826,17 +826,12 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
     def _snippet_text(self, selected_only=False):
         _host, _master, slave = self._connection()
         rows = self._known_rows(selected_only)
-        lines = [
-            "# ecmc configuration snippet",
-            "",
-            "```bash",
-        ]
+        lines = []
         if rows:
             lines.extend(ecmc_add_sdo_line(slave, entry, value) for _item, entry, value in rows)
         else:
             lines.append("# No successfully read or written values in this scope.")
-        lines.extend(["```", ""])
-        return "\n".join(lines)
+        return "\n".join(lines) + "\n"
 
     def _report_rows(self, selected_only=False):
         rows = []
