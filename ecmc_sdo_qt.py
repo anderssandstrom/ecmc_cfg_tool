@@ -195,10 +195,19 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         self.tree.customContextMenuRequested.connect(self._context_menu)
         header = self.tree.header()
         header.setStretchLastSection(False)
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
-        for column, width in ((2, 105), (3, 70), (4, 75), (5, 170), (6, 55), (7, 55), (8, 120)):
-            header.setSectionResizeMode(column, QtWidgets.QHeaderView.Fixed)
+        for column in range(self.tree.columnCount()):
+            header.setSectionResizeMode(column, QtWidgets.QHeaderView.Interactive)
+        for column, width in (
+            (0, 95),
+            (1, 200),
+            (2, 115),
+            (3, 75),
+            (4, 85),
+            (5, 190),
+            (6, 65),
+            (7, 65),
+            (8, 140),
+        ):
             self.tree.setColumnWidth(column, width)
         self.tree.itemDoubleClicked.connect(self._read_item)
         self.tree.itemSelectionChanged.connect(self._update_details)
