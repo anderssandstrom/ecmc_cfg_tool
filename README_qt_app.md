@@ -52,7 +52,7 @@ If a live EPICS connection is unavailable, embedded tool launch errors are shown
 in the workspace rather than opening an unexpected separate window.
 Thread timing under `ecmc / IOC` is grouped into Period, Send, Execute, and
 Latency PVs. Right-click the Thread heading to print all thread PVs, a subgroup
-to graph its min/max pair, or one PV to graph only that signal.
+to open a simple rolling min/max trend, or one PV to graph only that signal.
 Demo mode populates every navigator branch without reading any PVs.
 When the remote SDO browser is opened from a hardware row, the navigator asks
 for the SSH server/host and pre-fills it from the optional hostname PV or the

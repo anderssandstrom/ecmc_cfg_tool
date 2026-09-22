@@ -249,8 +249,10 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         self.read_selected_btn.clicked.connect(self._read_selected)
         self.write_selected_btn = QtWidgets.QPushButton("Write Selected")
         self.write_selected_btn.clicked.connect(self._write_selected)
-        self.report_btn = QtWidgets.QPushButton("Report / ecmc Snippet")
+        self.report_btn = QtWidgets.QPushButton("Report")
         self.report_btn.clicked.connect(self._show_report)
+        self.snippet_btn = QtWidgets.QPushButton("ecmc Snippet")
+        self.snippet_btn.clicked.connect(self._show_snippet)
         self.log_btn = QtWidgets.QPushButton("Show Log")
         self.log_btn.clicked.connect(self._toggle_log)
         self.expand_btn = QtWidgets.QPushButton("Expand All")
@@ -261,6 +263,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         footer.addWidget(self.read_selected_btn)
         footer.addWidget(self.write_selected_btn)
         footer.addWidget(self.report_btn)
+        footer.addWidget(self.snippet_btn)
         footer.addWidget(self.log_btn)
         footer.addWidget(self.expand_btn)
         footer.addWidget(self.collapse_btn)
@@ -818,7 +821,16 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
                 f"| {entry.index} | {entry.subindex} | {clean_name} | {entry.data_type} | "
                 f"{entry.access} | {source} | `{clean_value}` | `{clean_raw}` |"
             )
-        lines.extend(["", "## ecmc configuration snippet", "", "```bash"])
+        return "\n".join(lines)
+
+    def _snippet_text(self, selected_only=False):
+        _host, _master, slave = self._connection()
+        rows = self._known_rows(selected_only)
+        lines = [
+            "# ecmc configuration snippet",
+            "",
+            "```bash",
+        ]
         if rows:
             lines.extend(ecmc_add_sdo_line(slave, entry, value) for _item, entry, value in rows)
         else:
@@ -863,7 +875,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
 
     def _show_report(self):
         dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle("SDO Report and ecmc Configuration")
+        dialog.setWindowTitle("SDO Report")
         dialog.resize(850, 600)
         layout = QtWidgets.QVBoxLayout(dialog)
         scope = QtWidgets.QComboBox()
@@ -918,6 +930,51 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         fmt.currentIndexChanged.connect(lambda _index: refresh_preview())
         copy_btn.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(preview.toPlainText()))
         save_btn.clicked.connect(save_report)
+        close_btn.clicked.connect(dialog.accept)
+        refresh_preview()
+        dialog.exec_() if hasattr(dialog, "exec_") else dialog.exec()
+
+    def _show_snippet(self):
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("ecmc SDO Snippet")
+        dialog.resize(850, 600)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        scope = QtWidgets.QComboBox()
+        scope.addItem("All read or written values", False)
+        scope.addItem("Selected read or written values", True)
+        layout.addWidget(scope)
+        preview = QtWidgets.QPlainTextEdit()
+        preview.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
+        layout.addWidget(preview, 1)
+        buttons = QtWidgets.QHBoxLayout()
+        copy_btn = QtWidgets.QPushButton("Copy")
+        save_btn = QtWidgets.QPushButton("Save Snippet...")
+        close_btn = QtWidgets.QPushButton("Close")
+        buttons.addWidget(copy_btn)
+        buttons.addWidget(save_btn)
+        buttons.addStretch(1)
+        buttons.addWidget(close_btn)
+        layout.addLayout(buttons)
+
+        def refresh_preview():
+            preview.setPlainText(self._snippet_text(bool(scope.currentData())))
+
+        def save_snippet():
+            path, _chosen_filter = QtWidgets.QFileDialog.getSaveFileName(
+                dialog,
+                "Save ecmc SDO snippet",
+                "ethercat_sdo_ecmc_snippet.cmd",
+                "Command files (*.cmd);;Markdown (*.md);;Text (*.txt)",
+            )
+            if path:
+                try:
+                    Path(path).write_text(preview.toPlainText())
+                except OSError as ex:
+                    QtWidgets.QMessageBox.critical(dialog, "Could not save snippet", str(ex))
+
+        scope.currentIndexChanged.connect(lambda _index: refresh_preview())
+        copy_btn.clicked.connect(lambda: QtWidgets.QApplication.clipboard().setText(preview.toPlainText()))
+        save_btn.clicked.connect(save_snippet)
         close_btn.clicked.connect(dialog.accept)
         refresh_preview()
         dialog.exec_() if hasattr(dialog, "exec_") else dialog.exec()

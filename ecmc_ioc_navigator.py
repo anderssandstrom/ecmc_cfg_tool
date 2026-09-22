@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from qt_compat import QtCore, QtWidgets
@@ -14,7 +15,7 @@ from ecmc_axis_cfg import AxisYamlConfigWindow
 from ecmc_mtn_qt import MotionWindow
 from ecmc_cntrl_qt import CntrlWindow
 from ecmc_iso230_qt import Iso230Window
-from ecmc_daq_qt import DaqWindow
+from ecmc_daq_qt import DaqWindow, SeriesPlotWidget
 from ecmc_rtlog_qt import RtLogWindow
 from ecmc_ioc_tree import demo_ioc, discover_ioc
 from ecmc_sdo_qt import SdoBrowserWindow
@@ -38,6 +39,71 @@ class DiscoveryTask(QtCore.QRunnable):
             self.signals.finished.emit(discover_ioc(client, self.prefix, self.ssh_host_pv), "")
         except Exception as ex:
             self.signals.finished.emit({}, str(ex))
+
+
+class ThreadTrendWindow(QtWidgets.QMainWindow):
+    def __init__(self, pvs, title="Thread Timing", timeout=1.0, poll_ms=500, history_s=120.0, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(850, 520)
+        self.pvs = [str(pv) for pv in pvs if str(pv).strip()]
+        self.timeout = float(timeout)
+        self.history_s = float(history_s)
+        self._start = time.monotonic()
+        self._samples = {pv: [] for pv in self.pvs}
+        self._client = EpicsClient(timeout=max(self.timeout, 0.5))
+
+        root = QtWidgets.QWidget()
+        self.setCentralWidget(root)
+        layout = QtWidgets.QVBoxLayout(root)
+        top = QtWidgets.QHBoxLayout()
+        self.status = QtWidgets.QLabel("Starting...")
+        self.clear_btn = QtWidgets.QPushButton("Clear")
+        self.clear_btn.clicked.connect(self._clear)
+        top.addWidget(self.status, 1)
+        top.addWidget(self.clear_btn)
+        layout.addLayout(top)
+        self.plot = SeriesPlotWidget()
+        self.plot.set_axes(title=title, x_label="Time [s]", y_label="Value", empty_text="Waiting for samples...")
+        layout.addWidget(self.plot, 1)
+
+        self.timer = QtCore.QTimer(self)
+        self.timer.timeout.connect(self._poll)
+        self.timer.start(max(100, int(poll_ms)))
+
+    def _clear(self):
+        self._start = time.monotonic()
+        self._samples = {pv: [] for pv in self.pvs}
+        self.plot.set_series({})
+        self.status.setText("Cleared")
+
+    def _poll(self):
+        now = time.monotonic()
+        elapsed = now - self._start
+        cutoff = elapsed - self.history_s
+        ok = 0
+        errors = []
+        for pv in self.pvs:
+            try:
+                raw = self._client.get(pv, as_string=True)
+                value = float(str(raw).strip().strip('"'))
+            except Exception as ex:
+                errors.append(f"{pv}: {ex}")
+                continue
+            samples = self._samples.setdefault(pv, [])
+            samples.append((elapsed, value))
+            while samples and samples[0][0] < cutoff:
+                samples.pop(0)
+            ok += 1
+        self.plot.set_series(self._samples)
+        if errors and ok == 0:
+            self.status.setText(errors[0])
+        else:
+            self.status.setText(f"{ok}/{len(self.pvs)} PVs, {elapsed:.1f} s")
+
+    def closeEvent(self, event):
+        self.timer.stop()
+        super().closeEvent(event)
 
 
 class IocNavigator(QtWidgets.QMainWindow):
@@ -436,7 +502,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._menu_action(
                 menu,
                 "Graph This PV",
-                lambda: self._open_daq([data["pv"]], title=data.get("label", "Thread PV")),
+                lambda: self._open_thread_trend([data["pv"]], title=data.get("label", "Thread PV")),
             )
             menu.addSeparator()
             self._menu_action(menu, "Graph All Thread Timing", self._open_thread_timing_graph)
@@ -490,7 +556,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         data = item.data(0, self.DATA_ROLE) or {}
         kind = data.get("kind")
         if kind == "axis":
-            self._open_motion(data)
+            self._open_axis_panel(data, "ecmcAxis.ui")
         elif kind == "ecmc_group":
             self._open_main_panel()
         elif kind == "hardware":
@@ -726,18 +792,28 @@ class IocNavigator(QtWidgets.QMainWindow):
         suffixes = []
         for group_suffixes in self.THREAD_TIMING_GROUPS.values():
             suffixes.extend(group_suffixes)
-        self._open_daq(self._thread_pvs(suffixes), title="All Thread Timing")
+        self._open_thread_trend(self._thread_pvs(suffixes), title="All Thread Timing")
 
     def _open_thread_group_graph(self, group_name):
         suffixes = self.THREAD_TIMING_GROUPS.get(group_name, ())
         if suffixes:
-            self._open_daq(self._thread_pvs(suffixes), title=f"Thread {group_name}")
+            self._open_thread_trend(self._thread_pvs(suffixes), title=f"Thread {group_name}")
 
     def _open_thread_latency_graph(self):
         self._open_thread_group_graph("Latency")
 
     def _open_thread_execute_graph(self):
         self._open_thread_group_graph("Execute")
+
+    def _open_thread_trend(self, pvs, title="Thread Timing", separate=False):
+        pvs = list(pvs or [])
+        if self.embed_tools_check.isChecked() and not separate:
+            window = ThreadTrendWindow(pvs, title=title, timeout=max(self.timeout, 1.0))
+            self._add_tool_tab(window, title)
+            return
+        window = ThreadTrendWindow(pvs, title=title, timeout=max(self.timeout, 1.0))
+        window.show()
+        self._embedded_tools.append(window)
 
     def _open_daq(self, initial_pvs=None, separate=False, title=None):
         initial_pvs = list(initial_pvs or [])
