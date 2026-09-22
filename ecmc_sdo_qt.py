@@ -214,12 +214,12 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         for column in range(self.tree.columnCount()):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.Interactive)
         for column, width in (
-            (0, 95),
+            (0, 120),
             (1, 200),
             (2, 85),
             (3, 34),
             (4, 34),
-            (5, 80),
+            (5, 48),
             (6, 115),
             (7, 75),
             (8, 85),
