@@ -1008,6 +1008,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         self.log.appendPlainText(f"[{stamp}] {text}")
 
     def _debug_log(self, text):
+        print(f"[SDO debug] {text}", file=sys.stderr, flush=True)
         if not self.log.isVisible():
             self.log.setVisible(True)
             self.log_btn.setText("Hide Log")
