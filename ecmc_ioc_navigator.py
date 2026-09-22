@@ -213,6 +213,11 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._add_workspace_placeholder()
         workspace.addWidget(right)
         workspace.setSizes([330, 650])
+        self.busy_progress = QtWidgets.QProgressBar()
+        self.busy_progress.setMaximumWidth(160)
+        self.busy_progress.setRange(0, 0)
+        self.busy_progress.setVisible(False)
+        self.statusBar().addPermanentWidget(self.busy_progress)
         self.statusBar().showMessage("Ready")
 
     def _add_workspace_placeholder(self):
@@ -256,6 +261,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Missing IOC", "Enter an IOC prefix.")
             return
         self.refresh_btn.setEnabled(False)
+        self.busy_progress.setVisible(True)
         self.statusBar().showMessage(f"Discovering {prefix}...")
         task = DiscoveryTask(prefix, self.timeout, self.host_pv_edit.text().strip())
         self._tasks.add(task)
@@ -263,6 +269,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         def done(snapshot, error):
             self._tasks.discard(task)
             self.refresh_btn.setEnabled(True)
+            self.busy_progress.setVisible(False)
             if error:
                 self.statusBar().showMessage("Discovery failed")
                 QtWidgets.QMessageBox.critical(self, "IOC discovery failed", error)

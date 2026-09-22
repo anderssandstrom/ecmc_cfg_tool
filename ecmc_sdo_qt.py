@@ -236,6 +236,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             (8, 85),
         ):
             self.tree.setColumnWidth(column, width)
+        self.tree.itemClicked.connect(self._item_clicked)
         self.tree.itemDoubleClicked.connect(self._read_item)
         self.tree.itemSelectionChanged.connect(self._update_details)
 
@@ -279,6 +280,10 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         footer.addWidget(self.expand_btn)
         footer.addWidget(self.collapse_btn)
         footer.addStretch(1)
+        self.populate_progress = QtWidgets.QProgressBar()
+        self.populate_progress.setMaximumWidth(180)
+        self.populate_progress.setVisible(False)
+        footer.addWidget(self.populate_progress)
         self.summary = QtWidgets.QLabel("Enter a host and refresh")
         footer.addWidget(self.summary)
         layout.addLayout(footer)
@@ -440,6 +445,13 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         self._debug_log(f"Parsed SDO dictionary: {len(objects)} objects, {entry_total} entries")
         self.tree.clear()
         entry_count = 0
+        self.populate_progress.setRange(0, max(1, entry_total))
+        self.populate_progress.setValue(0)
+        self.populate_progress.setFormat("Building %v/%m")
+        self.populate_progress.setVisible(True)
+        self.statusBar().showMessage("Building SDO tree...")
+        QtWidgets.QApplication.processEvents()
+        self.tree.setUpdatesEnabled(False)
         for obj_index, obj in enumerate(objects, start=1):
             parent = QtWidgets.QTreeWidgetItem([obj.index, obj.name, "", "", "", "", "", "", ""])
             parent.setFirstColumnSpanned(False)
@@ -450,11 +462,14 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             for entry in obj.entries:
                 self._add_entry(parent, entry)
                 entry_count += 1
-                if entry_count % 100 == 0:
+                if entry_count % 500 == 0:
                     self._debug_log(f"Built {entry_count}/{entry_total} SDO rows")
+                    self.populate_progress.setValue(entry_count)
                     QtWidgets.QApplication.processEvents()
             if obj_index % 20 == 0:
                 QtWidgets.QApplication.processEvents()
+        self.tree.setUpdatesEnabled(True)
+        self.populate_progress.setValue(entry_total)
         self._debug_log("Applying SDO filters")
         self._apply_filter()
         self._debug_log("Collapsing SDO tree")
@@ -463,40 +478,48 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         self.statusBar().showMessage(status_message, 4000)
         self._log(f"Loaded {len(objects)} objects and {entry_count} entries")
         self._debug_log("SDO tree population finished")
+        self.populate_progress.setVisible(False)
 
     def _add_entry(self, parent, entry: SdoEntry):
         item = QtWidgets.QTreeWidgetItem([
-            f"{entry.index}:{entry.subindex[2:]}", entry.name, "", "", "", "",
+            f"{entry.index}:{entry.subindex[2:]}", entry.name, "", "R" if entry.readable else "", "W" if entry.writable else "", "",
             entry.data_type, entry.bit_length, entry.access,
         ])
+        item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
         item.setData(0, self.ENTRY_ROLE, entry)
         parent.addChild(item)
-
-        value_edit = QtWidgets.QLineEdit()
-        value_edit.setPlaceholderText("value")
-        value_edit.setEnabled(entry.writable or entry.readable)
-        self.tree.setItemWidget(item, self.COL_VALUE, value_edit)
-        read_btn = QtWidgets.QPushButton("R")
-        read_btn.setToolTip("Read SDO")
-        read_btn.setFixedWidth(28)
-        read_btn.setEnabled(entry.readable)
+        item.setToolTip(self.COL_VALUE, "Edit value here before writing")
         if not entry.has_data:
-            read_btn.setToolTip("0-bit SDO entries cannot be read")
+            item.setToolTip(self.COL_READ, "0-bit SDO entries cannot be read")
+            item.setToolTip(self.COL_WRITE, "0-bit SDO entries cannot be written")
         elif not entry.readable:
-            read_btn.setToolTip("SDO access flags do not allow reading")
-        read_btn.clicked.connect(lambda _checked=False, row=item: self._read_item(row))
-        self.tree.setItemWidget(item, self.COL_READ, read_btn)
-        write_btn = QtWidgets.QPushButton("W")
-        write_btn.setToolTip("Write SDO")
-        write_btn.setFixedWidth(28)
-        write_btn.setEnabled(entry.writable)
-        if not entry.has_data:
-            write_btn.setToolTip("0-bit SDO entries cannot be written")
+            item.setToolTip(self.COL_READ, "SDO access flags do not allow reading")
         elif not entry.writable:
-            write_btn.setToolTip("SDO access flags do not allow writing")
-        write_btn.clicked.connect(lambda _checked=False, row=item: self._write_item(row))
-        self.tree.setItemWidget(item, self.COL_WRITE, write_btn)
+            item.setToolTip(self.COL_WRITE, "SDO access flags do not allow writing")
+        else:
+            item.setToolTip(self.COL_READ, "Read SDO")
+            item.setToolTip(self.COL_WRITE, "Write SDO")
+        if not entry.readable:
+            item.setForeground(self.COL_READ, QtGui.QBrush(QtGui.QColor("#9ca3af")))
+        if not entry.writable:
+            item.setForeground(self.COL_WRITE, QtGui.QBrush(QtGui.QColor("#9ca3af")))
         self._set_row_state(item, "unknown")
+
+    def _item_clicked(self, item, column):
+        entry = self._entry(item)
+        if entry is None:
+            return
+        if column == self.COL_READ and entry.readable:
+            self._read_item(item)
+        elif column == self.COL_WRITE and entry.writable:
+            self._write_item(item)
+
+    def _item_value(self, item):
+        return item.text(self.COL_VALUE).strip() if item is not None else ""
+
+    def _set_item_value(self, item, value):
+        if item is not None:
+            item.setText(self.COL_VALUE, str(value))
 
     def _set_row_state(self, item, state):
         colors = {
@@ -507,11 +530,6 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             "error": SDO_ERROR_BG,
         }
         color = colors.get(state, SDO_UNKNOWN_BG)
-        editor = self.tree.itemWidget(item, self.COL_VALUE)
-        if editor is not None:
-            pal = editor.palette()
-            pal.setColor(QtGui.QPalette.Base, QtGui.QColor(color))
-            editor.setPalette(pal)
         brush = QtGui.QBrush(QtGui.QColor(color))
         item.setBackground(self.COL_STATUS, brush)
         item.setBackground(self.COL_VALUE, brush)
@@ -552,8 +570,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
                 f"Visible readable: {sum(1 for i in range(item.childCount()) if not item.child(i).isHidden() and self._entry(item.child(i)) and self._entry(item.child(i)).readable)}"
             )
             return
-        editor = self.tree.itemWidget(item, self.COL_VALUE)
-        value = editor.text().strip() if editor is not None else ""
+        value = self._item_value(item)
         raw = str(item.data(0, self.RAW_VALUE_ROLE) or "")
         source = str(item.data(0, self.SOURCE_ROLE) or "")
         _host, master, slave = self._connection()
@@ -638,8 +655,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             return
         rows = []
         for item, entry in self._selected_entry_items():
-            editor = self.tree.itemWidget(item, self.COL_VALUE)
-            value = editor.text().strip() if editor is not None else ""
+            value = self._item_value(item)
             if entry.writable and value:
                 rows.append((item, entry, value))
         if not rows:
@@ -723,9 +739,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         raw_value = stdout.strip()
         entry = self._entry(item)
         value = display_upload_value(entry, raw_value) if entry is not None else raw_value
-        editor = self.tree.itemWidget(item, self.COL_VALUE)
-        if editor is not None:
-            editor.setText(value)
+        self._set_item_value(item, value)
         item.setData(0, self.KNOWN_ROLE, True)
         item.setData(0, self.SOURCE_ROLE, "read")
         item.setData(0, self.RAW_VALUE_ROLE, raw_value)
@@ -738,8 +752,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         entry = self._entry(item)
         if entry is None or not entry.writable:
             return
-        editor = self.tree.itemWidget(item, self.COL_VALUE)
-        value = editor.text().strip() if editor is not None else ""
+        value = self._item_value(item)
         if not value:
             QtWidgets.QMessageBox.warning(self, "Missing value", "Enter a value before writing.")
             return
@@ -822,8 +835,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         for item, entry in candidates:
             if not item.data(0, self.KNOWN_ROLE):
                 continue
-            editor = self.tree.itemWidget(item, self.COL_VALUE)
-            value = editor.text().strip() if editor is not None else ""
+            value = self._item_value(item)
             if value:
                 rows.append((item, entry, value))
         return rows
