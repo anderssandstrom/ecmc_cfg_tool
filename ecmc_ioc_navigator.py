@@ -616,33 +616,17 @@ class IocNavigator(QtWidgets.QMainWindow):
     def _open_main_panel(self):
         self._caqtdm("ecmcMain.ui", f"IOC={self._prefix()}")
 
-    def _ec_overview_command(self):
-        command = shutil.which("start_ecmc_overview.py")
+    def _open_object_command(self):
+        local = self.caqtdm_dir / "ecmcOpenObject.sh"
+        if local.exists():
+            return str(local)
+        command = shutil.which("ecmcOpenObject.sh")
         if command:
             return command
-        for candidate in (
-            "/sls/controls/bin/start_ecmc_overview.py",
-            "/sf/controls/bin/start_ecmc_overview.py",
-            "/hipa/controls/bin/start_ecmc_overview.py",
-            "/proscan/controls/bin/start_ecmc_overview.py",
-        ):
-            path = Path(candidate)
-            if path.exists() and os.access(str(path), os.X_OK):
-                return str(path)
-        return ""
+        return "/ioc/modules/qt/ecmcOpenObject.sh"
 
     def _open_hardware_overview(self):
-        command = self._ec_overview_command()
-        if not command:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Hardware overview not found",
-                "Could not find start_ecmc_overview.py in PATH or known controls bin directories.",
-            )
-            return
-        master = str(self._snapshot.get("master", "0"))
-        rows = str(self._snapshot.get("ec_rows", "1"))
-        self._spawn([command, "--master", master, "--rows", rows, self._prefix()], self.caqtdm_dir)
+        self._spawn([self._open_object_command(), "EC_OVERVIEW", self._prefix()], self.caqtdm_dir)
 
     def _open_command_parser(self, separate=False):
         if self.embed_tools_check.isChecked() and not separate:
