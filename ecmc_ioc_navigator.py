@@ -617,16 +617,10 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._caqtdm("ecmcMain.ui", f"IOC={self._prefix()}")
 
     def _open_object_command(self):
-        local = self.caqtdm_dir / "ecmcOpenObject.sh"
-        if local.exists():
-            return str(local)
-        command = shutil.which("ecmcOpenObject.sh")
-        if command:
-            return command
         return "/ioc/modules/qt/ecmcOpenObject.sh"
 
     def _open_hardware_overview(self):
-        self._spawn([self._open_object_command(), "EC_OVERVIEW", self._prefix()], self.caqtdm_dir)
+        self._spawn(["bash", self._open_object_command(), "EC_OVERVIEW", self._prefix()], self.app_dir)
 
     def _open_command_parser(self, separate=False):
         if self.embed_tools_check.isChecked() and not separate:
