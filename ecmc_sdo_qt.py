@@ -199,9 +199,15 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
 
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText("Filter by index, name, type, or access...")
+        self.search.setMaximumWidth(360)
         self.search.textChanged.connect(self._apply_filter)
         filter_row = QtWidgets.QHBoxLayout()
-        filter_row.addWidget(self.search, 1)
+        filter_row.addWidget(self.search)
+        self.show_application_indexes = QtWidgets.QCheckBox("Show >= 0x6000")
+        self.show_application_indexes.setChecked(True)
+        self.show_application_indexes.setToolTip("Show only SDO indexes greater than or equal to 0x6000")
+        self.show_application_indexes.toggled.connect(self._apply_filter)
+        filter_row.addWidget(self.show_application_indexes)
         self.show_zero_bit = QtWidgets.QCheckBox("Show 0-bit")
         self.show_zero_bit.setToolTip("Show SDO entries with 0 bit length")
         self.show_zero_bit.toggled.connect(self._apply_filter)
@@ -797,10 +803,15 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
 
     def _apply_filter(self, _text=None):
         needle = self.search.text().strip().lower()
+        show_application_indexes = self.show_application_indexes.isChecked()
         show_zero_bit = self.show_zero_bit.isChecked()
         show_subindex = self.show_subindex.isChecked()
         for i in range(self.tree.topLevelItemCount()):
             parent = self.tree.topLevelItem(i)
+            try:
+                index_visible = int(parent.text(self.COL_INDEX), 16) >= 0x6000
+            except ValueError:
+                index_visible = True
             parent_match = needle in " ".join(parent.text(c).lower() for c in range(self.tree.columnCount()))
             visible_children = 0
             for j in range(parent.childCount()):
@@ -814,7 +825,8 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
                 matches = matches and not zero_bit_hidden and not subindex_hidden
                 child.setHidden(not matches)
                 visible_children += int(matches)
-            parent.setHidden(bool(needle) and not parent_match and visible_children == 0)
+            parent_hidden = bool(needle) and not parent_match and visible_children == 0
+            parent.setHidden(parent_hidden or (show_application_indexes and not index_visible))
             if needle and visible_children:
                 parent.setExpanded(True)
 
