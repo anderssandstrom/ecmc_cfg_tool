@@ -2,6 +2,7 @@
 import argparse
 import json
 import re
+from ecmc_caqtdm import launch_caqtdm
 import subprocess
 import sys
 from datetime import datetime
@@ -1189,13 +1190,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         motor_prefix = str(motor_prefix or '').rstrip(':')
         macro = f'DEV={motor_prefix},IOC={ioc_prefix},Axis={axis_name},AX_ID={axis_id}'
         try:
-            cmd = f'caqtdm -macro "{macro}" ecmcAxis.ui'
-            subprocess.Popen(
-                ['bash', '-lc', cmd],
-                cwd=str(Path(__file__).resolve().parent),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            launch_caqtdm('ecmcAxis.ui', macro)
             self._log(f'Started caQtDM axis panel ({macro})')
         except Exception as ex:
             self._log(f'Failed to start caQtDM axis panel: {ex}')
@@ -1204,13 +1199,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         ioc_prefix = self._ioc_prefix_for_title() or ''
         macro = f'IOC={ioc_prefix}'
         try:
-            cmd = f'caqtdm -macro "{macro}" ecmcMain.ui'
-            subprocess.Popen(
-                ['bash', '-lc', cmd],
-                cwd=str(Path(__file__).resolve().parent),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            launch_caqtdm('ecmcMain.ui', macro)
             self._log(f'Started caQtDM main panel ({macro})')
         except Exception as ex:
             self._log(f'Failed to start caQtDM main panel: {ex}')

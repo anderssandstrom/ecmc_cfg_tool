@@ -4,6 +4,7 @@ import ast
 import json
 import os
 import re
+from ecmc_caqtdm import launch_caqtdm
 import subprocess
 import sys
 from datetime import datetime
@@ -1124,13 +1125,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
     def _open_caqtdm_main_panel(self):
         macro = f"IOC={self._current_prefix()}"
         try:
-            cmd = f'caqtdm -macro "{macro}" ecmcMain.ui'
-            subprocess.Popen(
-                ["bash", "-lc", cmd],
-                cwd=str(Path(__file__).resolve().parent),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            launch_caqtdm('ecmcMain.ui', macro)
             self._log(f"Started caQtDM main panel ({macro})")
         except Exception as ex:
             self._log(f"Failed to start caQtDM main panel: {ex}")

@@ -3,6 +3,7 @@ import argparse
 import json
 import re
 import shutil
+from ecmc_caqtdm import launch_caqtdm
 import subprocess
 import sys
 from datetime import datetime
@@ -1290,13 +1291,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ioc_prefix = self._ioc_prefix_for_title() or ''
         macro = f'IOC={ioc_prefix}'
         try:
-            cmd = f'caqtdm -macro "{macro}" ecmcMain.ui'
-            subprocess.Popen(
-                ['bash', '-lc', cmd],
-                cwd=str(Path(__file__).resolve().parent),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            launch_caqtdm('ecmcMain.ui', macro)
             self._log(f'Started caQtDM main panel ({macro})')
         except Exception as ex:
             self._log(f'Failed to start caQtDM main panel: {ex}')

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
+from ecmc_caqtdm import launch_caqtdm, panel_directories
 import subprocess
 import sys
 import time
@@ -119,6 +119,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.app_dir = Path(__file__).resolve().parent
         default_qt = self.app_dir.parent / "ecmccfg" / "qt"
         self.caqtdm_dir = Path(caqtdm_dir).expanduser() if caqtdm_dir else default_qt
+        self.caqtdm_override = caqtdm_dir or None
         self.safety_qt_dir = self.app_dir.parent / "ecmc_plugin_safety" / "qt"
         self.thread_pool = QtCore.QThreadPool.globalInstance()
         self._tasks = set()
@@ -610,8 +611,11 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._spawn(["bash", str(script), self._prefix()], self.app_dir)
 
     def _caqtdm(self, panel, macro, panel_dir=None):
-        executable = shutil.which("caqtdm") or "caqtdm"
-        self._spawn([executable, "-macro", macro, Path(panel).name], self.app_dir)
+        try:
+            launch_caqtdm(panel, macro, panel_dir or self.caqtdm_override)
+            self.statusBar().showMessage("Started caQtDM: " + str(panel), 5000)
+        except Exception as ex:
+            QtWidgets.QMessageBox.critical(self, "Launch failed", str(ex))
 
     def _open_main_panel(self):
         self._caqtdm("ecmcMain.ui", f"IOC={self._prefix()}")
@@ -839,7 +843,9 @@ class IocNavigator(QtWidgets.QMainWindow):
         motor = data.get("motor", "")
         motor_prefix, _, name = motor.rpartition(":")
         macro = f"DEV={motor_prefix},IOC={self._prefix()},Axis={name},AX_ID={data['id']}"
-        panel = "ecmc_motorx_all.ui" if (self.caqtdm_dir / "ecmc_motorx_all.ui").exists() else "motorx_all.ui"
+        panel = "ecmc_motorx_all.ui" if any(
+            (directory / "ecmc_motorx_all.ui").is_file()
+            for directory in panel_directories(self.caqtdm_override)) else "motorx_all.ui"
         self._caqtdm(panel, macro)
 
     def _open_hardware_panel(self, data):
