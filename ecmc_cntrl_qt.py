@@ -203,6 +203,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._axis_combo_open_new_instance = False
         self._read_all_in_progress = False
         self._read_all_cancel_requested = False
+        self._tuning_window = None
         self._live_monitor = None
         self._live_identity = None
         self._live_qualified_since = None
@@ -319,6 +320,10 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.yaml_btn.setDefault(False)
         self.yaml_btn.clicked.connect(self._show_yaml_window)
         top_row.addWidget(self.yaml_btn)
+        self.tuning_btn = QtWidgets.QPushButton('Tuning')
+        self.tuning_btn.setMaximumHeight(24)
+        self.tuning_btn.clicked.connect(self._open_tuning_window)
+        top_row.addWidget(self.tuning_btn)
         self.open_app_combo = QtWidgets.QComboBox()
         self.open_app_combo.setMinimumWidth(170)
         self.open_app_combo.addItem(APP_LAUNCH_PLACEHOLDER, '')
@@ -1616,7 +1621,29 @@ class CntrlWindow(QtWidgets.QMainWindow):
         inner, deadband = derive(values, cfg, self._controller_mode, elapsed)
         self._controller_scene.update_live(values, inner, deadband)
 
+    def _open_tuning_window(self):
+        if self._tuning_window is not None and self._tuning_window.isVisible():
+            self._tuning_window.raise_()
+            self._tuning_window.activateWindow()
+            return
+        if not self._startup_axis_probe_ok:
+            return
+        axis = self.axis_all_edit.text().strip() or self.default_axis_id
+        if not self._ensure_axis_is_real(axis, purpose='controller tuning'):
+            return
+        base = self._resolve_motor_record_name(axis)
+        if not base:
+            self._log('Tuning: axis PV prefix unavailable')
+            return
+        from ecmc_tuning_qt import TuningWindow
+        self._tuning_window = TuningWindow(self, self.client, base, demo=self.demo)
+        self._tuning_window.show()
+
     def closeEvent(self, event):
+        if self._tuning_window is not None and self._tuning_window.isVisible():
+            if not self._tuning_window.close():
+                event.ignore()
+                return
         self._stop_live()
         super().closeEvent(event)
 

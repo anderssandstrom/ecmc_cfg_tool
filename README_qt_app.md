@@ -89,6 +89,7 @@ Use the Cntrl app when tuning controller-related parameters for a real axis.
 - Reads and writes paired set/read controller values and supports `Read All` plus `Copy Read->Set`.
 - Exports changed controller values or current session-known values as YAML.
 - The default Controller Sketch is a native, automatically scaled, interactive Qt graphics scene; no image or calibration is needed.
+- The modeless Tuning popup runs repeating A/B step scans with optional snake traversal and plots CA monitor samples of PosSet, PosAct and PosErr. Endpoints are motor-record user coordinates; plotted axis PVs are native ECMC coordinates. STOP cancels the scan and requests motor-record stop. The popup stays bound to the axis selected when opened.
 - Only supports `REAL` axes; virtual axes are rejected.
 
 ### Motion
