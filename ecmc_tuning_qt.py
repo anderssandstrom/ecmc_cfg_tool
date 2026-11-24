@@ -1,5 +1,6 @@
 """Modeless controller tuning window, using native ECMC moves and CA monitors."""
 import math
+import csv
 import time
 from collections import deque
 from qt_compat import QtCore, QtGui, QtWidgets
@@ -29,12 +30,21 @@ class Trend(QtWidgets.QWidget):
         self.series = series
         self.samples = {key: deque(maxlen=40000) for key, _, _ in series}
         self.history = 15
+        self.frozen = None
+        self.fixed_range = None
+        self.limit = None
         self.setMinimumHeight(145)
 
     def append(self, key, stamp, value):
         self.samples[key].append((stamp,value))
 
+    def freeze(self,checked):
+        self.frozen = (time.monotonic(), {k:list(q) for k,q in self.samples.items()}) if checked else None
+        self.update()
+
     def clear(self):
+        if self.frozen is not None:
+            self.frozen = (self.frozen[0], {k:[] for k in self.samples})
         for q in self.samples.values():
             q.clear()
         self.update()
@@ -46,13 +56,12 @@ class Trend(QtWidgets.QWidget):
         r = QtCore.QRectF(76,24,self.width()-90,self.height()-49)
         if r.width() < 10 or r.height() < 10:
             return
-        now = time.monotonic()
+        now, source = self.frozen if self.frozen is not None else (time.monotonic(),self.samples)
         start = now-self.history
         data = {}
-        for key,q in self.samples.items():
-            while len(q)>1 and q[1][0]<start:
-                q.popleft()
-            data[key] = [(t,v) for t,v in q if t>=start and v is not None]
+        for key,q in source.items():
+            # Preserve the last sample before the visible window for held values.
+            data[key] = [(t,v) for t,v in q if start<=t<=now and v is not None]
         values = [v for a in data.values() for _,v in a]
         p.setPen(QtGui.QColor('#465565'))
         x = 78
@@ -68,6 +77,8 @@ class Trend(QtWidgets.QWidget):
             lo,hi = min(0,lo),max(0,hi)
         pad = (hi-lo)*.05 or max(abs(hi)*1e-6,1e-9)
         lo,hi = lo-pad,hi+pad
+        if self.fixed_range is not None:
+            lo,hi = self.fixed_range
         for i in range(5):
             y = r.top()+r.height()*i/4
             x = r.left()+r.width()*i/4
@@ -79,14 +90,20 @@ class Trend(QtWidgets.QWidget):
             p.drawText(QtCore.QRectF(x-28,r.bottom()+3,56,18),QtCore.Qt.AlignCenter,f'{-self.history*(1-i/4):g}s')
         p.save()
         p.setClipRect(r)
+        if self.limit is not None:
+            p.setPen(QtGui.QPen(QtGui.QColor('#c43b3b'),1.2,QtCore.Qt.DashLine))
+            for v in (-self.limit,self.limit):
+                if lo<=v<=hi:
+                    y=r.bottom()-(v-lo)/(hi-lo)*r.height()
+                    p.drawLine(QtCore.QPointF(r.left(),y),QtCore.QPointF(r.right(),y))
         for key,_,color in self.series:
             path = QtGui.QPainterPath()
             started = False
-            for stamp,v in self.samples[key]:
+            for stamp,v in source[key]:
                 if v is None:
                     started=False
                     continue
-                if stamp<start:
+                if stamp<start or stamp>now:
                     continue
                 x=r.left()+(stamp-start)/self.history*r.width()
                 y=r.bottom()-(v-lo)/(hi-lo)*r.height()
@@ -103,13 +120,23 @@ class Trend(QtWidgets.QWidget):
 class TuningWindow(QtWidgets.QDialog):
     sample = QtCore.Signal(str,float,object) if hasattr(QtCore,'Signal') else QtCore.pyqtSignal(str,float,object)
 
-    def __init__(self,parent,client,base,demo=False,read_config=None):
+    def __init__(self,parent,client,base,demo=False,read_config=None,read_lag=None):
         super().__init__(parent)
         self.setWindowTitle('Controller tuning — '+base+(' [DEMO]' if demo else ''))
         self.setModal(False)
-        self.resize(760,510)
+        self.resize(800,570)
         self.client,self.base,self.demo=client,base,demo
         self.read_config=read_config
+        self.read_lag=read_lag
+        self.paused=False
+        self.pause_requested=False
+        self.stats_count=0
+        self.stats_sum_sq=0.
+        self.stats_min=None
+        self.stats_max=None
+        self.stats_start=time.monotonic()
+        self.stop_confirm_after=0.
+        self.stop_sent=False
         self.killing=False
         self.sim_enabled=1
         self.sim_auto=1
@@ -152,6 +179,13 @@ class TuningWindow(QtWidgets.QDialog):
         for i,w in enumerate((self.relative,self.snake,self.start_btn,self.stop_btn,self.kill_btn)):
             controls.addWidget(w,2,i)
         controls.addWidget(self.mode_label,2,5,1,2)
+        self.pause_btn=QtWidgets.QPushButton('Pause')
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.clicked.connect(self.toggle_pause)
+        controls.addWidget(self.pause_btn,3,2)
+        self.enable_btn=QtWidgets.QPushButton('Enable drive')
+        self.enable_btn.clicked.connect(self.enable_drive)
+        controls.addWidget(self.enable_btn,3,3,1,2)
         layout.addLayout(controls)
         self.status=QtWidgets.QLabel('Idle — enter scan endpoints explicitly')
         self.status.setWordWrap(True)
@@ -160,6 +194,15 @@ class TuningWindow(QtWidgets.QDialog):
         self.error=Trend([('PosErr','PosErr','#a64070')])
         layout.addWidget(self.position,1)
         layout.addWidget(self.error,1)
+        stats=QtWidgets.QHBoxLayout()
+        self.stats_label=QtWidgets.QLabel('RMS: —    Peak: —    P–P: —')
+        stats.addWidget(self.stats_label,1)
+        self.lag_label=QtWidgets.QLabel('Lag: unknown')
+        stats.addWidget(self.lag_label)
+        reset=QtWidgets.QPushButton('Reset stats')
+        reset.clicked.connect(self.reset_stats)
+        stats.addWidget(reset)
+        layout.addLayout(stats)
         row=QtWidgets.QHBoxLayout()
         row.addWidget(QtWidgets.QLabel('History [s]'))
         history=QtWidgets.QSpinBox()
@@ -171,6 +214,33 @@ class TuningWindow(QtWidgets.QDialog):
         clear.clicked.connect(self.position.clear)
         clear.clicked.connect(self.error.clear)
         row.addWidget(clear)
+        freeze=QtWidgets.QCheckBox('Freeze')
+        freeze.toggled.connect(self.position.freeze)
+        freeze.toggled.connect(self.error.freeze)
+        row.addWidget(freeze)
+        fixed=QtWidgets.QCheckBox('Fixed ±error')
+        self.error_range=QtWidgets.QLineEdit('0.01')
+        self.error_range.setMaximumWidth(74)
+        self.error_range.setEnabled(False)
+        def scale():
+            self.error_range.setEnabled(fixed.isChecked())
+            try:
+                v=float(self.error_range.text())
+                if not math.isfinite(v) or v<=0: raise ValueError()
+                self.error.fixed_range=(-v,v) if fixed.isChecked() else None
+                self.error_range.setStyleSheet('')
+            except ValueError:
+                self.error_range.setStyleSheet('background:#ffd7d7')
+                if not fixed.isChecked(): self.error.fixed_range=None
+        fixed.toggled.connect(scale)
+        self.error_range.editingFinished.connect(scale)
+        row.addWidget(fixed)
+        row.addWidget(self.error_range)
+        export=QtWidgets.QPushButton('Export CSV')
+        export.clicked.connect(self.export_csv)
+        row.addWidget(export)
+        layout.addLayout(row)
+        row=QtWidgets.QHBoxLayout()
         self.readout=QtWidgets.QLabel('Waiting for PVs')
         row.addWidget(self.readout,1)
         layout.addLayout(row)
@@ -224,6 +294,11 @@ class TuningWindow(QtWidgets.QDialog):
             self.position.append(key,stamp,value)
         if key in self.error.samples:
             self.error.append(key,stamp,value)
+            if value is not None and stamp>=self.stats_start:
+                self.stats_count+=1
+                self.stats_sum_sq+=value*value
+                self.stats_min=value if self.stats_min is None else min(value,self.stats_min)
+                self.stats_max=value if self.stats_max is None else max(value,self.stats_max)
         if key in ('VELO','ACC','DEC') and value is not None:
             edit=self.inputs[key.lower()]
             if not edit.text().strip():
@@ -262,9 +337,10 @@ class TuningWindow(QtWidgets.QDialog):
                 self.sim_target=self.sim_staged
             elif field=='StpCmd':
                 self.sim_target=self.sim_pos
-            elif field=='EnaCmd' and value==0:
-                self.sim_enabled=0
-                self.sim_target=self.sim_pos
+            elif field=='EnaCmd':
+                self.sim_enabled=int(value)
+                if value==0:
+                    self.sim_target=self.sim_pos
             return
         # Wait for each write so command/data/target/execute are ordered.
         # Use a dedicated CA PV and a bounded timeout; STOP/KILL are independent.
@@ -342,6 +418,10 @@ class TuningWindow(QtWidgets.QDialog):
             self._put('AccCmd',acc)
             self._put('DecCmd',dec)
             self.active=True
+            self.paused=False
+            self.pause_requested=False
+            self.pause_btn.setEnabled(True)
+            self.pause_btn.setText('Pause')
             self.start_btn.setEnabled(False)
             for w in [*self.inputs.values(),self.relative,self.snake]:
                 w.setEnabled(False)
@@ -372,26 +452,86 @@ class TuningWindow(QtWidgets.QDialog):
 
     def stop_scan(self):
         self.active=False
+        self.paused=self.pause_requested=False
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.setText('Pause')
         self.stop_pending=True
         self.killing=False
+        self.stop_sent=False
+        self.stop_confirm_after=time.monotonic()+0.25
         try:
             self._put('StpCmd',1)
+            self.stop_sent=True
             self.status.setText('STOP requested — waiting for stationary axis')
         except Exception as ex:
             self.status.setText(f'STOP failed: {ex}. Retry or use local controls.')
 
     def kill_scan(self):
         self.active=False
+        self.paused=self.pause_requested=False
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.setText('Pause')
         self.stop_pending=True
         self.killing=True
+        self.stop_sent=False
+        self.stop_confirm_after=time.monotonic()+0.25
         errors=[]
-        for field,value in (('StpCmd',1),('EnaCmd',0)):
+        for field,value in (('EnaCmd',0),('StpCmd',1)):
             try:
                 self._put(field,value)
             except Exception as ex:
                 errors.append(str(ex))
+        self.stop_sent=not errors
         self.status.setText('KILL requested — waiting for disable readback' if not errors else
                             'KILL write failure: '+'; '.join(errors)+' — verify drive locally')
+
+    def reset_stats(self):
+        self.stats_count=0
+        self.stats_sum_sq=0.
+        self.stats_min=self.stats_max=None
+        self.stats_start=time.monotonic()
+
+    def export_csv(self):
+        path,_=QtWidgets.QFileDialog.getSaveFileName(self,'Export buffered PV samples','tuning.csv','CSV (*.csv)')
+        if not path:
+            return
+        try:
+            # Independent CA streams: no fabricated synchronized samples.
+            rows=sorted((t,k,v) for trend in (self.position,self.error) for k,q in trend.samples.items() for t,v in q)
+            origin=rows[0][0] if rows else time.monotonic()
+            with open(path,'w',newline='') as f:
+                writer=csv.writer(f)
+                writer.writerow(['elapsed_s','pv','value'])
+                writer.writerows((f'{t-origin:.6f}',self.base+'-'+k,v) for t,k,v in rows)
+            self.status.setText(f'Exported {len(rows)} buffered samples')
+        except Exception as ex:
+            self.status.setText(f'Export failed: {ex}')
+
+    def toggle_pause(self):
+        if not self.active or self.stop_pending:
+            return
+        if self.paused or self.pause_requested:
+            self.paused=self.pause_requested=False
+            self.pause_btn.setText('Pause')
+            self.status.setText('Scan resumed')
+        else:
+            self.pause_requested=True
+            self.pause_btn.setText('Resume')
+            self.status.setText('Pause requested — finish current move')
+
+    def enable_drive(self):
+        if self.active or self.stop_pending:
+            return
+        if self._value('ErrId')!=0 or self._bit(10)!=1 or self._bit(3)!=0 or self._bit(23)!=0:
+            self.status.setText('Cannot enable: axis error, busy, blocked or unavailable')
+            return
+        if not self.demo and QtWidgets.QMessageBox.question(self,'Enable drive',f'Enable {self.base}?',QtWidgets.QMessageBox.Yes|QtWidgets.QMessageBox.No,QtWidgets.QMessageBox.No)!=QtWidgets.QMessageBox.Yes:
+            return
+        try:
+            self._put('EnaCmd',1)
+            self.status.setText('Enable requested — see drive readback')
+        except Exception as ex:
+            self.status.setText(f'Enable failed: {ex}')
 
     def _unlock(self):
         for w in [*self.inputs.values(),self.relative,self.snake]:
@@ -410,11 +550,21 @@ class TuningWindow(QtWidgets.QDialog):
             for key,v in (('PosSet',self.sim_pos),('PosAct',self.sim_pos-err),('PosErr',err)):
                 self._sample(key,now,v)
         self.last_tick=now
+        if self.stats_count:
+            rms=math.sqrt(self.stats_sum_sq/self.stats_count)
+            peak=max(abs(self.stats_min),abs(self.stats_max))
+            self.stats_label.setText(f'RMS: {rms:.5g}    Peak: {peak:.5g}    P–P: {self.stats_max-self.stats_min:.5g}    N: {self.stats_count}')
+        else:
+            self.stats_label.setText('RMS: —    Peak: —    P–P: —')
+        lag=self.read_lag() if self.read_lag is not None else (0.01 if self.demo else None)
+        self.error.limit=lag
+        self.lag_label.setText('Lag: '+(f'±{lag:g}' if lag is not None else 'off / unknown'))
+        self.enable_btn.setEnabled(not self.active and not self.stop_pending and self._value('Enabled')==0)
         self.position.update()
         self.error.update()
         self.readout.setText('   '.join(k+': '+('—' if self.latest.get(k) is None else f'{self.latest[k]:.6g}') for k in ('PosSet','PosAct','PosErr')))
         if self.stop_pending:
-            if self._bit(3)==0 and self._bit(5)==0 and (not self.killing or (self._value('Enabled')==0 and self._value('EnableCmd')==0)):
+            if now>=self.stop_confirm_after and self.stop_sent and self._bit(3)==0 and self._bit(5)==0 and (not self.killing or (self._value('Enabled')==0 and self._value('EnableCmd')==0)):
                 self.stop_pending=False
                 self._unlock()
                 self.status.setText('Drive disabled' if self.killing else 'Stopped')
@@ -428,6 +578,11 @@ class TuningWindow(QtWidgets.QDialog):
             if self.idle_until is not None:
                 if self._bit(3)!=0 or self._bit(5)!=0:
                     raise RuntimeError('Unexpected motion during dwell')
+                if self.pause_requested or self.paused:
+                    if not self.paused:
+                        self.paused=True
+                        self.status.setText(f'Paused at {self.target:g}')
+                    return
                 if now>=self.idle_until:
                     self.index,self.direction=next_step(self.index,self.direction,len(self.points),self.use_snake)
                     self._move()

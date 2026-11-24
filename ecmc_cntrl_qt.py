@@ -1654,7 +1654,17 @@ class CntrlWindow(QtWidgets.QMainWindow):
                     raise RuntimeError(f'Cannot read native scan limits: {name}')
                 values[key] = float(reply.rsplit(': ',1)[1])
             return values
-        self._tuning_window = TuningWindow(self, self.client, base, demo=self.demo, read_config=read_config)
+        identity = self._context_identity()
+        def read_lag():
+            if self._context_identity() != identity:
+                return None
+            try:
+                enabled = float(self._cached_current_value(axis, 'AxisMonEnableLagMon'))
+                tol = float(self._cached_current_value(axis, 'AxisMonPosLagTol'))
+                return tol if enabled == 1 and 0 < tol < float('inf') else None
+            except (TypeError, ValueError):
+                return None
+        self._tuning_window = TuningWindow(self, self.client, base, demo=self.demo, read_config=read_config, read_lag=read_lag)
         self._tuning_window.show()
 
     def closeEvent(self, event):
