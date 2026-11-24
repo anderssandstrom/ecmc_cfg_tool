@@ -6,6 +6,8 @@ from ecmc_caqtdm import launch_caqtdm
 import subprocess
 import sys
 import time
+from collections import deque
+from ecmc_daq_trigger import TriggerCapture
 from pathlib import Path
 
 from qt_compat import QtCore, QtGui, QtWidgets
@@ -928,6 +930,8 @@ class DaqWindow(QtWidgets.QMainWindow):
         self.resize(980, 680)
 
         self._capture_active = False
+        self._trigger = None
+        self._trigger_deadline = None
         self._capture_start_ts = None
         self._capture_goal = 2048
         self._samples_by_pv = {}
@@ -1014,7 +1018,16 @@ class DaqWindow(QtWidgets.QMainWindow):
         top_row.addSpacing(12)
         top_row.addWidget(QtWidgets.QLabel("Launch"))
         top_row.addWidget(self.open_app_combo)
-        layout.addLayout(top_row)
+        setup = QtWidgets.QGroupBox('Connection / acquisition settings')
+        setup.setCheckable(True)
+        setup.setChecked(False)
+        setup_body = QtWidgets.QWidget()
+        setup_body.setLayout(top_row)
+        setup_layout = QtWidgets.QVBoxLayout(setup)
+        setup_layout.addWidget(setup_body)
+        setup_body.setVisible(False)
+        setup.toggled.connect(setup_body.setVisible)
+        layout.addWidget(setup)
 
         proc_row = QtWidgets.QHBoxLayout()
         self.remove_mean_chk = QtWidgets.QCheckBox("Remove Mean")
@@ -1048,7 +1061,16 @@ class DaqWindow(QtWidgets.QMainWindow):
         proc_row.addWidget(reset_range_btn)
         proc_row.addWidget(reset_time_zoom_btn)
         proc_row.addStretch(1)
-        layout.addLayout(proc_row)
+        analysis_group = QtWidgets.QGroupBox('Analysis settings')
+        analysis_group.setCheckable(True)
+        analysis_group.setChecked(False)
+        analysis_body = QtWidgets.QWidget()
+        analysis_body.setLayout(proc_row)
+        analysis_layout = QtWidgets.QVBoxLayout(analysis_group)
+        analysis_layout.addWidget(analysis_body)
+        analysis_body.setVisible(False)
+        analysis_group.toggled.connect(analysis_body.setVisible)
+        layout.addWidget(analysis_group)
 
         file_row = QtWidgets.QHBoxLayout()
         self.log_toggle_btn = QtWidgets.QPushButton("Show Log")
@@ -1096,6 +1118,33 @@ class DaqWindow(QtWidgets.QMainWindow):
         pv_row.addWidget(clear_samples_btn)
         pv_row.addWidget(show_freq_btn)
         layout.addLayout(pv_row)
+        trigger_row = QtWidgets.QHBoxLayout()
+        self.trigger_enabled = QtWidgets.QCheckBox('Triggered capture')
+        self.trigger_pv = QtWidgets.QLineEdit()
+        self.trigger_pv.setPlaceholderText('Trigger PV (e.g. axis-ErrId)')
+        self.trigger_edge = QtWidgets.QComboBox()
+        self.trigger_edge.addItems(['Rising ≥','Falling ≤','Absolute ≥'])
+        self.trigger_threshold = CompactDoubleSpinBox()
+        self.trigger_threshold.setRange(-1e12,1e12)
+        self.trigger_threshold.setDecimals(6)
+        self.trigger_threshold.setValue(1)
+        self.trigger_pre = CompactDoubleSpinBox()
+        self.trigger_post = CompactDoubleSpinBox()
+        for spin,value in ((self.trigger_pre,2),(self.trigger_post,3)):
+            spin.setRange(0.1,120)
+            spin.setValue(value)
+            spin.setSuffix(' s')
+        trigger_row.addWidget(self.trigger_enabled)
+        trigger_row.addWidget(self.trigger_pv,1)
+        trigger_row.addWidget(self.trigger_edge)
+        trigger_row.addWidget(self.trigger_threshold)
+        trigger_row.addWidget(QtWidgets.QLabel('Pre'))
+        trigger_row.addWidget(self.trigger_pre)
+        trigger_row.addWidget(QtWidgets.QLabel('Post'))
+        trigger_row.addWidget(self.trigger_post)
+        layout.addLayout(trigger_row)
+        self.trigger_controls=(self.trigger_enabled,self.trigger_pv,self.trigger_edge,self.trigger_threshold,self.trigger_pre,self.trigger_post)
+        self.capture_edit_buttons=(add_btn,remove_btn,clear_pvs_btn,clear_samples_btn,load_session_btn)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical, self)
         layout.addWidget(splitter, 1)
@@ -1123,9 +1172,12 @@ class DaqWindow(QtWidgets.QMainWindow):
             "right-drag pans, and right double-click resets zoom. "
             "Drag the start/end markers in the time plot, or left double-click there to reset to the full capture."
         )
+        note.setToolTip(note.text())
+        note.setText('Wheel: zoom · right drag: pan · drag range markers to select FFT interval.')
         note.setWordWrap(True)
         note.setStyleSheet("color: #516079;")
         left_layout.addWidget(note)
+        left.setMaximumWidth(260)
         upper_layout.addWidget(left, 0)
 
         self.time_plot = SeriesPlotWidget()
@@ -1172,7 +1224,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         lower_layout.addWidget(self.log)
         splitter.addWidget(lower)
         splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
+        splitter.setStretchFactor(1, 1)
 
         self.timeout_spin.valueChanged.connect(self._on_timeout_changed)
         self.poll_interval_spin.valueChanged.connect(self._on_poll_interval_changed)
@@ -1383,6 +1435,7 @@ class DaqWindow(QtWidgets.QMainWindow):
     def _session_payload(self):
         return {
             "version": 1,
+            "trigger_timestamp": self._trigger.timestamp if self._trigger is not None and self._trigger.fired else None,
             "prefix": self.prefix_edit.text().strip(),
             "timeout_s": float(self.timeout_spin.value()),
             "fallback_poll_ms": int(self.poll_interval_spin.value()),
@@ -1410,6 +1463,8 @@ class DaqWindow(QtWidgets.QMainWindow):
     def _apply_session_payload(self, payload):
         data = dict(payload or {})
         self.stop_capture()
+        self._trigger=None
+        self._trigger_deadline=None
 
         prefix = str(data.get("prefix", ""))
         timeout_s = float(data.get("timeout_s", self.timeout_spin.value()))
@@ -1577,6 +1632,14 @@ class DaqWindow(QtWidgets.QMainWindow):
             self._log("No PVs selected")
             return
         self._capture_goal = int(self.sample_count_spin.value())
+        self._trigger = None
+        self._trigger_deadline = None
+        if self.trigger_enabled.isChecked():
+            trigger_pv=self._resolved_pv_name(self.trigger_pv.text())
+            if not trigger_pv or not self.trigger_pv.text().strip():
+                self._log('Enter a trigger PV before arming')
+                return
+            self._trigger=TriggerCapture(pvs,trigger_pv,self.trigger_edge.currentIndex(),self.trigger_threshold.value(),self.trigger_pre.value(),self.trigger_post.value(),self._capture_goal)
         self._capture_start_ts = None
         self._capture_active = True
         self._analysis_range_auto = True
@@ -1584,7 +1647,10 @@ class DaqWindow(QtWidgets.QMainWindow):
         for name in pvs:
             self._samples_by_pv[name] = []
             self._analysis_by_pv[name] = {}
-        self.source.start(pvs)
+        sources=list(pvs)
+        if self._trigger is not None and self._trigger.trigger_pv not in sources:
+            sources.append(self._trigger.trigger_pv)
+        self.source.start(sources)
         self._update_capture_status()
         self._log(f"Capture started for {len(pvs)} PV(s), target {self._capture_goal} samples per PV")
 
@@ -1609,6 +1675,16 @@ class DaqWindow(QtWidgets.QMainWindow):
         name = str(pv_name or "").strip()
         if not self._capture_active or not name:
             return
+        if self._trigger is not None:
+            fired=self._trigger.add(name,float(timestamp_s),float(value))
+            if fired:
+                self._trigger_deadline=time.monotonic()+self._trigger.post_s
+                self._log('Trigger fired; collecting post-trigger samples')
+            if self._trigger.fired:
+                self._samples_by_pv={k:list(q) for k,q in self._trigger.buffers.items()}
+                self._capture_start_ts=self._trigger.timestamp-self._trigger.pre_s
+                self._pending_refresh=True
+            return
         if name not in self._samples_by_pv:
             return
         samples = self._samples_by_pv.setdefault(name, [])
@@ -1627,6 +1703,10 @@ class DaqWindow(QtWidgets.QMainWindow):
             self.stop_capture()
 
     def _refresh_views(self):
+        if self._capture_active and self._trigger_deadline is not None and time.monotonic()>=self._trigger_deadline:
+            self._trigger_deadline=None
+            self.stop_capture()
+            return
         if not self._pending_refresh and self._capture_active:
             self._update_capture_status()
             return
@@ -1709,8 +1789,12 @@ class DaqWindow(QtWidgets.QMainWindow):
             self.capture_status.setText(
                 f"Idle: min {min(counts)} / {self._capture_goal}, max {max(counts)} / {self._capture_goal}"
             )
+        if self._capture_active and self._trigger is not None:
+            self.capture_status.setText('Triggered — collecting post-trigger data' if self._trigger.fired else 'Armed — waiting for threshold crossing')
         self.start_btn.setEnabled(not self._capture_active)
         self.stop_btn.setEnabled(self._capture_active)
+        for w in (*self.trigger_controls,*self.capture_edit_buttons,self.sample_count_spin):
+            w.setEnabled(not self._capture_active)
 
     def _log(self, message):
         self.log.appendPlainText(f"[{time.strftime('%H:%M:%S')}] {message}")
