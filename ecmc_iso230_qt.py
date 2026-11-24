@@ -1078,6 +1078,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.estimated_duration_value.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
 
         self._native_axis = None
+        self._native_stop_pending = False
+        self._native_stop_sent = False
+        self._native_stop_after = 0.0
         self.motion_interface = QtWidgets.QComboBox()
         self.motion_interface.addItems(["Motor Record", "Native ECMC"])
         self.native_jerk_edit = QtWidgets.QLineEdit("")
@@ -3003,13 +3006,15 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
 
     def _set_test_running_state(self, running):
         self._test_active = bool(running)
-        self.start_btn.setEnabled(not running)
-        self.abort_btn.setEnabled(running)
-        for widget in (self.motion_interface, self.prefix_edit, self.axis_edit, self.axis_apply_btn, self.resolve_btn, self.motor_record_edit, self.axis_pfx_cfg_pv_edit, self.motor_name_cfg_pv_edit):
-            widget.setEnabled(not running)
+        self.start_btn.setEnabled(not running and not self._native_stop_pending)
+        self.abort_btn.setEnabled(running or self._native_stop_pending)
+        for widget in (self.motion_interface, self.prefix_edit, self.axis_edit, self.axis_pick_combo, self.axis_apply_btn, self.resolve_btn, self.motor_record_edit, self.axis_pfx_cfg_pv_edit, self.motor_name_cfg_pv_edit):
+            widget.setEnabled(not running and not self._native_stop_pending)
         self._update_progress_display()
 
     def start_test(self):
+        if self._native_stop_pending or self._test_active:
+            return
         if self._standalone:
             self._log("Standalone mode: live EPICS test execution is unavailable")
             return
@@ -3046,7 +3051,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 f"report reference={settings['reference_pv']}"
             )
             self._advance_test_step()
-            self._test_timer.start()
+            if self._test_active or self._native_stop_pending:
+                self._test_timer.start()
         except Exception as ex:
             self._set_test_running_state(False)
             self._log(f"Failed to start ISO 230 test: {ex}")
@@ -3086,6 +3092,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self.step_label.setText(f"{self._current_step['label']} | ready")
 
     def _test_tick(self):
+        if self._native_stop_pending:
+            self._check_native_stop()
+            return
         if not self._test_active or not self._current_step:
             self._test_timer.stop()
             return
@@ -3555,6 +3564,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
 
     def _finish_test(self):
         self._test_timer.stop()
+        self._native_axis = None
         self._set_test_running_state(False)
         self._current_phase = "done"
         self._current_step = None
@@ -3583,30 +3593,62 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._update_progress_display()
 
     def abort_test(self):
+        if self._native_stop_pending:
+            self.stop_motion()
+            return
         if not self._test_active:
             return
         self._log("ISO 230 test aborted by user")
         self._test_timer.stop()
+        if self._native_axis is not None:
+            self.stop_motion()
         self._set_test_running_state(False)
         self._current_phase = "aborted"
         self.step_label.setText("Aborted")
-        try:
-            self.stop_motion()
-        except Exception as ex:
-            self._log(f"Abort stop failed: {ex}")
+        if not self._native_stop_pending:
+            try:
+                self.stop_motion()
+            except Exception as ex:
+                self._log(f"Abort stop failed: {ex}")
         self._latest_metrics = self._compute_metrics(self._measurements)
         self._latest_metrics["state"] = "Aborted"
         self._update_summary_labels(self._latest_metrics)
         self._update_live_graph()
         self._update_progress_display()
 
+    def _check_native_stop(self):
+        axis = self._native_axis
+        if not self._native_stop_sent or axis is None:
+            return
+        if time.monotonic() < self._native_stop_after:
+            return
+        try:
+            stat = axis._value("Stat")
+            if stat is None or int(stat) & ((1 << 3) | (1 << 5)):
+                return
+        except Exception:
+            return
+        self._native_stop_pending = False
+        self._native_stop_sent = False
+        self._native_axis = None
+        self._test_timer.stop()
+        self._set_test_running_state(False)
+        self._log("Native STOP confirmed by stationary status")
+        self.step_label.setText("Stopped")
+
     def stop_motion(self):
         if self._native_axis is not None:
+            self._native_stop_pending = True
+            self._native_stop_sent = False
+            self._set_test_running_state(False)
             try:
                 self._native_axis._put("StpCmd", 1)
-                self._log("Native STOP requested; verify stationary readback")
+                self._native_stop_sent = True
+                self._native_stop_after = time.monotonic() + 0.25
+                self._log("Native STOP requested; waiting for stationary readback")
             except Exception as ex:
-                self._log(f"Native STOP failed: {ex}; verify axis locally")
+                self._log(f"Native STOP failed: {ex}; retry Abort or verify axis locally")
+            self._test_timer.start()
             return
         try:
             try:
@@ -4794,11 +4836,13 @@ A = max_i(xbar_i^+ + 2*s_i^+, xbar_i^- + 2*s_i^-)
             self._log(f"Failed to save CSV: {ex}")
 
     def closeEvent(self, event):
-        try:
-            if self._test_active:
-                self.abort_test()
-        finally:
-            super().closeEvent(event)
+        if self._test_active:
+            self.abort_test()
+        if self._native_stop_pending:
+            event.ignore()
+            self._log("Waiting for native STOP confirmation before closing; retry Abort if necessary")
+            return
+        super().closeEvent(event)
 
 
 def build_demo_report_files(report_path, csv_path=None, seed=2302):
