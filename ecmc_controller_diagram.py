@@ -78,18 +78,18 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
 
         # Explicit logical coordinates, independent of font metrics or layout
         # compression. Native widgets remain editable inside graphics proxies.
-        box(205,8,300,116,'PID parameters')
-        label(357,25,'Outer',11,True,True)
-        label(455,25,'Inner',11,True,True)
+        box(100,8,300,116,'PID parameters — P / I / D')
+        label(252,25,'Outer',11,True,True)
+        label(350,25,'Inner',11,True,True)
         for i,key in enumerate(('Kp','Ki','Kd')):
             y=39+22*i
-            label(215,y+4, {'Ki':'Ti [ms]', 'Kd':'Td [ms]'}.get(key,key) if pid_ms else key,11)
-            cell(311,y,'AxisCntrl'+key)
-            cell(409,y,'AxisCntrlInner'+key)
-        field(215,102,'Inner tolerance','AxisCntrlInnerTol',96)
+            label(110,y+4, {'Ki':'Ti [ms]', 'Kd':'Td [ms]'}.get(key,key) if pid_ms else key,11)
+            cell(206,y,'AxisCntrl'+key)
+            cell(304,y,'AxisCntrlInner'+key)
+        field(110,102,'Inner tolerance','AxisCntrlInnerTol',96)
 
-        box(570,22,178,53,'Velocity feedforward')
-        field(582,47,'Kff','AxisCntrlKff',62)
+        box(455,22,178,53,'Velocity feedforward')
+        field(467,47,'Kff','AxisCntrlKff',62)
         box(8,190,91,58,'Trajectory')
         label(53,211,'Position',11,False,True)
         label(53,226,'setpoint',11,False,True)
@@ -111,11 +111,11 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         box(776,181,216,76,'Drive scaling')
         field(786,205,'Numerator','AxisDrvScaleNum',108)
         field(786,228,'Denominator','AxisDrvScaleDenom',108)
-        box(850,280,142,39,'Physical process')
-        label(921,298,'Motor / mechanics',11,False,True)
-        box(578,279,216,76,'Encoder scaling')
-        field(588,302,'Numerator','AxisEncScaleNum',108)
-        field(588,325,'Denominator','AxisEncScaleDenom',108)
+        box(850,289,142,38,'Physical process')
+        label(921,307,'Motor / mechanics',11,False,True)
+        box(578,270,216,76,'Encoder scaling')
+        field(588,293,'Numerator','AxisEncScaleNum',108)
+        field(588,316,'Denominator','AxisEncScaleDenom',108)
 
         line([(99,219),(118,219)])
         line([(142,219),(158,219),(158,160),(182,160)])
@@ -125,17 +125,16 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         line([(392,219),(420,219)])
         line([(278,327),(432,327),(432,231)])
         line([(444,219),(532,219)])
-        line([(659,75),(659,147),(544,147),(544,207)])
+        line([(544,75),(544,207)])
         # Separate velocity signal from the same trajectory generator.
-        line([(53,190),(53,130),(557,130),(557,48),(570,48)])
-        label(60,115,'Trajectory velocity',11)
+        line([(53,190),(53,132),(433,132),(433,48),(455,48)])
+        label(60,135,'Trajectory velocity',11)
         line([(556,219),(578,219)])
         line([(750,219),(776,219)])
-        line([(884,257),(884,269),(921,269),(921,280)])
-        line([(850,300),(822,300),(822,317),(794,317)])
-        line([(578,317),(475,317),(475,359),(130,359),(130,231)])
+        line([(921,257),(921,289)])
+        line([(850,308),(794,308)])
+        line([(686,346),(686,359),(130,359),(130,231)])
         label(285,344,'Actual position feedback',11)
-        line([(230,122),(230,141)],True,False)
 
         # Monitoring is shown separately from the arithmetic signal path.
         box(8,372,330,64,'At-target monitoring',True)
