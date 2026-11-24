@@ -7,6 +7,7 @@ import json
 from ecmc_caqtdm import launch_caqtdm, panel_directories
 from ecmc_app_launcher import script_command
 from ecmc_diagnostic_presets import axis_diagnostic_pvs
+from ecmc_settings import UiSettings
 import subprocess
 import sys
 import time
@@ -134,6 +135,12 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._ssh_host = ssh_host
         self._embedded_tools = []
         self._build_ui(prefix, ssh_host, ssh_host_pv)
+        self._ui_settings = None if demo else UiSettings('navigator')
+        if self._ui_settings is not None:
+            self._ui_settings.restore_geometry(self)
+            self._ui_settings.restore_layout('workspace', self.workspace)
+            self._ui_settings.restore_layout('tree_header', self.tree.header())
+            self.embed_tools_check.setChecked(self._ui_settings.boolean('embed_tools', True))
         self._health_timer=QtCore.QTimer(self)
         self._health_timer.setInterval(500)
         self._health_timer.timeout.connect(self._update_health)
@@ -151,7 +158,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.setCentralWidget(root)
         layout = QtWidgets.QVBoxLayout(root)
 
-        workspace = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
+        workspace = self.workspace = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         workspace.setChildrenCollapsible(False)
         workspace.setHandleWidth(8)
         layout.addWidget(workspace, 1)
@@ -499,6 +506,12 @@ class IocNavigator(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self,'Snapshot failed',str(ex))
 
     def closeEvent(self,event):
+        if self._ui_settings is not None:
+            self._ui_settings.save_geometry(self)
+            self._ui_settings.save_layout('workspace', self.workspace)
+            self._ui_settings.save_layout('tree_header', self.tree.header())
+            self._ui_settings.set_boolean('embed_tools', self.embed_tools_check.isChecked())
+            self._ui_settings.sync()
         self._health_timer.stop()
         self._disconnect_health()
         super().closeEvent(event)
