@@ -1569,6 +1569,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
             item = self.diagram_layout.itemAt(i)
             w = item.widget()
             if w is not None:
+                self.diagram_layout.removeWidget(w)
+                w.hide()
                 w.deleteLater()
 
     def _row_def(self, name):
@@ -1579,7 +1581,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
             return ''
         return f"GET: {row_def.get('get') or '-'}\nSET: {row_def.get('set') or '-'}"
 
-    def _make_sketch_cell(self, row_def, overlay=False):
+    def _make_sketch_cell(self, row_def, overlay=False, compact=False):
         cell = QtWidgets.QWidget()
         if overlay:
             cell.setProperty('overlayCell', True)
@@ -1591,7 +1593,9 @@ class CntrlWindow(QtWidgets.QMainWindow):
         cl.setSpacing(1 if overlay else 2)
 
         edit = QtWidgets.QLineEdit('')
-        if overlay:
+        if compact:
+            edit.setFixedSize(60, 19)
+        elif overlay:
             edit.setFixedSize(62, 28)
         else:
             edit.setFixedSize(96, 34)
@@ -1616,7 +1620,9 @@ class CntrlWindow(QtWidgets.QMainWindow):
         for b in (rb, wb):
             b.setAutoDefault(False)
             b.setDefault(False)
-            if overlay:
+            if compact:
+                b.setFixedSize(14, 19)
+            elif overlay:
                 b.setFixedSize(14, 13)
             else:
                 b.setFixedSize(20, 16)
@@ -1647,6 +1653,12 @@ class CntrlWindow(QtWidgets.QMainWindow):
             self._seed_value_widgets_from_cache(row_def, self.axis_all_edit.text(), edit, edit)
 
         cl.addWidget(edit)
+        if compact:
+            cl.setSpacing(1)
+            cl.addWidget(rb)
+            cl.addWidget(wb)
+            cell.setFixedSize(90, 19)
+            return cell
         btn_col = QtWidgets.QVBoxLayout()
         btn_col.setContentsMargins(0, 0, 0, 0)
         btn_col.setSpacing(1)
@@ -1664,7 +1676,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
             self._populate_controller_sketch_overlay(image_path)
             return
         from ecmc_controller_diagram import ControllerDiagram
-        self.diagram_layout.addWidget(ControllerDiagram(self._make_sketch_cell, self._row_def), 0, 0)
+        self.diagram_layout.addWidget(ControllerDiagram(lambda rd: self._make_sketch_cell(rd, compact=True), self._row_def), 0, 0)
 
     def _populate_controller_sketch_overlay(self, image_path):
         canvas = ImageOverlayCanvas(image_path)

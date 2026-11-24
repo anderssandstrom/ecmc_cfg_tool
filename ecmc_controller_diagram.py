@@ -1,111 +1,159 @@
-"""Native Qt controller schematic. All editable cells use existing app callbacks."""
+"""Fit-to-window controller diagram with native interactive Qt controls."""
 import math
 from qt_compat import QtCore, QtGui, QtWidgets
 
 
-class ControllerDiagram(QtWidgets.QWidget):
+class ControllerDiagram(QtWidgets.QGraphicsView):
+    WIDTH = 1000
+    HEIGHT = 438
+
     def __init__(self, make_cell, row_def):
         super().__init__()
-        self.setMinimumSize(1160, 720)
-        self._links = []
-        grid = QtWidgets.QGridLayout(self)
-        grid.setContentsMargins(14, 14, 14, 14)
-        grid.setHorizontalSpacing(34)
-        grid.setVerticalSpacing(30)
+        scene = QtWidgets.QGraphicsScene(self)
+        self.setScene(scene)
+        scene.setSceneRect(0, 0, self.WIDTH, self.HEIGHT)
+        self.setMinimumSize(0, 0)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Ignored)
+        self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.setRenderHint(QtGui.QPainter.Antialiasing)
+        scene.setBackgroundBrush(QtGui.QBrush(QtGui.QColor('#e9edf0')))
+        blue = '#527a99'
+        green = '#548675'
+        ink = '#273b4b'
 
-        def panel(title, fields=(), monitoring=False):
-            box = QtWidgets.QGroupBox(title)
-            border = '#49866e' if monitoring else '#5685aa'
-            box.setStyleSheet('QGroupBox { border: 1px solid '+border+'; border-radius: 5px; margin-top: 12px; padding-top: 6px; font-weight: bold; } QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px; }')
-            form = QtWidgets.QFormLayout(box)
-            form.setContentsMargins(8, 14, 8, 8)
-            form.setSpacing(4)
-            for label, name in fields:
-                form.addRow(label, make_cell(row_def(name)))
-            return box
+        def label(x, y, text, size=12, bold=False, center=False):
+            item = scene.addSimpleText(text)
+            font = QtGui.QFont()
+            font.setPixelSize(size)
+            font.setBold(bold)
+            item.setFont(font)
+            item.setBrush(QtGui.QBrush(QtGui.QColor(ink)))
+            if center:
+                x -= item.boundingRect().width()/2
+            item.setPos(x, y)
+            item.setZValue(2)
+            return item
 
-        pid = panel('PID parameters — outer / inner')
-        form = pid.layout()
-        for label, suffix in (('Kp','Kp'), ('Ki','Ki'), ('Kd','Kd')):
-            pair = QtWidgets.QWidget()
-            h = QtWidgets.QHBoxLayout(pair)
-            h.setContentsMargins(0,0,0,0)
-            h.addWidget(make_cell(row_def('AxisCntrl'+suffix)))
-            h.addWidget(make_cell(row_def('AxisCntrlInner'+suffix)))
-            form.addRow(label, pair)
-        form.addRow('Inner tolerance', make_cell(row_def('AxisCntrlInnerTol')))
-        ff = panel('Velocity feedforward', [('Kff','AxisCntrlKff')])
-        traj = panel('Trajectory / position')
-        traj.layout().addRow(QtWidgets.QLabel('Position setpoint'))
-        error = panel('Error  (+ −)')
-        error.layout().addRow(QtWidgets.QLabel('Position error'))
-        p = panel('P — proportional')
-        integ = panel('I — accumulator', [('Min','AxisCntrlIPartLL'),('Max','AxisCntrlIPartHL'),('Reset at ramp','AxisCntrlResetIAtRmp'),('Freeze at ramp','AxisCntrlFreezeIAtRmp')])
-        d = panel('D — difference')
-        summ = panel('Σ  P + I + D + FF')
-        out = panel('Output limits', [('Min','AxisCntrlOutLL'),('Max','AxisCntrlOutHL')])
-        drive = panel('Drive scaling', [('Numerator','AxisDrvScaleNum'),('Denominator','AxisDrvScaleDenom')])
-        process = panel('Physical process')
-        enc = panel('Encoder scaling', [('Numerator','AxisEncScaleNum'),('Denominator','AxisEncScaleDenom')])
-        target = panel('At-target monitoring', [('Enable','AxisMonEnableAtTargetMon'),('Tolerance','AxisMonAtTargetTol'),('Time [cycles]','AxisMonAtTargetTime')], True)
-        deadband = panel('Controller deadband', [('Tolerance','AxisCntrlDeadband'),('Time [cycles]','AxisCntrlDeadbandTime')], True)
-        slave = panel('Slave control deadband', [('Tolerance','AxisMonSlvCtrlDbTol'),('Time [cycles]','AxisMonSlvCtrlDbTime')], True)
+        def box(x, y, w, h, title, monitoring=False):
+            item = scene.addRect(x,y,w,h,QtGui.QPen(QtGui.QColor(green if monitoring else blue)),
+                                 QtGui.QBrush(QtGui.QColor('#f1f7f3' if monitoring else '#f7f9fb')))
+            item.setZValue(1)
+            label(x+w/2,y+4,title,12,True,True)
 
-        grid.addWidget(pid,0,2,1,2)
-        grid.addWidget(ff,0,4)
-        grid.addWidget(traj,2,0)
-        grid.addWidget(error,2,1)
-        grid.addWidget(p,1,2)
-        grid.addWidget(integ,2,2)
-        grid.addWidget(d,3,2)
-        grid.addWidget(summ,2,3)
-        grid.addWidget(out,2,4)
-        grid.addWidget(drive,2,5)
-        grid.addWidget(process,3,5)
-        grid.addWidget(enc,4,4,1,2)
-        grid.addWidget(target,5,0,1,2)
-        grid.addWidget(deadband,5,2,1,2)
-        grid.addWidget(slave,5,4,1,2)
-        for a,b in ((traj,error),(error,p),(error,integ),(error,d),(p,summ),(integ,summ),(d,summ),(summ,out),(out,drive)):
-            self._links.append((a,b,'right','left',False))
-        self._links.extend([(ff,summ,'bottom','top',False),(drive,process,'bottom','top',False),
-                            (process,enc,'bottom','right',False),(enc,error,'left','bottom',False),
-                            (pid,p,'bottom','top',True)])
-        self._grid = grid
+        def cell(x,y,name):
+            widget = make_cell(row_def(name))
+            proxy = scene.addWidget(widget)
+            proxy.setPos(x,y)
+            proxy.setZValue(3)
 
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        painter = QtGui.QPainter(self)
-        painter.setRenderHint(QtGui.QPainter.Antialiasing)
-        def anchor(widget, side):
-            r = widget.geometry()
-            return {'left': QtCore.QPointF(r.left(),r.center().y()),
-                    'right': QtCore.QPointF(r.right(),r.center().y()),
-                    'top': QtCore.QPointF(r.center().x(),r.top()),
-                    'bottom': QtCore.QPointF(r.center().x(),r.bottom())}[side]
-        for a,b,sa,sb,dashed in self._links:
-            start,end=anchor(a,sa),anchor(b,sb)
-            pen=QtGui.QPen(self.palette().color(QtGui.QPalette.WindowText),1.5)
+        def field(x,y,title,name,dx=70):
+            label(x,y+4,title,11)
+            cell(x+dx,y,name)
+
+        def line(points, dashed=False, arrow=True):
+            pen=QtGui.QPen(QtGui.QColor(ink),1.5)
             if dashed:
                 pen.setStyle(QtCore.Qt.DashLine)
-            painter.setPen(pen)
-            if sa=='right' and sb=='left':
-                mid=(start.x()+end.x())/2
-                points=[start,QtCore.QPointF(mid,start.y()),QtCore.QPointF(mid,end.y()),end]
-            elif sa=='left' and sb=='bottom':
-                y=start.y()
-                points=[start,QtCore.QPointF(end.x(),y),end]
-            elif sa=='bottom' and sb=='right':
-                x=end.x()+12
-                points=[start,QtCore.QPointF(start.x(),end.y()),QtCore.QPointF(x,end.y()),end]
-            else:
-                mid=(start.y()+end.y())/2
-                points=[start,QtCore.QPointF(start.x(),mid),QtCore.QPointF(end.x(),mid),end]
-            painter.drawPolyline(QtGui.QPolygonF(points))
-            if not dashed:
-                prev=next((p for p in reversed(points[:-1]) if p!=end),start)
-                angle=math.atan2(end.y()-prev.y(),end.x()-prev.x())
-                head=[end]+[QtCore.QPointF(end.x()-8*math.cos(angle+t),end.y()-8*math.sin(angle+t)) for t in (-.45,.45)]
-                painter.setBrush(pen.color())
-                painter.drawPolygon(QtGui.QPolygonF(head))
-        painter.end()
+            path=QtGui.QPainterPath(QtCore.QPointF(*points[0]))
+            for p in points[1:]:
+                path.lineTo(QtCore.QPointF(*p))
+            item=scene.addPath(path,pen)
+            item.setZValue(0)
+            if arrow and not dashed:
+                x,y=points[-1]
+                px,py=points[-2]
+                a=math.atan2(y-py,x-px)
+                poly=QtGui.QPolygonF([QtCore.QPointF(x,y)]+[
+                    QtCore.QPointF(x-7*math.cos(a+t),y-7*math.sin(a+t))
+                    for t in (-.45,.45)])
+                scene.addPolygon(poly,QtGui.QPen(QtCore.Qt.NoPen),QtGui.QBrush(QtGui.QColor(ink)))
+
+        def summing(x,y,sign):
+            item=scene.addEllipse(x-12,y-12,24,24,QtGui.QPen(QtGui.QColor(ink),1.5),
+                                  QtGui.QBrush(QtGui.QColor('#f7f9fb')))
+            item.setZValue(1)
+            label(x,y-11,sign,16,True,True)
+
+        # Explicit logical coordinates, independent of font metrics or layout
+        # compression. Native widgets remain editable inside graphics proxies.
+        box(205,8,300,116,'PID parameters')
+        label(357,25,'Outer',11,True,True)
+        label(455,25,'Inner',11,True,True)
+        for i,key in enumerate(('Kp','Ki','Kd')):
+            y=39+22*i
+            label(215,y+4,key,11)
+            cell(311,y,'AxisCntrl'+key)
+            cell(409,y,'AxisCntrlInner'+key)
+        field(215,102,'Inner tolerance','AxisCntrlInnerTol',96)
+
+        box(570,22,178,53,'Velocity feedforward')
+        field(582,47,'Kff','AxisCntrlKff',62)
+        box(8,190,91,58,'Trajectory')
+        label(53,211,'Position',11,False,True)
+        label(53,226,'setpoint',11,False,True)
+        summing(130,219,'−')
+        box(182,141,96,38,'P')
+        label(230,158,'Proportional',11,False,True)
+        box(182,190,210,106,'I — accumulator')
+        field(192,211,'Min','AxisCntrlIPartLL',110)
+        field(192,232,'Max','AxisCntrlIPartHL',110)
+        field(192,253,'Reset at ramp','AxisCntrlResetIAtRmp',110)
+        field(192,274,'Freeze at ramp','AxisCntrlFreezeIAtRmp',110)
+        box(182,310,96,35,'D')
+        label(230,326,'Difference',11,False,True)
+        summing(432,219,'+')
+        summing(544,219,'+')
+        box(578,181,172,76,'Output limits')
+        field(588,205,'Min','AxisCntrlOutLL',66)
+        field(588,228,'Max','AxisCntrlOutHL',66)
+        box(776,181,216,76,'Drive scaling')
+        field(786,205,'Numerator','AxisDrvScaleNum',108)
+        field(786,228,'Denominator','AxisDrvScaleDenom',108)
+        box(850,280,142,39,'Physical process')
+        label(921,298,'Motor / mechanics',11,False,True)
+        box(578,279,216,76,'Encoder scaling')
+        field(588,302,'Numerator','AxisEncScaleNum',108)
+        field(588,325,'Denominator','AxisEncScaleDenom',108)
+
+        line([(99,219),(118,219)])
+        line([(142,219),(158,219),(158,160),(182,160)])
+        line([(158,219),(182,219)])
+        line([(158,219),(158,327),(182,327)])
+        line([(278,160),(432,160),(432,207)])
+        line([(392,219),(420,219)])
+        line([(278,327),(432,327),(432,231)])
+        line([(444,219),(532,219)])
+        line([(659,75),(659,116),(544,116),(544,207)])
+        # Separate velocity signal from the same trajectory generator.
+        line([(53,190),(53,130),(557,130),(557,48),(570,48)])
+        label(60,115,'Trajectory velocity',11)
+        line([(556,219),(578,219)])
+        line([(750,219),(776,219)])
+        line([(884,257),(884,269),(921,269),(921,280)])
+        line([(850,300),(822,300),(822,317),(794,317)])
+        line([(578,317),(475,317),(475,359),(130,359),(130,231)])
+        label(285,344,'Actual position feedback',11)
+        line([(230,122),(230,141)],True,False)
+
+        # Monitoring is shown separately from the arithmetic signal path.
+        box(8,372,330,64,'At-target monitoring',True)
+        field(17,394,'Enable','AxisMonEnableAtTargetMon',48)
+        field(166,394,'Tolerance','AxisMonAtTargetTol',72)
+        # Use remaining lower row; compact cells keep the whole scene visible.
+        field(17,413,'Time [cycles]','AxisMonAtTargetTime',96)
+        box(350,372,310,64,'Controller deadband',True)
+        field(359,394,'Tolerance','AxisCntrlDeadband',92)
+        field(359,413,'Time [cycles]','AxisCntrlDeadbandTime',92)
+        box(672,372,320,64,'Slave control deadband',True)
+        field(681,394,'Tolerance','AxisMonSlvCtrlDbTol',92)
+        field(681,413,'Time [cycles]','AxisMonSlvCtrlDbTime',92)
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        self.fitInView(self.sceneRect(),QtCore.Qt.KeepAspectRatio)
+
+    def showEvent(self,event):
+        super().showEvent(event)
+        self.fitInView(self.sceneRect(),QtCore.Qt.KeepAspectRatio)
