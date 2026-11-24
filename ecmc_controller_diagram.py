@@ -36,11 +36,14 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
             item.setZValue(2)
             return item
 
-        def box(x, y, w, h, title, monitoring=False):
+        def box(x, y, w, h, title, monitoring=False, tooltip=None):
             item = scene.addRect(x,y,w,h,QtGui.QPen(QtGui.QColor(green if monitoring else blue)),
                                  QtGui.QBrush(QtGui.QColor('#f1f7f3' if monitoring else '#f7f9fb')))
             item.setZValue(1)
-            label(x+w/2,y+4,title,12,True,True)
+            heading = label(x+w/2,y+4,title,12,True,True)
+            if tooltip:
+                item.setToolTip(tooltip)
+                heading.setToolTip(tooltip)
 
         def cell(x,y,name):
             widget = make_cell(row_def(name))
@@ -52,8 +55,9 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
             label(x,y+4,title,11)
             cell(x+dx,y,name)
 
-        def line(points, dashed=False, arrow=True):
-            pen=QtGui.QPen(QtGui.QColor(ink),1.5)
+        def line(points, dashed=False, arrow=True, color=None):
+            color = color or ink
+            pen=QtGui.QPen(QtGui.QColor(color),1.5)
             if dashed:
                 pen.setStyle(QtCore.Qt.DashLine)
             path=QtGui.QPainterPath(QtCore.QPointF(*points[0]))
@@ -61,14 +65,14 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
                 path.lineTo(QtCore.QPointF(*p))
             item=scene.addPath(path,pen)
             item.setZValue(0)
-            if arrow and not dashed:
+            if arrow:
                 x,y=points[-1]
                 px,py=points[-2]
                 a=math.atan2(y-py,x-px)
                 poly=QtGui.QPolygonF([QtCore.QPointF(x,y)]+[
                     QtCore.QPointF(x-7*math.cos(a+t),y-7*math.sin(a+t))
                     for t in (-.45,.45)])
-                scene.addPolygon(poly,QtGui.QPen(QtCore.Qt.NoPen),QtGui.QBrush(QtGui.QColor(ink)))
+                scene.addPolygon(poly,QtGui.QPen(QtCore.Qt.NoPen),QtGui.QBrush(QtGui.QColor(color)))
 
         def summing(x,y,sign):
             item=scene.addEllipse(x-12,y-12,24,24,QtGui.QPen(QtGui.QColor(ink),1.5),
@@ -78,7 +82,8 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
 
         # Explicit logical coordinates, independent of font metrics or layout
         # compression. Native widgets remain editable inside graphics proxies.
-        box(100,8,300,116,'PID parameters — P / I / D')
+        box(100,8,300,116,'PID parameters — P / I / D',
+            tooltip='Inner gains are selected only if inner tolerance > 0 and the absolute difference between the final target position and actual position is strictly smaller than that tolerance.')
         label(252,25,'Outer',11,True,True)
         label(350,25,'Inner',11,True,True)
         for i,key in enumerate(('Kp','Ki','Kd')):
@@ -87,30 +92,46 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
             cell(206,y,'AxisCntrl'+key)
             cell(304,y,'AxisCntrlInner'+key)
         field(110,102,'Inner tolerance','AxisCntrlInnerTol',96)
+        label(299,105,'|target−act| < tol',10).setToolTip('Inner tolerance must also be greater than zero.')
 
-        box(455,22,178,53,'Velocity feedforward')
-        field(467,47,'Kff','AxisCntrlKff',62)
+        box(425,22,178,53,'Velocity feedforward',
+            tooltip='CSV: trajectory velocity setpoint × Kff. CSP with ECMC correction uses zero feedforward.')
+        field(437,47,'Kff','AxisCntrlKff',62)
+
+        label(799,8,'CSV position controller',16,True,True)
+        box(610,32,382,96,'Control / monitoring conditions',True,
+            tooltip='ECMC 11.2.0: enabled at-target monitoring qualifies each tolerance counter when the setpoint is within the at-target tolerance of the final target and the local trajectory is not busy. With external trajectory source, the controller-deadband flag is supplied by PLC instead.')
+        label(620,55,'At-target enabled; setpoint near final target',11)
+        label(620,71,'Local trajectory not busy; error tolerance + time',11)
+        label(620,91,'CSP: direct position or PID correction; FF = 0',11)
+        label(620,107,'CSP correction holds its last offset in deadband.',11)
         box(8,190,91,58,'Trajectory')
         label(53,211,'Position',11,False,True)
         label(53,226,'setpoint',11,False,True)
         summing(130,219,'−')
         box(182,141,96,38,'P')
         label(230,158,'Proportional',11,False,True)
-        box(182,190,210,106,'I — accumulator')
+        box(182,190,210,106,'I — accumulator',
+            tooltip='Integral contribution is clamped only if max > min. Internal trajectory busy: reset takes precedence over freeze; otherwise integrate Ki × position error.')
         field(192,211,'Min','AxisCntrlIPartLL',110)
         field(192,232,'Max','AxisCntrlIPartHL',110)
-        field(192,253,'Reset at ramp','AxisCntrlResetIAtRmp',110)
-        field(192,274,'Freeze at ramp','AxisCntrlFreezeIAtRmp',110)
+        field(192,253,'Reset on busy','AxisCntrlResetIAtRmp',110)
+        field(192,274,'Freeze on busy','AxisCntrlFreezeIAtRmp',110)
         box(182,310,96,35,'D')
         label(230,326,'Difference',11,False,True)
-        summing(432,219,'+')
-        summing(544,219,'+')
-        box(578,181,172,76,'Output limits')
-        field(588,205,'Min','AxisCntrlOutLL',66)
-        field(588,228,'Max','AxisCntrlOutHL',66)
-        box(776,181,216,76,'Drive scaling')
-        field(786,205,'Numerator','AxisDrvScaleNum',108)
-        field(786,228,'Denominator','AxisDrvScaleDenom',108)
+        summing(420,219,'+')
+        summing(490,219,'+')
+        box(520,181,168,76,'Output limits',
+            tooltip='Limits the sum of P + I + D + FF only when max > min.')
+        field(528,205,'Min','AxisCntrlOutLL',62)
+        field(528,228,'Max','AxisCntrlOutHL',62)
+        box(710,190,68,58,'Run / 0',True,
+            tooltip='CSV: when not busy and in controller deadband, skip PID calculation, reset controller state and send zero velocity to the drive. Axis disabled, invalid feedback or interlocks can also suppress control.')
+        label(744,212,'PID reset',10,False,True)
+        label(744,225,'if gated',10,False,True)
+        box(800,181,192,76,'Drive scaling')
+        field(808,205,'Numerator','AxisDrvScaleNum',86)
+        field(808,228,'Denominator','AxisDrvScaleDenom',86)
         box(850,289,142,38,'Physical process')
         label(921,307,'Motor / mechanics',11,False,True)
         box(578,270,216,76,'Encoder scaling')
@@ -121,31 +142,41 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         line([(142,219),(158,219),(158,160),(182,160)])
         line([(158,219),(182,219)])
         line([(158,219),(158,327),(182,327)])
-        line([(278,160),(432,160),(432,207)])
-        line([(392,219),(420,219)])
-        line([(278,327),(432,327),(432,231)])
-        line([(444,219),(532,219)])
-        line([(544,75),(544,207)])
+        line([(278,160),(420,160),(420,207)])
+        line([(392,219),(408,219)])
+        line([(278,327),(420,327),(420,231)])
+        line([(432,219),(478,219)])
+        line([(490,75),(490,207)])
         # Separate velocity signal from the same trajectory generator.
-        line([(53,190),(53,132),(433,132),(433,48),(455,48)])
+        line([(53,190),(53,132),(412,132),(412,48),(425,48)])
         label(60,135,'Trajectory velocity',11)
-        line([(556,219),(578,219)])
-        line([(750,219),(776,219)])
+        line([(502,219),(520,219)])
+        line([(688,219),(710,219)])
+        line([(778,219),(800,219)])
         line([(921,257),(921,289)])
         line([(850,308),(794,308)])
         line([(686,346),(686,359),(130,359),(130,231)])
         label(285,344,'Actual position feedback',11)
 
+        # Dashed green control path, not a position or velocity signal. Break
+        # the path at the feedback crossing to make clear there is no junction.
+        line([(505,372),(505,365)],True,False,green)
+        line([(505,353),(505,263),(744,263),(744,248)],True,True,green)
+        label(515,265,'Deadband + not busy',10).setToolTip('CSV control gate: reset PID and command zero.')
+
         # Monitoring is shown separately from the arithmetic signal path.
-        box(8,372,330,64,'At-target monitoring',True)
+        box(8,372,330,64,'At-target monitoring',True,
+            tooltip='Determines the at-target status using the common trajectory qualification and its own tolerance/time. Its enable also gates internal deadband monitoring.')
         field(17,394,'Enable','AxisMonEnableAtTargetMon',48)
         field(166,394,'Tolerance','AxisMonAtTargetTol',72)
         # Use remaining lower row; compact cells keep the whole scene visible.
         field(17,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonAtTargetTime',96)
-        box(350,372,310,64,'Controller deadband',True)
+        box(350,372,310,64,'Controller deadband',True,
+            tooltip='CSV: controller deadband AND not busy resets the PID and commands zero velocity. CSP with ECMC correction: holds the last correction. External trajectory: PLC supplies the controller-deadband status.')
         field(359,394,'Tolerance','AxisCntrlDeadband',92)
         field(359,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisCntrlDeadbandTime',92)
-        box(672,372,320,64,'Slave control deadband',True)
+        box(672,372,320,64,'Slave control deadband',True,
+            tooltip='Separate tolerance and time qualification for slave control; defaults to the at-target settings if not configured.')
         field(681,394,'Tolerance','AxisMonSlvCtrlDbTol',92)
         field(681,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonSlvCtrlDbTime',92)
 
