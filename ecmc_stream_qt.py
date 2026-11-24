@@ -10,6 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from qt_compat import QtCore, QtGui, QtWidgets
+from ecmc_command_client import CommandClient, command_transaction
 # Re-export for existing applications and third-party imports.
 from ecmc_epics import EpicsClient, _join_prefix_pv, _proc_pv_for_readback
 
@@ -1348,7 +1349,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._set_readback_field(msg)
             return False, msg
         try:
-            self.client.put(pv, cmd, wait=True)
+            CommandClient(self.client, pv, "").send(cmd, wait=True)
             msg = f'CMD -> {pv} ({len(cmd)} chars): {cmd}'
             self._log(msg)
             return True, msg
@@ -1358,35 +1359,39 @@ class MainWindow(QtWidgets.QMainWindow):
             return False, msg
 
     def read_raw_command(self, cmd):
-        ok, msg = self.send_raw_command(cmd)
-        if not ok:
-            self._set_readback_field(msg)
-            return False, msg
-
-        qp = self.qry_pv.text().strip()
-        if not qp:
-            msg = f'Command sent, no QRY PV configured: {cmd}'
-            self._log(msg)
-            self._set_readback_field(msg)
-            return True, msg
-
-        try:
-            val = self.client.get(qp, as_string=True)
-            if query_value_indicates_error(val):
-                short = summarize_error_text(val, self.error_name_by_code)
-                msg = f'QRY ERROR <- {qp}: {short}'
-                self._log(msg)
-                self._set_readback_field(short)
+        pv = self.cmd_pv.text().strip()
+        if not pv:
+            return False, "ERROR: Command PV is empty"
+        with command_transaction(pv):
+            ok, msg = self.send_raw_command(cmd)
+            if not ok:
+                self._set_readback_field(msg)
                 return False, msg
-            msg = compact_query_message_value(f'QRY <- {qp}: {val}')
-            self._log(msg)
-            self._set_readback_field(val)
-            return True, msg
-        except Exception as ex:
-            msg = f'ERROR query read: {ex}'
-            self._log(msg)
-            self._set_readback_field(msg)
-            return False, msg
+
+            qp = self.qry_pv.text().strip()
+            if not qp:
+                msg = f'Command sent, no QRY PV configured: {cmd}'
+                self._log(msg)
+                self._set_readback_field(msg)
+                return True, msg
+
+            try:
+                val = self.client.get(qp, as_string=True)
+                if query_value_indicates_error(val):
+                    short = summarize_error_text(val, self.error_name_by_code)
+                    msg = f'QRY ERROR <- {qp}: {short}'
+                    self._log(msg)
+                    self._set_readback_field(short)
+                    return False, msg
+                msg = compact_query_message_value(f'QRY <- {qp}: {val}')
+                self._log(msg)
+                self._set_readback_field(val)
+                return True, msg
+            except Exception as ex:
+                msg = f'ERROR query read: {ex}'
+                self._log(msg)
+                self._set_readback_field(msg)
+                return False, msg
 
     def send_command(self):
         self.read_raw_command(self.command_edit.text())
@@ -1398,8 +1403,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         try:
             proc_pv = _proc_pv_for_readback(qp)
-            self.client.put(proc_pv, 1, wait=True)
-            val = self.client.get(qp, as_string=True)
+            with command_transaction(qp):
+                self.client.put(proc_pv, 1, wait=True)
+                val = self.client.get(qp, as_string=True)
             self._set_readback_field(val)
             self._log(compact_query_message_value(f'QRY <- {qp}: {val}'))
         except Exception as ex:
