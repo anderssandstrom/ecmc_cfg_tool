@@ -4,6 +4,7 @@ import csv
 import html
 import json
 import math
+import os
 from ecmc_iso230_math import compute_metrics, linear_regression
 from ecmc_iso230_analysis import compensation_rows, compare_metrics, session_metrics, settling_time
 import random
@@ -17,7 +18,12 @@ import urllib.parse
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from qt_compat import QSvgWidget, QtCore, QtGui, QtWidgets
+from qt_compat import QT_BINDING, QSvgWidget, QtCore, QtGui, QtWidgets
+
+if QT_BINDING == "PyQt5":
+    from PyQt5.QtSvg import QSvgRenderer
+else:
+    from PySide6.QtSvg import QSvgRenderer
 
 from ecmc_mtn_qt import (
     _MotionPvMixin,
@@ -3462,7 +3468,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         except Exception as ex:
             self._log(f"Stop failed: {ex}")
 
-    def _build_report_markdown(self):
+    def _build_report_markdown(self, graph_reference=None):
         settings = getattr(self, "_test_settings_cache", None)
         metrics = dict(self._latest_metrics or {})
         rows = list(self._measurements or [])
@@ -3523,7 +3529,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             "",
             "Bidirectional positioning error relative to commanded target. Forward mean error is shown in blue, reverse mean error in amber, ISO repeatability intervals are shown as vertical bars, and the reversal value is the dashed violet segment at each target.",
             "",
-            graph_svg,
+            graph_svg if graph_reference is None else graph_reference,
             "",
             "## Notes",
             "",
@@ -4498,6 +4504,38 @@ A = max_i(xbar_i^+ + 2*s_i^+, xbar_i^- + 2*s_i^-)
         layout.addLayout(btn_row)
         dlg.exec_()
 
+    def _write_report_files(self, path):
+        """Write portable Markdown and a raster graph from the same dataset."""
+        target = Path(path)
+        settings = getattr(self, "_test_settings_cache", None)
+        graph_reference = ""
+        if settings:
+            graph_svg = self._build_iso230_svg(settings, dict(self._latest_metrics or {}))
+            if graph_svg.lstrip().startswith("<svg"):
+                graph_path = target.with_name(target.stem + "_graph.png")
+                renderer = QSvgRenderer(QtCore.QByteArray(graph_svg.encode("utf-8")))
+                if not renderer.isValid():
+                    raise RuntimeError("Invalid ISO230 report SVG")
+                size = renderer.defaultSize()
+                image = QtGui.QImage(size.width() * 3, size.height() * 3, QtGui.QImage.Format_ARGB32)
+                image.fill(QtGui.QColor("white"))
+                painter = QtGui.QPainter(image)
+                try:
+                    renderer.render(painter)
+                finally:
+                    painter.end()
+                if not image.save(str(graph_path), "PNG"):
+                    raise OSError(f"Could not save graph: {graph_path}")
+                graph_reference = (
+                    "![ISO230 positioning accuracy]("
+                    + urllib.parse.quote(graph_path.name)
+                    + ")"
+                )
+            else:
+                graph_reference = re.sub(r"<[^>]+>", "", graph_svg).strip()
+        target.write_text(self._build_report_markdown(graph_reference), encoding="utf-8")
+        return target
+
     def export_report(self):
         if not self._latest_report_markdown:
             self._latest_report_markdown = self._build_report_markdown()
@@ -4511,7 +4549,7 @@ A = max_i(xbar_i^+ + 2*s_i^+, xbar_i^- + 2*s_i^-)
         if not path:
             return
         try:
-            Path(path).write_text(self._latest_report_markdown, encoding="utf-8")
+            self._write_report_files(path)
             self._log(f"Saved report: {path}")
         except Exception as ex:
             self._log(f"Failed to save report: {ex}")
@@ -4596,6 +4634,11 @@ A = max_i(xbar_i^+ + 2*s_i^+, xbar_i^- + 2*s_i^-)
 
 
 def build_demo_report_files(report_path, csv_path=None, seed=2302):
+    if QtWidgets.QApplication.instance() is None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        app = QtWidgets.QApplication([])
+    else:
+        app = QtWidgets.QApplication.instance()
     settings = _demo_settings()
     rows = _build_demo_measurements(settings, seed=seed)
     dummy = Iso230Window.__new__(Iso230Window)
@@ -4604,10 +4647,8 @@ def build_demo_report_files(report_path, csv_path=None, seed=2302):
     dummy._measurements = rows
     dummy._latest_metrics = dummy._compute_metrics(rows)
     dummy._latest_metrics["state"] = "Demo"
-    report_md = dummy._build_report_markdown()
-
-    report_target = Path(report_path)
-    report_target.write_text(report_md, encoding="utf-8")
+    dummy._operator_comments = ""
+    report_target = dummy._write_report_files(report_path)
 
     if csv_path:
         _write_demo_csv(csv_path, rows)
