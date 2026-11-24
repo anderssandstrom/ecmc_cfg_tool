@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import ast
-import json
 import os
 import re
 from ecmc_caqtdm import launch_caqtdm
@@ -650,24 +649,6 @@ class RtLogWindow(QtWidgets.QMainWindow):
         t = datetime.now().strftime("%H:%M:%S")
         self.app_log.appendPlainText(f"[{t}] {msg}")
 
-    def _emit_debug_log(self, run_id, hypothesis_id, location, message, data):
-        # region agent log
-        try:
-            payload = {
-                "sessionId": "8645a3",
-                "runId": run_id,
-                "hypothesisId": hypothesis_id,
-                "location": location,
-                "message": message,
-                "data": data,
-                "timestamp": int(datetime.now().timestamp() * 1000),
-            }
-            with open("/Users/sandst_a/sources/ecmc_cfg_tool/.cursor/debug-8645a3.log", "a", encoding="utf-8") as _dbg_f:
-                _dbg_f.write(json.dumps(payload, ensure_ascii=True) + "\n")
-        except Exception:
-            pass
-        # endregion
-
     def _get_pv_best_effort(self, pv_name, as_string=False):
         try:
             return self.client.get(pv_name, as_string=as_string)
@@ -682,19 +663,10 @@ class RtLogWindow(QtWidgets.QMainWindow):
         motor_record = self._resolve_motor_record_name(axis_id)
         if motor_record:
             pv_name = f"{motor_record}-DbgPrntEna"
-            pv_source = "motor_record"
+
         else:
             pv_name = self._pv(f"Axis{axis_id}-DbgPrntEna")
-            pv_source = "legacy_axis_suffix"
-        # region agent log
-        self._emit_debug_log(
-            run_id="pre-fix",
-            hypothesis_id="H2",
-            location="ecmc_rtlog_qt.py:_axis_dbg_pv",
-            message="Resolved axis debug PV name",
-            data={"axisId": axis_id, "pvName": pv_name, "pvSource": pv_source, "motorRecord": motor_record},
-        )
-        # endregion
+
         return pv_name
 
     def _resolve_motor_record_name(self, axis_id):
@@ -774,15 +746,6 @@ class RtLogWindow(QtWidgets.QMainWindow):
         if not axis_id:
             return
         self.launch_axis_edit.setText(axis_id)
-        # region agent log
-        self._emit_debug_log(
-            run_id="pre-fix",
-            hypothesis_id="H1",
-            location="ecmc_rtlog_qt.py:_on_axis_combo_activated",
-            message="Axis selection changed from combo",
-            data={"selectedAxisId": axis_id, "launchAxisEdit": self.launch_axis_edit.text().strip()},
-        )
-        # endregion
         self._refresh_axis_dbg_state()
 
     def _get_pv_text(self, suffix):
@@ -824,15 +787,6 @@ class RtLogWindow(QtWidgets.QMainWindow):
             return
         axis_id = self._current_axis_id()
         target_pv = self._axis_dbg_pv()
-        # region agent log
-        self._emit_debug_log(
-            run_id="pre-fix",
-            hypothesis_id="H3",
-            location="ecmc_rtlog_qt.py:_write_axis_dbg_enabled",
-            message="Writing axis debug enable",
-            data={"axisId": axis_id, "checked": bool(checked), "targetPv": target_pv},
-        )
-        # endregion
         try:
             self.client.put(target_pv, 1 if checked else 0, wait=False)
             if self._monitor_mode:
@@ -840,15 +794,6 @@ class RtLogWindow(QtWidgets.QMainWindow):
             else:
                 self.refresh_status()
         except Exception as ex:
-            # region agent log
-            self._emit_debug_log(
-                run_id="pre-fix",
-                hypothesis_id="H4",
-                location="ecmc_rtlog_qt.py:_write_axis_dbg_enabled",
-                message="Write axis debug enable failed",
-                data={"axisId": axis_id, "targetPv": target_pv, "error": str(ex)},
-            )
-            # endregion
             self._axis_dbg_supported = False
             self._set_axis_dbg_controls_enabled()
             if not self._axis_dbg_missing_logged:
@@ -864,15 +809,6 @@ class RtLogWindow(QtWidgets.QMainWindow):
             self._axis_dbg_supported = True
             self._axis_dbg_missing_logged = False
             enabled = _truthy_pv(axis_dbg_text)
-            # region agent log
-            self._emit_debug_log(
-                run_id="pre-fix",
-                hypothesis_id="H5",
-                location="ecmc_rtlog_qt.py:_refresh_axis_dbg_state",
-                message="Read axis debug state",
-                data={"axisId": axis_id, "rawValue": axis_dbg_text, "parsedEnabled": bool(enabled)},
-            )
-            # endregion
             self._updating_axis_dbg_widgets = True
             self.axis_dbg_chk.setChecked(enabled)
             self._updating_axis_dbg_widgets = False
