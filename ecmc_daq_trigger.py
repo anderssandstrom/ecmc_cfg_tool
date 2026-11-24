@@ -1,5 +1,5 @@
 """Bounded CA event capture with edge triggering (timestamps are IOC timestamps)."""
-from collections import deque
+from ecmc_acquisition import bounded_series
 import math
 
 
@@ -10,7 +10,7 @@ class TriggerCapture:
         self.threshold=abs(threshold) if edge==2 else threshold
         self.pre_s=pre_s
         self.post_s=post_s
-        self.buffers={p:deque(maxlen=max_samples) for p in pvs}
+        self.buffers=bounded_series(pvs,max_samples)
         self.timestamp=None
         self.previous=None
 
