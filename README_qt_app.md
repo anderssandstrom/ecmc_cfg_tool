@@ -88,7 +88,7 @@ Use the Cntrl app when tuning controller-related parameters for a real axis.
 - Supports multiple views: `Flat`, `Schematic`, `Diagram`, and `Controller Sketch`.
 - Reads and writes paired set/read controller values and supports `Read All` plus `Copy Read->Set`.
 - Exports changed controller values or current session-known values as YAML.
-- Allows sketch-overlay calibration and layout saving for site-specific controller drawings.
+- The default Controller Sketch is a native, automatically scaled, interactive Qt graphics scene; no image or calibration is needed.
 - Only supports `REAL` axes; virtual axes are rejected.
 
 ### Motion
