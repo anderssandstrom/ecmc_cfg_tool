@@ -345,6 +345,7 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
         self.open_app_combo.addItem(APP_LAUNCH_CONTROLLER, "controller")
         self.open_app_combo.addItem(APP_LAUNCH_ISO230, "iso230")
         self.open_app_combo.addItem(APP_LAUNCH_DAQ, "daq")
+        self.open_app_combo.addItem("DAQ / FFT (motion trigger)", "daq_trigger")
         self.open_app_combo.addItem(APP_LAUNCH_RTLOG, "rtlog")
         self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_MAIN, "caqtdm_main")
         self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_AXIS, "caqtdm_axis")
@@ -615,6 +616,8 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
                 self._open_iso230_window()
             elif action == "daq":
                 self._open_daq_window()
+            elif action == "daq_trigger":
+                self._open_daq_window(triggered=True)
             elif action == "rtlog":
                 self._open_rtlog_window()
             elif action == "caqtdm_main":
@@ -644,12 +647,16 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
             self._log(f"Failed to start new motion window: {ex}")
             return False
 
-    def _open_daq_window(self):
+    def _open_daq_window(self, triggered=False):
         prefix = self.prefix_edit.text().strip() or self.default_prefix or 'IOC:ECMC'
         try:
             base = self.motor_record_edit.text().strip()
-            pvs = axis_diagnostic_pvs(base, profile="position", extra=())
-            launch_tool("daq", prefix, *pvs)
+            if triggered and not base:
+                raise RuntimeError("Resolve the motor record before configuring a motion trigger")
+            extra = (base + "-VelAct", base + "-Busy") if triggered else ()
+            pvs = axis_diagnostic_pvs(base, profile="position", extra=extra)
+            args = ["--motion-trigger", base + "-Busy"] if triggered else []
+            launch_tool("daq", prefix, *pvs, *args)
             self._log(f"Started DAQ window (prefix {prefix}, {len(pvs)} preset PVs)")
         except Exception as ex:
             self._log(f"Failed to start DAQ window: {ex}")
