@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+from ecmc_context import combine_motor_record
 
 
 def join_pv(prefix: str, suffix: str) -> str:
@@ -153,7 +154,7 @@ def discover_ioc(client, prefix: str, ssh_host_pv: str = "") -> dict:
     for item_id in axis_ids:
         axis_prefix = text_value(client, join_pv(prefix, f"MCU-Cfg-AX{item_id}-Pfx"))
         name = text_value(client, join_pv(prefix, f"MCU-Cfg-AX{item_id}-Nam"))
-        motor = f"{axis_prefix.rstrip(':')}:{name}" if axis_prefix and name else (name or axis_prefix.rstrip(":"))
+        motor = combine_motor_record(axis_prefix, name) if name else axis_prefix.rstrip(":")
         axis_type = text_value(client, f"{motor}-Type") if motor else ""
         snapshot["axes"].append(
             {"id": item_id, "name": name or f"Axis {item_id}", "motor": motor, "axis_type": axis_type}
