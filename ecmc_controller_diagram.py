@@ -5,7 +5,7 @@ from qt_compat import QtCore, QtGui, QtWidgets
 
 class ControllerDiagram(QtWidgets.QGraphicsView):
     WIDTH = 1000
-    HEIGHT = 438
+    HEIGHT = 458
 
     def __init__(self, make_cell, row_def, pid_ms=False, timing_ms=False, mode='UNKNOWN'):
         super().__init__()
@@ -181,25 +181,29 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
 
         # Dashed green control path, not a position or velocity signal. Break
         # the path at the feedback crossing to make clear there is no junction.
-        line([(505,372),(505,369)],True,False,green)
+        line([(375,372),(375,369),(505,369)],True,False,green)
         line([(505,359),(505,263),(744,263),(744,248)],True,True,green)
         label(515,265,'Deadband + not busy',10).setToolTip('CSV: reset PID and command zero. CSP correction: hold last offset.')
 
         # Monitoring is shown separately from the arithmetic signal path.
-        box(8,372,330,64,'At-target monitoring',True,
+        box(8,372,244,84,'At-target monitor',True,
             tooltip='Determines the at-target status using the common trajectory qualification and its own tolerance/time. Its enable also gates internal deadband monitoring.')
-        field(17,394,'Enable','AxisMonEnableAtTargetMon',48)
-        field(166,394,'Tolerance','AxisMonAtTargetTol',72)
-        # Use remaining lower row; compact cells keep the whole scene visible.
-        field(17,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonAtTargetTime',96)
-        box(350,372,310,64,'Controller deadband',True,
+        field(15,394,'Enable','AxisMonEnableAtTargetMon',82)
+        field(15,414,'Tolerance','AxisMonAtTargetTol',82)
+        field(15,434,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonAtTargetTime',82)
+        box(260,372,230,84,'Controller deadband',True,
             tooltip='CSV: controller deadband AND not busy resets the PID and commands zero velocity. CSP with ECMC correction: holds the last correction. External trajectory: PLC supplies the controller-deadband status.')
-        field(359,394,'Tolerance','AxisCntrlDeadband',92)
-        field(359,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisCntrlDeadbandTime',92)
-        box(672,372,320,64,'Slave control deadband',True,
+        field(269,394,'Tolerance','AxisCntrlDeadband',82)
+        field(269,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisCntrlDeadbandTime',82)
+        box(498,372,234,84,'Slave control deadband',True,
             tooltip='Separate tolerance and time qualification for slave control; defaults to the at-target settings if not configured.')
-        field(681,394,'Tolerance','AxisMonSlvCtrlDbTol',92)
-        field(681,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonSlvCtrlDbTime',92)
+        field(507,394,'Tolerance','AxisMonSlvCtrlDbTol',82)
+        field(507,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonSlvCtrlDbTime',82)
+        box(740,372,252,84,'Position lag monitor',True,
+            tooltip='Independent following-error interlock. While enabled, |controller error| above tolerance for more than the configured cycles interlocks the trajectory; the drive interlock is at twice the configured cycle count.')
+        field(748,394,'Enable','AxisMonEnableLagMon',82)
+        field(748,414,'Tolerance','AxisMonPosLagTol',82)
+        field(748,434,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonPosLagTime',82)
 
         # Live data occupies unused whitespace; no editable configuration
         # widget is touched by the monitor.
@@ -209,8 +213,8 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         live_label('status',8,306)
         live_label('actual',666,348,True)
         live_label('velocity',921,332,True)
-        live_label('at_target',238,415)
-        live_label('deadband',550,415)
+        live_label('at_target',219,415,True)
+        live_label('deadband',375,436,True)
         live_label('pid',620,145)
         live_label('message',620,159)
 
@@ -244,7 +248,7 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
             status = 'Axis error'
         self._set_live('status',status)
         at = values.get('at_target')
-        self._set_live('at_target','At target' if at == 1 else 'Not at target' if at == 0 else 'Unknown',
+        self._set_live('at_target','At tgt ✓' if at == 1 else 'At tgt ×' if at == 0 else 'At tgt —',
                        '#237b4b' if at == 1 else '#273b4b')
         self._set_live('deadband',deadband, '#237b4b' if deadband.startswith('likely') else '#273b4b')
         self._set_live('pid','Gain selection (est.): '+('inner' if inner is True else 'outer' if inner is False else 'unknown'))

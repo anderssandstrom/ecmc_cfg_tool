@@ -134,6 +134,8 @@ def _group_for_name(name):
     low = str(name or '').lower()
     if 'scale' in low:
         return 'Scaling'
+    if 'poslag' in low or 'enablelagmon' in low:
+        return 'Position Lag Monitor'
     if 'attarget' in low:
         return 'At Target Monitor'
     if 'inner' in low:
@@ -179,7 +181,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.rows = _build_pairs(self.catalog.get('commands', []), include_set_only=False)
         self.rows_all = _build_pairs(self.catalog.get('commands', []), include_set_only=True)
         # These commands are present in ECMC 11.2.0 but may be absent from older catalogs.
-        for name in ["AxisCntrlResetIAtRmp","AxisCntrlFreezeIAtRmp","AxisMonSlvCtrlDbTol","AxisMonSlvCtrlDbTime","AxisMonEnableAtTargetMon"]:
+        for name in ["AxisCntrlResetIAtRmp","AxisCntrlFreezeIAtRmp","AxisMonSlvCtrlDbTol","AxisMonSlvCtrlDbTime","AxisMonEnableAtTargetMon","AxisMonEnableLagMon","AxisMonPosLagTol","AxisMonPosLagTime"]:
             if not any(row['name'] == name for row in self.rows_all):
                 row = {'name': name, 'get': f'Get{name}(<axisIndex>)',
                        'set': f'Cfg.Set{name}(<axisIndex>,<value>)', 'group': _group_for_name(name)}
@@ -1138,6 +1140,9 @@ class CntrlWindow(QtWidgets.QMainWindow):
             'AxisMonSlvCtrlDbTol': 'monitoring.target.slaveControlDeadband.tolerance',
             'AxisMonSlvCtrlDbTime': 'monitoring.target.slaveControlDeadband.time',
             'AxisMonEnableAtTargetMon': 'monitoring.target.enable',
+            'AxisMonEnableLagMon': 'monitoring.lag.enable',
+            'AxisMonPosLagTol': 'monitoring.lag.tolerance',
+            'AxisMonPosLagTime': 'monitoring.lag.time',
             'AxisCntrlKp': 'controller.Kp',
             'AxisCntrlKi': 'controller.Ki',
             'AxisCntrlKd': 'controller.Kd',
@@ -1168,7 +1173,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
             if not name:
                 continue
             path = self._controller_yaml_key(name)
-            if path.startswith(('controller.', 'monitoring.target.', 'drive.', 'encoder.')):
+            if path.startswith(('controller.', 'monitoring.target.', 'monitoring.lag.', 'drive.', 'encoder.')):
                 names.append(name)
         return names
 

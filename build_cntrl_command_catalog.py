@@ -8,6 +8,7 @@ from pathlib import Path
 KEYWORDS = (
     re.compile(r'cntrl', re.IGNORECASE),
     re.compile(r'at\s*target|attarget', re.IGNORECASE),
+    re.compile(r'poslag|enablelagmon', re.IGNORECASE),
     re.compile(r'scale\s*num|scalenum', re.IGNORECASE),
     re.compile(r'scale\s*denom|scaledenom', re.IGNORECASE),
 )
@@ -52,7 +53,7 @@ def main():
 
     payload = {
         'generated_for': 'controller_tuning',
-        'filter': ['*cntrl*', '*atTarget*', '*scaleNum*', '*scaleDenom*'],
+        'filter': ['*cntrl*', '*atTarget*', '*posLag*', '*enableLagMon*', '*scaleNum*', '*scaleDenom*'],
         'commands': filtered,
     }
     out_path.write_text(json.dumps(payload, indent=2) + '\n')

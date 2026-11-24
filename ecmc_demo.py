@@ -8,6 +8,7 @@ DEFAULTS = {
     'AxisCntrlIPartLL': '-100', 'AxisCntrlIPartHL': '100',
     'AxisCntrlOutLL': '-100', 'AxisCntrlOutHL': '100',
     'AxisCntrlDeadband': '0.001', 'AxisCntrlDeadbandTime': '50',
+    'AxisMonEnableLagMon': '1', 'AxisMonPosLagTol': '0.1', 'AxisMonPosLagTime': '100',
     'AxisMonAtTargetTol': '0.01', 'AxisMonAtTargetTime': '100',
     'AxisMonEnableAtTargetMon': '1', 'AxisMonSlvCtrlDbTol': '0.005',
     'AxisMonSlvCtrlDbTime': '100', 'AxisDrvScaleNum': '1',
