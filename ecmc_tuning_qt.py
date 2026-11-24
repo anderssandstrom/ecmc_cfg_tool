@@ -120,7 +120,7 @@ class Trend(QtWidgets.QWidget):
 class TuningWindow(QtWidgets.QDialog):
     sample = QtCore.Signal(str,float,object) if hasattr(QtCore,'Signal') else QtCore.pyqtSignal(str,float,object)
 
-    def __init__(self,parent,client,base,demo=False,read_config=None,read_lag=None):
+    def __init__(self,parent,client,base,demo=False,read_config=None,read_lag=None,read_jerk=None,write_jerk=None):
         super().__init__(parent)
         self.setWindowTitle('Controller tuning — '+base+(' [DEMO]' if demo else ''))
         self.setModal(False)
@@ -128,6 +128,9 @@ class TuningWindow(QtWidgets.QDialog):
         self.client,self.base,self.demo=client,base,demo
         self.read_config=read_config
         self.read_lag=read_lag
+        self.read_jerk=read_jerk
+        self.write_jerk=write_jerk
+        self.traj_type=None
         self.paused=False
         self.pause_requested=False
         self.stats_count=0
@@ -186,6 +189,12 @@ class TuningWindow(QtWidgets.QDialog):
         self.enable_btn=QtWidgets.QPushButton('Enable drive')
         self.enable_btn.clicked.connect(self.enable_drive)
         controls.addWidget(self.enable_btn,3,3,1,2)
+        self.jerk_label=QtWidgets.QLabel('Jerk [EGU/s³]')
+        self.jerk_edit=QtWidgets.QLineEdit('')
+        self.jerk_edit.setEnabled(False)
+        self.jerk_edit.setToolTip('Ruckig only. Applied before scan start through Cfg.SetAxisJerk; blank retains the IOC setting.')
+        controls.addWidget(self.jerk_label,3,5)
+        controls.addWidget(self.jerk_edit,3,6)
         layout.addLayout(controls)
         self.status=QtWidgets.QLabel('Idle — enter scan endpoints explicitly')
         self.status.setWordWrap(True)
@@ -253,6 +262,9 @@ class TuningWindow(QtWidgets.QDialog):
             self.inputs['velo'].setText('1')
             self.inputs['acc'].setText('5')
             self.inputs['dec'].setText('5')
+            self.traj_type=1
+            self.jerk_edit.setText('50')
+            self.jerk_edit.setEnabled(True)
         else:
             self._connect()
         self.timer.start()
@@ -269,7 +281,7 @@ class TuningWindow(QtWidgets.QDialog):
         # Keep all graph samples, not just the most recent value at repaint.
         for key,suffix in {'PosSet':'-PosSet','PosAct':'-PosAct','PosErr':'-PosErr',
                 'ErrId':'-ErrId','Enabled':'-EnaAct','EnableCmd':'-EnaCmd-RB',
-                'Stat':'-Stat','Auto':'-AutoExecuteOnTargetPos-RB',
+                'Stat':'-Stat','Auto':'-AutoExecuteOnTargetPos-RB','TrajType':'-TrajType',
                 'VELO':'-TgtVelCmd','ACC':'-AccCmd','DEC':'-DecCmd',
                 'Command':'-MtnCmd','CmdData':'-MtnCmdData','Target':'-TgtPosCmd',
                 'Execute':'-ExeCmd','Stop':'-StpCmd','EnableWrite':'-EnaCmd'}.items():
@@ -288,6 +300,15 @@ class TuningWindow(QtWidgets.QDialog):
 
     def _sample(self,key,stamp,value):
         self.latest[key]=value
+        if key=='TrajType':
+            previous=self.traj_type
+            self.traj_type=int(value) if value in (0,1) else None
+            if self.traj_type!=previous and not self.active:
+                self.jerk_edit.clear()
+                self.jerk_edit.setEnabled(self.traj_type==1 and not self.stop_pending)
+                if self.traj_type==1 and self.read_jerk is not None:
+                    # Defer the one-time command read; do not poll the command interface.
+                    QtCore.QTimer.singleShot(0,self._load_jerk)
         if key=='Stat' and value is not None and int(value)&(1<<3):
             self.busy_seen_at=stamp
         if key in self.position.samples:
@@ -303,6 +324,16 @@ class TuningWindow(QtWidgets.QDialog):
             edit=self.inputs[key.lower()]
             if not edit.text().strip():
                 edit.setText(f'{value:g}')
+
+    def _load_jerk(self):
+        if self.active or self.stop_pending or self.traj_type!=1 or self.jerk_edit.text().strip():
+            return
+        try:
+            value=self.read_jerk()
+            if math.isfinite(value) and value>0:
+                self.jerk_edit.setText(f'{value:.12g}')
+        except Exception as ex:
+            self.jerk_edit.setToolTip(f'Jerk read unavailable: {ex}. Blank keeps current setting.')
 
     def _value(self,key):
         if self.demo:
@@ -387,6 +418,13 @@ class TuningWindow(QtWidgets.QDialog):
                 raise RuntimeError('Axis must be stationary before starting')
             a,b,dwell,velo,acc,dec=(float(self.inputs[k].text()) for k in ('a','b','dwell','velo','acc','dec'))
             steps=int(self.inputs['steps'].text())
+            jerk=None
+            if self.traj_type==1 and self.jerk_edit.text().strip():
+                jerk=float(self.jerk_edit.text())
+                if not math.isfinite(jerk) or jerk<=0:
+                    raise ValueError('Ruckig jerk must be finite and positive')
+                if not self.demo and self.write_jerk is None:
+                    raise RuntimeError('Jerk configuration unavailable')
             if not all(math.isfinite(v) for v in (a,b,dwell,velo,acc,dec)) or dwell<0 or min(velo,acc,dec)<=0:
                 raise ValueError('Invalid scan parameters')
             if self.relative.isChecked():
@@ -417,7 +455,13 @@ class TuningWindow(QtWidgets.QDialog):
             self._put('TgtVelCmd',velo)
             self._put('AccCmd',acc)
             self._put('DecCmd',dec)
+            if jerk is not None:
+                if self.traj_type!=1:
+                    raise RuntimeError('Trajectory type changed')
+                if not self.demo:
+                    self.write_jerk(jerk)
             self.active=True
+            self.jerk_edit.setEnabled(False)
             self.paused=False
             self.pause_requested=False
             self.pause_btn.setEnabled(True)
@@ -534,6 +578,7 @@ class TuningWindow(QtWidgets.QDialog):
             self.status.setText(f'Enable failed: {ex}')
 
     def _unlock(self):
+        self.jerk_edit.setEnabled(self.traj_type==1)
         for w in [*self.inputs.values(),self.relative,self.snake]:
             w.setEnabled(True)
         self.start_btn.setEnabled(True)

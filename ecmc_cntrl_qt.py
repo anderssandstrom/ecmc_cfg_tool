@@ -1664,7 +1664,25 @@ class CntrlWindow(QtWidgets.QMainWindow):
                 return tol if enabled == 1 and 0 < tol < float('inf') else None
             except (TypeError, ValueError):
                 return None
-        self._tuning_window = TuningWindow(self, self.client, base, demo=self.demo, read_config=read_config, read_lag=read_lag)
+        def jerk_context():
+            if self._context_identity()!=identity or self._resolve_motor_record_name(axis)!=base:
+                raise RuntimeError('Controller selection changed; reopen tuning for this axis')
+        def read_jerk():
+            jerk_context()
+            ok, reply = self.read_raw_command(f'GetAxisJerk({axis})', quiet=True)
+            if not ok:
+                raise RuntimeError(reply)
+            return float(reply.rsplit(': ',1)[1])
+        def write_jerk(value):
+            jerk_context()
+            ok, reply = self.read_raw_command(f'Cfg.SetAxisJerk({axis},{value:.17g})', quiet=True)
+            if not ok:
+                raise RuntimeError(reply)
+            actual=read_jerk()
+            if abs(actual-value)>max(1e-12,abs(value)*1e-8):
+                raise RuntimeError(f'Jerk readback mismatch: {actual:g} != {value:g}')
+        self._tuning_window = TuningWindow(self, self.client, base, demo=self.demo,
+            read_config=read_config, read_lag=read_lag, read_jerk=read_jerk, write_jerk=write_jerk)
         self._tuning_window.show()
 
     def closeEvent(self, event):
