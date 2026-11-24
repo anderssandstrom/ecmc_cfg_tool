@@ -17,8 +17,21 @@ PYTHON_BIN="$(find_qt_python)" || {
 shift || true
 
 ARGS=()
-for pv in "$@"; do
-  ARGS+=(--pv "$pv")
+while (( $# )); do
+  case "$1" in
+    --motion-trigger)
+      if (( $# < 2 )); then
+        echo "Missing motion trigger PV" >&2
+        exit 2
+      fi
+      ARGS+=("--motion-trigger=$2")
+      shift 2
+      ;;
+    *)
+      ARGS+=("--pv=$1")
+      shift
+      ;;
+  esac
 done
 
 exec "${PYTHON_BIN}" ecmc_daq_qt.py \
