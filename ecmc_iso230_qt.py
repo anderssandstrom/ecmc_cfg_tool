@@ -14,6 +14,8 @@ import random
 import re
 import tempfile
 from ecmc_caqtdm import launch_caqtdm
+from ecmc_diagnostic_presets import axis_diagnostic_pvs
+from ecmc_app_launcher import launch_tool
 import subprocess
 import sys
 import time
@@ -1516,19 +1518,12 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         return self.axis_edit.text().strip() or self.default_axis_id
 
     def _open_daq_window(self):
-        script = Path(__file__).with_name("start_daq.sh")
-        if not script.exists():
-            self._log(f"Launcher not found: {script.name}")
-            return
-        prefix = self.prefix_edit.text().strip() or self.default_prefix or "IOC:ECMC"
+        prefix = self.prefix_edit.text().strip() or self.default_prefix or 'IOC:ECMC'
         try:
-            subprocess.Popen(
-                ["bash", str(script), str(prefix)],
-                cwd=str(script.parent),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            self._log(f"Started DAQ window (prefix {prefix})")
+            base = self._committed_motor_record_text()
+            pvs = axis_diagnostic_pvs(base, profile="position", extra=self._configured_reference_pvs())
+            launch_tool("daq", prefix, *pvs)
+            self._log(f"Started DAQ window (prefix {prefix}, {len(pvs)} preset PVs)")
         except Exception as ex:
             self._log(f"Failed to start DAQ window: {ex}")
 
