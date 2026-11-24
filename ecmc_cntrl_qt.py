@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ecmc_demo import DemoClient
+import ecmc_parameter_conversion as units
 from qt_compat import QtCore, QtGui, QtWidgets
 
 from ecmc_stream_qt import (
@@ -531,6 +532,13 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.view_mode.setCurrentText('Controller Sketch')
         self.view_mode.currentTextChanged.connect(self._on_view_mode_changed)
         search_row.addWidget(self.view_mode)
+        self.pid_units = QtWidgets.QCheckBox('Ti/Td [ms]')
+        self.time_units = QtWidgets.QCheckBox('Time [ms]')
+        self.rate_label = QtWidgets.QLabel('Rate: —')
+        for control in (self.pid_units, self.time_units):
+            search_row.addWidget(control)
+            control.toggled.connect(self._on_view_mode_changed)
+        search_row.addWidget(self.rate_label)
         self.read_all_btn = QtWidgets.QPushButton('Read All')
         self.read_all_btn.setAutoDefault(False)
         self.read_all_btn.setDefault(False)
@@ -1250,6 +1258,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
         if not name:
             return
         cached = self._cached_current_value(axis_text, name)
+        if read_edit is not None and read_edit.property('timeRepresentation') and self._unit_path(row_def, read_edit) in units.REVERSE:
+            return
         if not cached:
             return
         # Fill readback if empty.
@@ -1339,8 +1349,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
         motor_name = str(motor_name or "").strip()
         motor_comment = f" [{motor_name}]" if motor_name else ""
         tree = {}
-        for name, value in sorted(flat.items()):
-            path = self._controller_yaml_key(name)
+        paths = {self._controller_yaml_key(k): v for k,v in flat.items()}
+        current = {self._controller_yaml_key(k): v for k,v in self._current_values_by_axis.get(str(axis_id), {}).items()}
+        if self.pid_units.isChecked() or self.time_units.isChecked():
+            paths, changed_paths = units.export_values(paths, current, self._sample_rate(), self.pid_units.isChecked(), self.time_units.isChecked(), changed_paths)
+        for path, value in sorted(paths.items()):
             cur = tree
             parts = [p for p in path.split('.') if p]
             for part in parts[:-1]:
@@ -1610,6 +1623,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         )
         edit.setStyleSheet(base_style)
         edit.setProperty('sketchValue', True)
+        edit.setProperty('timeRepresentation', compact)
         edit.setProperty('sketchOverlay', bool(overlay))
         edit.setProperty('sketchBaseStyle', base_style)
         edit.textChanged.connect(lambda _txt='', e=edit: self._on_sketch_value_text_changed(e))
@@ -1668,6 +1682,37 @@ class CntrlWindow(QtWidgets.QMainWindow):
         cl.addLayout(btn_col)
         return cell
 
+    def _sample_rate(self):
+        prefix = self._ioc_prefix_for_title()
+        try:
+            hz = units.rate(self._get_pv_best_effort(_join_prefix_pv(prefix, 'MCU-Cfg-Rate')))
+            self.rate_label.setText(f'{hz:g} Hz')
+            return hz
+        except (ValueError, TypeError):
+            self.rate_label.setText('Rate: unavailable')
+            return None
+
+    def _unit_path(self, row_def, widget):
+        old = self._controller_yaml_key(row_def['name'])
+        if not widget.property('timeRepresentation'):
+            return old
+        return units.display_path(old, self.pid_units.isChecked(), self.time_units.isChecked())
+
+    def _pid_kp(self, axis, path):
+        name = 'AxisCntrlInnerKp' if path.startswith('controller.inner.') else 'AxisCntrlKp'
+        ok, msg = self.read_raw_command(f'Get{name}({axis})', quiet=True)
+        if not ok:
+            raise ValueError('Kp read failed')
+        return units.number(msg.split(': ', 1)[1])
+
+    def _convert_value(self, row_def, widget, axis, value, write=False):
+        path = self._unit_path(row_def, widget)
+        if path not in units.REVERSE:
+            return value
+        hz = self._sample_rate()
+        kp = self._pid_kp(axis, path) if units.REVERSE[path] in units.PID else None
+        return (units.to_runtime if write else units.from_runtime)(path, value, hz, kp)
+
     def _populate_controller_sketch(self):
         self._clear_diagram_layout()
         self._current_overlay_canvas = None
@@ -1676,7 +1721,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
             self._populate_controller_sketch_overlay(image_path)
             return
         from ecmc_controller_diagram import ControllerDiagram
-        self.diagram_layout.addWidget(ControllerDiagram(lambda rd: self._make_sketch_cell(rd, compact=True), self._row_def), 0, 0)
+        self.diagram_layout.addWidget(ControllerDiagram(lambda rd: self._make_sketch_cell(rd, compact=True), self._row_def, self.pid_units.isChecked(), self.time_units.isChecked()), 0, 0)
 
     def _populate_controller_sketch_overlay(self, image_path):
         canvas = ImageOverlayCanvas(image_path)
@@ -2150,6 +2195,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
                     continue
                 rows.append((row_def, axis_edit, read_edit))
 
+        self._sample_rate()
         count = 0
         self._set_read_all_busy(True, total=len(rows))
         try:
@@ -2341,11 +2387,17 @@ class CntrlWindow(QtWidgets.QMainWindow):
         ok, msg = self.read_raw_command(cmd, quiet=quiet)
         if ok and ': ' in msg:
             val = msg.split(': ', 1)[1].strip()
-            disp_val = compact_float_text(val)
+            raw_value = compact_float_text(val)
+            try:
+                disp_val = self._convert_value(row_def, read_edit, axis_edit.text(), raw_value)
+            except (ValueError, TypeError, OverflowError) as ex:
+                read_edit.setText('N/A')
+                self._log(str(ex))
+                return False
             if bool(read_edit.property('sketchValue')):
                 read_edit.setProperty('lastReadbackText', disp_val)
             read_edit.setText(disp_val)
-            self._record_current_value(axis_edit.text().strip() or self.default_axis_id, row_def.get('name', ''), disp_val)
+            self._record_current_value(axis_edit.text().strip() or self.default_axis_id, row_def.get('name', ''), raw_value)
             if bool(read_edit.property('sketchValue')):
                 self._update_value_match_visual(read_edit, read_edit)
             return True
@@ -2361,7 +2413,12 @@ class CntrlWindow(QtWidgets.QMainWindow):
             self._set_sketch_value_style(read_edit, False)
             return
         set_txt = set_edit.text().strip()
-        cmd, err = self._cmd_from_template(row_def.get('set', ''), axis_edit.text(), set_edit.text())
+        try:
+            runtime_value = self._convert_value(row_def, set_edit, axis_edit.text(), set_txt, write=True)
+        except (ValueError, TypeError, OverflowError) as ex:
+            self._log(str(ex))
+            return
+        cmd, err = self._cmd_from_template(row_def.get('set', ''), axis_edit.text(), runtime_value)
         if err:
             read_edit.setText(err)
             self._set_sketch_value_style(read_edit, False)
@@ -2372,9 +2429,9 @@ class CntrlWindow(QtWidgets.QMainWindow):
             self._set_sketch_value_style(read_edit, False)
             return
         axis_id = axis_edit.text().strip() or self.default_axis_id
-        self._record_change(axis_id, row_def.get('name', ''), set_txt)
+        self._record_change(axis_id, row_def.get('name', ''), runtime_value)
         if not row_def.get('get'):
-            self._record_current_value(axis_id, row_def.get('name', ''), set_txt)
+            self._record_current_value(axis_id, row_def.get('name', ''), runtime_value)
         self._log_change(
             f"WRITE axis={axis_id} cmd={row_def.get('name','')} value={set_txt} | {cmd}"
         )

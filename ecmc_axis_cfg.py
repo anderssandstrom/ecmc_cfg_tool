@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ecmc_demo import DemoClient
+import ecmc_parameter_conversion as units
 from qt_compat import QtCore, QtGui, QtWidgets
 
 from ecmc_stream_qt import (
@@ -611,6 +612,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.search.setPlaceholderText("Filter keys...")
         self.search.textChanged.connect(self._apply_tree_filter)
         search_row.addWidget(self.search, 1)
+        self.pid_units = QtWidgets.QCheckBox("Ti/Td [ms]")
+        self.time_units = QtWidgets.QCheckBox("Time [ms]")
+        for control in (self.pid_units, self.time_units):
+            search_row.addWidget(control)
+            control.toggled.connect(self._reload_unit_view)
         layout.addLayout(search_row)
 
         self.cfg_group = QtWidgets.QGroupBox("Configuration")
@@ -1046,6 +1052,15 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         changed_paths = set(changed_paths or [])
         readonly_paths = set(readonly_paths or [])
         original_values = dict(original_values or {})
+        if self.pid_units.isChecked() or self.time_units.isChecked() or any(r.get("path") in units.REVERSE for r in self._leaf_rows):
+            try:
+                hz = self._sample_rate()
+            except (ValueError, TypeError):
+                hz = None
+            pid_ms = self.pid_units.isChecked() or any(r.get("path") in units.PID.values() for r in self._leaf_rows)
+            timing_ms = self.time_units.isChecked() or any(r.get("path") in units.TIMING.values() for r in self._leaf_rows)
+            flat, changed_paths = units.export_values(flat,self._current_values_by_axis.get(str(axis_id),{}),hz,pid_ms,timing_ms,changed_paths)
+            readonly_paths = {units.display_path(p,pid_ms,timing_ms) for p in readonly_paths} | readonly_paths
         if not flat:
             return f"# No values available for axis {axis_id}\n"
         motor_name = str(motor_name or "").strip()
@@ -1163,7 +1178,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         for row in self._leaf_rows:
             path = str(row.get("path", "") or "")
             if path:
-                current.setdefault(path, "null")
+                current.setdefault(units.REVERSE.get(path,path), "null")
         if not self._axis_is_real(axis_key):
             current = {
                 path: value
@@ -1288,6 +1303,27 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.yaml_path = Path(self.yaml_edit.text().strip())
         self._load_yaml_tree()
 
+    def _sample_rate(self):
+        return units.rate(self._get_pv_best_effort(_join_prefix_pv(self._ioc_prefix_for_title(), 'MCU-Cfg-Rate')))
+
+    def _reload_unit_view(self, checked=False):
+        self._load_yaml_tree()
+        if self._startup_axis_probe_ok:
+            self._read_and_copy_current_axis(reason='unit selection', allow_partial_copy=True)
+
+    def _convert_value(self, path, value, write=False):
+        if path not in units.REVERSE:
+            return value
+        hz = self._sample_rate()
+        kp = None
+        if units.REVERSE[path] in units.PID:
+            name = 'AxisCntrlInnerKp' if path.startswith('controller.inner.') else 'AxisCntrlKp'
+            ok, msg = self.read_raw_command(f'Get{name}({self._axis_id()})', quiet=True)
+            if not ok:
+                raise ValueError('Kp read failed')
+            kp = units.number(msg.split(': ',1)[1])
+        return (units.to_runtime if write else units.from_runtime)(path,value,hz,kp)
+
     def _load_yaml_tree(self):
         self._poll_timer.stop()
         self.tree.clear()
@@ -1302,6 +1338,31 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             self._log(f"Failed to parse YAML template: {ex}")
             return
 
+        # Rebuild the tree from the template, preserving original syntax unless
+        # the user requests alternate units. New-format templates work directly.
+        def transform(node):
+            leaves = []
+            for child in node.children:
+                if child.children:
+                    transform(child)
+                else:
+                    leaves.append(child)
+            # Move nested time.trajectory/drive and timeout to their new parent.
+            for child in leaves:
+                old = child.path
+                new = units.display_path(old,self.pid_units.isChecked(),self.time_units.isChecked())
+                if new != old and new.rsplit('.',1)[0] == old.rsplit('.',1)[0]:
+                    child.path = new
+                    child.key = new.rsplit('.',1)[1]
+                    child.value = ''
+                elif new != old:
+                    # Velocity timeMs is a renamed group; both children share it.
+                    if node.path.endswith('.time') and new.rsplit('.',1)[0].endswith('.timeMs'):
+                        node.path = new.rsplit('.',1)[0]
+                        node.key = 'timeMs'
+                        child.path = new
+                        child.value = ''
+        transform(root)
         for child in root.children:
             self._add_tree_node(None, child)
         # Start collapsed: only top-level rows are visible.
@@ -1387,12 +1448,18 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
 
         base = None
         pair = None
-        custom = self.yaml_cmd_map.get(node.path) if not blocked else None
+        runtime_path = units.REVERSE.get(node.path, node.path)
+        custom = self.yaml_cmd_map.get(runtime_path) if not blocked else None
+        if not custom and runtime_path == "encoder.filter.trajectory.size":
+            custom = self.yaml_cmd_map.get("encoder.filter.position.size")
+        if not custom and runtime_path.startswith("plc.filter."):
+            leaf = runtime_path.split(".")[2]
+            custom = self.yaml_cmd_map.get("plc.velocity_filter."+("encoder" if leaf in ("velocity","position") else "trajectory")+".size") if runtime_path.endswith(".size") else None
         if custom:
             pair = {"name": node.path, "get": custom.get("get", ""), "set": custom.get("set", "")}
             matched = bool(pair.get("get") or pair.get("set"))
         else:
-            base = None if blocked else guess_axis_command_base(node.path, self.command_pairs)
+            base = None if blocked else guess_axis_command_base(runtime_path, self.command_pairs)
             pair = self.command_pairs.get(base) if base else None
             matched = bool(pair)
 
@@ -2156,17 +2223,23 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         if not value or is_block_marked(value):
             row["status"].setText("no value")
             return
-        cmd = fill_axis_command(pair["set"], self._axis_id(), value)
+        try:
+            runtime_value = self._convert_value(row.get("path",""), value, write=True)
+        except (ValueError, TypeError, OverflowError) as ex:
+            row["status"].setText(str(ex))
+            self._log(str(ex))
+            return
+        cmd = fill_axis_command(pair["set"], self._axis_id(), runtime_value)
         # Validate the setter command via QRY so command-level errors are
         # reflected in W-status (not only transport-level put errors).
         ok, msg = self.read_raw_command(cmd)
         self._set_row_phase_status(row, "write", ok, msg=msg)
         if ok:
             axis_id = self._axis_id()
-            self._record_change(axis_id, row.get("path", ""), value)
+            self._record_change(axis_id, units.REVERSE.get(row.get("path",""),row.get("path","")), runtime_value)
             # If getter is missing, write is the best current value we have.
             if not pair.get("get"):
-                self._record_current_value(axis_id, row.get("path", ""), value)
+                self._record_current_value(axis_id, units.REVERSE.get(row.get("path",""),row.get("path","")), runtime_value)
             self._log_change(f'WRITE axis={self._axis_id()} key={row.get("path","")} value={value} | {cmd}')
             self._read_row(row)
         else:
@@ -2186,9 +2259,16 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self._set_row_phase_status(row, "read", ok, msg=msg)
         if ok and ": " in msg:
             val = msg.split(": ", 1)[1].strip()
-            disp_val = compact_float_text(val)
+            raw_value = compact_float_text(val)
+            path = row.get("path","")
+            try:
+                disp_val = self._convert_value(path, raw_value)
+            except (ValueError, TypeError, OverflowError) as ex:
+                row["read_edit"].setText("N/A")
+                row["status"].setText(str(ex))
+                return False
             row["read_edit"].setText(disp_val)
-            self._record_current_value(self._axis_id(), row.get("path", ""), disp_val)
+            self._record_current_value(self._axis_id(), units.REVERSE.get(path,path), raw_value)
         else:
             row["read_edit"].setText(msg)
         return bool(ok)

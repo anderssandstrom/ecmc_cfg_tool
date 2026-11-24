@@ -7,7 +7,7 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
     WIDTH = 1000
     HEIGHT = 438
 
-    def __init__(self, make_cell, row_def):
+    def __init__(self, make_cell, row_def, pid_ms=False, timing_ms=False):
         super().__init__()
         scene = QtWidgets.QGraphicsScene(self)
         self.setScene(scene)
@@ -83,7 +83,7 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         label(455,25,'Inner',11,True,True)
         for i,key in enumerate(('Kp','Ki','Kd')):
             y=39+22*i
-            label(215,y+4,key,11)
+            label(215,y+4, {'Ki':'Ti [ms]', 'Kd':'Td [ms]'}.get(key,key) if pid_ms else key,11)
             cell(311,y,'AxisCntrl'+key)
             cell(409,y,'AxisCntrlInner'+key)
         field(215,102,'Inner tolerance','AxisCntrlInnerTol',96)
@@ -125,7 +125,7 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         line([(392,219),(420,219)])
         line([(278,327),(432,327),(432,231)])
         line([(444,219),(532,219)])
-        line([(659,75),(659,116),(544,116),(544,207)])
+        line([(659,75),(659,147),(544,147),(544,207)])
         # Separate velocity signal from the same trajectory generator.
         line([(53,190),(53,130),(557,130),(557,48),(570,48)])
         label(60,115,'Trajectory velocity',11)
@@ -142,13 +142,13 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         field(17,394,'Enable','AxisMonEnableAtTargetMon',48)
         field(166,394,'Tolerance','AxisMonAtTargetTol',72)
         # Use remaining lower row; compact cells keep the whole scene visible.
-        field(17,413,'Time [cycles]','AxisMonAtTargetTime',96)
+        field(17,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonAtTargetTime',96)
         box(350,372,310,64,'Controller deadband',True)
         field(359,394,'Tolerance','AxisCntrlDeadband',92)
-        field(359,413,'Time [cycles]','AxisCntrlDeadbandTime',92)
+        field(359,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisCntrlDeadbandTime',92)
         box(672,372,320,64,'Slave control deadband',True)
         field(681,394,'Tolerance','AxisMonSlvCtrlDbTol',92)
-        field(681,413,'Time [cycles]','AxisMonSlvCtrlDbTime',92)
+        field(681,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonSlvCtrlDbTime',92)
 
     def resizeEvent(self,event):
         super().resizeEvent(event)
