@@ -5,6 +5,7 @@ import argparse
 import os
 import json
 from ecmc_caqtdm import launch_caqtdm, panel_directories
+from ecmc_app_launcher import script_command
 import subprocess
 import sys
 import time
@@ -724,12 +725,10 @@ class IocNavigator(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(self, "Launch failed", str(ex))
 
     def _open_script(self, script_name, object_id):
-        script = self.app_dir / script_name
-        self._spawn(["bash", str(script), self._prefix(), str(object_id)], self.app_dir)
+        self._spawn(script_command(script_name, self._prefix(), object_id, app_dir=self.app_dir), self.app_dir)
 
     def _open_script_no_object(self, script_name):
-        script = self.app_dir / script_name
-        self._spawn(["bash", str(script), self._prefix()], self.app_dir)
+        self._spawn(script_command(script_name, self._prefix(), app_dir=self.app_dir), self.app_dir)
 
     def _caqtdm(self, panel, macro, panel_dir=None):
         try:
@@ -760,8 +759,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             )
             self._add_tool_tab(window, f"Command {prefix}")
             return
-        script = self.app_dir / "start.sh"
-        self._spawn(["bash", str(script), self._prefix()], self.app_dir)
+        self._open_script_no_object("start.sh")
 
     def _open_motion(self, data, separate=False):
         if self.embed_tools_check.isChecked() and not separate:
@@ -932,8 +930,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._add_tool_tab(window, title or ("PV Graph" if initial_pvs else "DAQ / FFT"))
             return
         if initial_pvs:
-            script = self.app_dir / "start_daq.sh"
-            self._spawn(["bash", str(script), self._prefix(), *initial_pvs], self.app_dir)
+            self._spawn(script_command("start_daq.sh", self._prefix(), *initial_pvs, app_dir=self.app_dir), self.app_dir)
         else:
             self._open_script_no_object("start_daq.sh")
 
@@ -1060,8 +1057,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             title = f"SDO {slave} {hw_name}".strip()
             self._add_tool_tab(window, title)
             return
-        script = self.app_dir / "start_sdo.sh"
-        self._spawn(["bash", str(script), host, master, slave], self.app_dir)
+        self._spawn(script_command("start_sdo.sh", host, master, slave, app_dir=self.app_dir), self.app_dir)
 
 
 def main():
