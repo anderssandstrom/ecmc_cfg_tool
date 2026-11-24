@@ -12,8 +12,11 @@ from collections import deque
 from datetime import datetime
 
 from qt_compat import QtCore, QtGui, QtWidgets
+from ecmc_settings import UiSettings
+from ecmc_widgets import reset_combo
 
-from ecmc_stream_qt import EpicsClient, _join_prefix_pv, compact_float_text
+from ecmc_epics import EpicsClient, _join_prefix_pv
+from ecmc_formatting import compact_float_text
 
 APP_LAUNCH_PLACEHOLDER = "Open app..."
 APP_LAUNCH_MOTION = "New Motion App"
@@ -599,9 +602,7 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
         self._apply_axis_top()
 
     def _reset_open_app_combo(self):
-        self.open_app_combo.blockSignals(True)
-        self.open_app_combo.setCurrentIndex(0)
-        self.open_app_combo.blockSignals(False)
+        reset_combo(self.open_app_combo)
 
     def _on_open_app_selected(self, index):
         action = str(self.open_app_combo.itemData(index) or "")
@@ -2183,6 +2184,7 @@ def main():
         timeout=args.timeout,
         axis_id_was_provided=bool((args.axis_id or '').strip()),
     )
+    UiSettings("motion").attach_window(w)
     w.show()
     sys.exit(app.exec_())
 
