@@ -13,6 +13,7 @@ from pathlib import Path
 from ecmc_demo import DemoClient
 import ecmc_parameter_conversion as units
 from qt_compat import QtCore, QtGui, QtWidgets
+from ecmc_command_client import CommandClient, command_transaction
 
 from ecmc_stream_qt import (
     EpicsClient,
@@ -2184,7 +2185,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         if not cmd:
             return False, 'ERROR: Command text is empty'
         try:
-            self.client.put(pv, cmd, wait=bool(wait))
+            CommandClient(self.client, pv, "").send(cmd, wait=bool(wait))
             msg = f'CMD -> {pv} ({len(cmd)} chars): {cmd}'
             if not quiet:
                 self._log(msg)
@@ -2196,32 +2197,35 @@ class CntrlWindow(QtWidgets.QMainWindow):
             return False, msg
 
     def read_raw_command(self, cmd, quiet=False):
-        fast_cli = bool(quiet and getattr(self.client, 'backend', '') == 'cli')
-        ok, msg = self.send_raw_command(cmd, quiet=quiet, wait=(not fast_cli))
-        if not ok:
-            return False, msg
-        qp = self.qry_pv.text().strip()
-        if not qp:
-            return True, f'Command sent, no QRY PV configured: {cmd}'
-        try:
-            proc_pv = _proc_pv_for_readback(qp)
-            self.client.put(proc_pv, 1, wait=(not fast_cli))
-            val = self.client.get(qp, as_string=True)
-            if query_value_indicates_error(val):
-                short = summarize_error_text(val, self.error_name_by_code)
-                msg = f'QRY ERROR <- {qp}: {short}'
+        pv = self.cmd_pv.text().strip()
+        if not pv:
+            return False, "ERROR: Command PV is empty"
+        with command_transaction(pv):
+            ok, msg = self.send_raw_command(cmd, quiet=quiet, wait=True)
+            if not ok:
+                return False, msg
+            qp = self.qry_pv.text().strip()
+            if not qp:
+                return True, f'Command sent, no QRY PV configured: {cmd}'
+            try:
+                proc_pv = _proc_pv_for_readback(qp)
+                self.client.put(proc_pv, 1, wait=True)
+                val = self.client.get(qp, as_string=True)
+                if query_value_indicates_error(val):
+                    short = summarize_error_text(val, self.error_name_by_code)
+                    msg = f'QRY ERROR <- {qp}: {short}'
+                    if not quiet:
+                        self._log(msg)
+                    return False, msg
+                msg = f'QRY <- {qp}: {val}'
+                if not quiet:
+                    self._log(msg)
+                return True, msg
+            except Exception as ex:
+                msg = f'ERROR query read: {ex}'
                 if not quiet:
                     self._log(msg)
                 return False, msg
-            msg = f'QRY <- {qp}: {val}'
-            if not quiet:
-                self._log(msg)
-            return True, msg
-        except Exception as ex:
-            msg = f'ERROR query read: {ex}'
-            if not quiet:
-                self._log(msg)
-            return False, msg
 
     def _read_row(self, row_def, axis_edit, read_edit, quiet=False):
         if not self._ensure_axis_is_real(axis_edit.text(), purpose=f'read {row_def.get("name","controller value")}'):
