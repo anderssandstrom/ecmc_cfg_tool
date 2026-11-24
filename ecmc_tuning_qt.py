@@ -1,8 +1,7 @@
 """Modeless controller tuning window, using native ECMC moves and CA monitors."""
 import math
-import csv
 import time
-from collections import deque
+from ecmc_acquisition import bounded_series, append_sample, export_event_csv
 from qt_compat import QtCore, QtGui, QtWidgets
 from ecmc_native_motion import NativeMotionMixin, NATIVE_PV_SUFFIXES, numeric_readback
 
@@ -29,7 +28,7 @@ class Trend(QtWidgets.QWidget):
     def __init__(self, series):
         super().__init__()
         self.series = series
-        self.samples = {key: deque(maxlen=40000) for key, _, _ in series}
+        self.samples = bounded_series((key for key, _, _ in series), 40000)
         self.history = 15
         self.frozen = None
         self.fixed_range = None
@@ -37,7 +36,7 @@ class Trend(QtWidgets.QWidget):
         self.setMinimumHeight(145)
 
     def append(self, key, stamp, value):
-        self.samples[key].append((stamp,value))
+        append_sample(self.samples[key], stamp, value, keep_gap=True)
 
     def freeze(self,checked):
         self.frozen = (time.monotonic(), {k:list(q) for k,q in self.samples.items()}) if checked else None
@@ -485,13 +484,10 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
             return
         try:
             # Independent CA streams: no fabricated synchronized samples.
-            rows=sorted((t,k,v) for trend in (self.position,self.error) for k,q in trend.samples.items() for t,v in q)
-            origin=rows[0][0] if rows else time.monotonic()
-            with open(path,'w',newline='') as f:
-                writer=csv.writer(f)
-                writer.writerow(['elapsed_s','pv','value'])
-                writer.writerows((f'{t-origin:.6f}',self.base+'-'+k,v) for t,k,v in rows)
-            self.status.setText(f'Exported {len(rows)} buffered samples')
+            series = {key: samples for trend in (self.position, self.error)
+                      for key, samples in trend.samples.items()}
+            count = export_event_csv(path, series, pv_name=lambda key: self.base+'-'+key)
+            self.status.setText(f'Exported {count} buffered samples')
         except Exception as ex:
             self.status.setText(f'Export failed: {ex}')
 
