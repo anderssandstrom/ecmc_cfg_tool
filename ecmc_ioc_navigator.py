@@ -17,7 +17,9 @@ from ecmc_axis_cfg import AxisYamlConfigWindow
 from ecmc_mtn_qt import MotionWindow
 from ecmc_cntrl_qt import CntrlWindow
 from ecmc_iso230_qt import Iso230Window
-from ecmc_daq_qt import DaqWindow, SeriesPlotWidget
+from ecmc_daq_qt import DaqWindow
+from ecmc_plot_widgets import SeriesPlotWidget
+from ecmc_acquisition import bounded_series, append_sample
 from ecmc_rtlog_qt import RtLogWindow
 from ecmc_ioc_tree import demo_ioc, discover_ioc
 from ecmc_sdo_qt import SdoBrowserWindow
@@ -52,7 +54,7 @@ class ThreadTrendWindow(QtWidgets.QMainWindow):
         self.timeout = float(timeout)
         self.history_s = float(history_s)
         self._start = time.monotonic()
-        self._samples = {pv: [] for pv in self.pvs}
+        self._samples = bounded_series(self.pvs, 100000)
         self._client = EpicsClient(timeout=max(self.timeout, 0.5))
 
         root = QtWidgets.QWidget()
@@ -75,7 +77,7 @@ class ThreadTrendWindow(QtWidgets.QMainWindow):
 
     def _clear(self):
         self._start = time.monotonic()
-        self._samples = {pv: [] for pv in self.pvs}
+        self._samples = bounded_series(self.pvs, 100000)
         self.plot.set_series({})
         self.status.setText("Cleared")
 
@@ -92,11 +94,8 @@ class ThreadTrendWindow(QtWidgets.QMainWindow):
             except Exception as ex:
                 errors.append(f"{pv}: {ex}")
                 continue
-            samples = self._samples.setdefault(pv, [])
-            samples.append((elapsed, value))
-            while samples and samples[0][0] < cutoff:
-                samples.pop(0)
-            ok += 1
+            if append_sample(self._samples[pv], elapsed, value, cutoff=cutoff):
+                ok += 1
         self.plot.set_series(self._samples)
         if errors and ok == 0:
             self.status.setText(errors[0])
