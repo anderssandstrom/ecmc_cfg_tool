@@ -316,6 +316,13 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.error_name_by_code = load_local_error_name_map(error_db_path)
         self.rows = _build_pairs(self.catalog.get('commands', []), include_set_only=False)
         self.rows_all = _build_pairs(self.catalog.get('commands', []), include_set_only=True)
+        # These commands are present in ECMC 11.2.0 but may be absent from older catalogs.
+        for name in ["AxisCntrlResetIAtRmp","AxisCntrlFreezeIAtRmp","AxisMonSlvCtrlDbTol","AxisMonSlvCtrlDbTime","AxisMonEnableAtTargetMon"]:
+            if not any(row['name'] == name for row in self.rows_all):
+                row = {'name': name, 'get': f'Get{name}(<axisIndex>)',
+                       'set': f'Cfg.Set{name}(<axisIndex>,<value>)', 'group': _group_for_name(name)}
+                self.rows_all.append(row)
+                self.rows.append(row)
         self._rows_all_by_name = {r['name']: r for r in self.rows_all}
         self._diagram_read_rows = []
         self._diagram_value_pairs = []
@@ -1263,6 +1270,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
 
     def _controller_yaml_key(self, cmd_name):
         m = {
+            'AxisCntrlResetIAtRmp': 'controller.resetIAtRmp',
+            'AxisCntrlFreezeIAtRmp': 'controller.freezeIAtRmp',
+            'AxisMonSlvCtrlDbTol': 'monitoring.target.slaveControlDeadband.tolerance',
+            'AxisMonSlvCtrlDbTime': 'monitoring.target.slaveControlDeadband.time',
+            'AxisMonEnableAtTargetMon': 'monitoring.target.enable',
             'AxisCntrlKp': 'controller.Kp',
             'AxisCntrlKi': 'controller.Ki',
             'AxisCntrlKd': 'controller.Kd',
@@ -1632,146 +1644,13 @@ class CntrlWindow(QtWidgets.QMainWindow):
 
     def _populate_controller_sketch(self):
         self._clear_diagram_layout()
-        image_path = self.sketch_image_edit.text().strip() if hasattr(self, 'sketch_image_edit') else self.sketch_image_path
-        if image_path:
-            p = Path(image_path)
-            if p.exists():
-                self._populate_controller_sketch_overlay(str(p))
-                return
-
-        sketch = QtWidgets.QWidget()
-        sketch.setStyleSheet('QWidget { background: #e1e1e1; color: #1e1e1e; }')
-        grid = QtWidgets.QGridLayout(sketch)
-        grid.setContentsMargins(18, 14, 18, 14)
-        grid.setHorizontalSpacing(22)
-        grid.setVerticalSpacing(14)
-
-        def _t(text, css=''):
-            w = QtWidgets.QLabel(text)
-            if css:
-                w.setStyleSheet(css)
-            return w
-
-        hdr = _t('PID sets:', 'QLabel { font-size: 26px; font-weight: 700; color: #111; }')
-        grid.addWidget(hdr, 0, 0, 1, 2)
-
-        grid.addWidget(_t('outer PID: e >', 'QLabel { font-size: 18px; }'), 1, 0)
-        grid.addWidget(_t('inner PID: e <', 'QLabel { font-size: 18px; }'), 2, 0)
-        grid.addWidget(_t('tol.', 'QLabel { font-size: 18px; }'), 1, 1)
-        grid.addWidget(self._make_sketch_cell(self._row_def('AxisCntrlInnerTol')), 2, 1)
-
-        gains = QtWidgets.QWidget()
-        gl = QtWidgets.QGridLayout(gains)
-        gl.setContentsMargins(0, 0, 0, 0)
-        gl.setHorizontalSpacing(10)
-        gl.setVerticalSpacing(8)
-        gl.addWidget(_t('outer', 'QLabel { font-size: 18px; font-weight: 600; }'), 0, 1)
-        gl.addWidget(_t('inner', 'QLabel { font-size: 18px; font-weight: 600; }'), 0, 2)
-        for rr, (lbl, outer, inner) in enumerate([
-            ('Kp', 'AxisCntrlKp', 'AxisCntrlInnerKp'),
-            ('Ki', 'AxisCntrlKi', 'AxisCntrlInnerKi'),
-            ('Kd', 'AxisCntrlKd', 'AxisCntrlInnerKd'),
-        ], start=1):
-            gl.addWidget(_t(lbl, 'QLabel { font-size: 18px; font-weight: 600; }'), rr, 0)
-            gl.addWidget(self._make_sketch_cell(self._row_def(outer)), rr, 1)
-            gl.addWidget(self._make_sketch_cell(self._row_def(inner)), rr, 2)
-        grid.addWidget(gains, 0, 2, 3, 2)
-
-        ff_col = QtWidgets.QWidget()
-        fl = QtWidgets.QGridLayout(ff_col)
-        fl.setContentsMargins(0, 0, 0, 0)
-        fl.setHorizontalSpacing(8)
-        fl.setVerticalSpacing(8)
-        fl.addWidget(_t('ff', 'QLabel { font-size: 18px; font-weight: 600; }'), 0, 0)
-        fl.addWidget(_t('drv. scale', 'QLabel { font-size: 18px; font-weight: 600; }'), 1, 0)
-        fl.addWidget(_t('Kff', 'QLabel { font-size: 18px; font-weight: 600; }'), 2, 0)
-        fl.addWidget(self._make_sketch_cell(self._row_def('AxisCntrlKff')), 2, 1)
-        fl.addWidget(_t('denom', 'QLabel { font-size: 18px; }'), 1, 2)
-        fl.addWidget(self._make_sketch_cell(self._row_def('AxisDrvScaleDenom')), 1, 1)
-        fl.addWidget(_t('num', 'QLabel { font-size: 18px; }'), 2, 2)
-        fl.addWidget(self._make_sketch_cell(self._row_def('AxisDrvScaleNum')), 3, 1)
-        grid.addWidget(ff_col, 0, 4, 4, 2)
-
-        chain = QtWidgets.QWidget()
-        cl = QtWidgets.QHBoxLayout(chain)
-        cl.setContentsMargins(0, 0, 0, 0)
-        cl.setSpacing(14)
-
-        def _blk(text, w=90, h=62, dark=True):
-            b = QtWidgets.QLabel(text)
-            b.setAlignment(QtCore.Qt.AlignCenter)
-            if dark:
-                b.setStyleSheet(
-                    f'QLabel {{ background: #0f5b79; color: #f3f3f3; border: 2px solid #0f3345;'
-                    f' font-size: 24px; font-weight: 700; min-width: {w}px; min-height: {h}px; }}'
-                )
-            else:
-                b.setStyleSheet(
-                    f'QLabel {{ background: transparent; color: #0f3345; border: 2px solid #0f3345;'
-                    f' font-size: 28px; font-weight: 700; min-width: {w}px; min-height: {h}px; border-radius: {h//2}px; }}'
-                )
-            return b
-
-        cl.addWidget(_blk('-', 54, 220, dark=False))
-        cl.addWidget(_t('->', 'QLabel { font-size: 24px; color: #666; }'))
-
-        pid_col = QtWidgets.QWidget()
-        pl = QtWidgets.QVBoxLayout(pid_col)
-        pl.setContentsMargins(0, 0, 0, 0)
-        pl.setSpacing(10)
-        pl.addWidget(_blk('P', 68, 58))
-        pl.addWidget(_blk('I', 68, 58))
-        pl.addWidget(_blk('D', 68, 58))
-        cl.addWidget(pid_col)
-
-        cl.addWidget(_t('->', 'QLabel { font-size: 24px; color: #666; }'))
-        cl.addWidget(_blk('+', 54, 220, dark=False))
-        cl.addWidget(_t('->', 'QLabel { font-size: 24px; color: #666; }'))
-        cl.addWidget(_blk('+', 54, 220, dark=False))
-        cl.addWidget(_t('->', 'QLabel { font-size: 24px; color: #666; }'))
-        cl.addWidget(_blk('Deadband', 150, 220))
-        cl.addWidget(_t('->', 'QLabel { font-size: 24px; color: #666; }'))
-        cl.addWidget(_blk('Process', 210, 220))
-        grid.addWidget(chain, 4, 1, 2, 6)
-
-        deadband_vals = QtWidgets.QWidget()
-        dl = QtWidgets.QGridLayout(deadband_vals)
-        dl.setContentsMargins(0, 0, 0, 0)
-        dl.setHorizontalSpacing(8)
-        dl.addWidget(_t('tol.', 'QLabel { font-size: 18px; }'), 0, 0)
-        dl.addWidget(self._make_sketch_cell(self._row_def('AxisCntrlDeadband')), 0, 1)
-        dl.addWidget(_t('time [cyc]', 'QLabel { font-size: 18px; }'), 0, 2)
-        dl.addWidget(self._make_sketch_cell(self._row_def('AxisCntrlDeadbandTime')), 0, 3)
-        grid.addWidget(deadband_vals, 6, 4, 1, 3)
-
-        at_target = QtWidgets.QWidget()
-        atl = QtWidgets.QGridLayout(at_target)
-        atl.setContentsMargins(0, 0, 0, 0)
-        atl.setHorizontalSpacing(8)
-        atl.setVerticalSpacing(6)
-        atl.addWidget(_t('At target:', 'QLabel { font-size: 20px; font-weight: 600; }'), 0, 0, 1, 2)
-        atl.addWidget(_t('tol.', 'QLabel { font-size: 18px; }'), 1, 0)
-        atl.addWidget(self._make_sketch_cell(self._row_def('AxisMonAtTargetTol')), 1, 1)
-        atl.addWidget(_t('time [cyc]', 'QLabel { font-size: 18px; }'), 1, 2)
-        atl.addWidget(self._make_sketch_cell(self._row_def('AxisMonAtTargetTime')), 1, 3)
-        grid.addWidget(at_target, 7, 0, 2, 4)
-
-        enc = QtWidgets.QWidget()
-        el = QtWidgets.QGridLayout(enc)
-        el.setContentsMargins(0, 0, 0, 0)
-        el.setHorizontalSpacing(8)
-        el.setVerticalSpacing(6)
-        el.addWidget(_t('Enc. scale', 'QLabel { font-size: 20px; font-weight: 600; }'), 0, 0, 1, 2)
-        el.addWidget(_t('num', 'QLabel { font-size: 18px; }'), 1, 0)
-        el.addWidget(self._make_sketch_cell(self._row_def('AxisEncScaleNum')), 1, 1)
-        el.addWidget(_t('denom', 'QLabel { font-size: 18px; }'), 2, 0)
-        el.addWidget(self._make_sketch_cell(self._row_def('AxisEncScaleDenom')), 2, 1)
-        grid.addWidget(enc, 7, 4, 2, 2)
-
-        for c in range(7):
-            grid.setColumnStretch(c, 1)
-
-        self.diagram_layout.addWidget(sketch, 0, 0)
+        self._current_overlay_canvas = None
+        image_path = self.sketch_image_edit.text().strip()
+        if image_path and Path(image_path).is_file():
+            self._populate_controller_sketch_overlay(image_path)
+            return
+        from ecmc_controller_diagram import ControllerDiagram
+        self.diagram_layout.addWidget(ControllerDiagram(self._make_sketch_cell, self._row_def), 0, 0)
 
     def _populate_controller_sketch_overlay(self, image_path):
         canvas = ImageOverlayCanvas(image_path)
@@ -2253,8 +2132,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
                     self._log(f'Read All cancelled ({count}/{len(rows)})')
                     return False
                 if not self._read_row(row_def, axis_edit, read_edit, quiet=True):
-                    self._log(f'Read All aborted after {count} rows (read failed: {row_def.get("name", "?")})')
-                    return False
+                    self._log(f'Read unavailable: {row_def.get("name", "?")} (continuing)')
+                    continue
                 count += 1
                 self._update_read_all_progress(count)
             self._log(f'Read All completed ({count} rows)')
@@ -2499,13 +2378,6 @@ def main():
     default_cmd_pv = args.cmd_pv.strip() if args.cmd_pv else _join_prefix_pv(args.prefix, 'MCU-Cmd.AOUT')
     default_qry_pv = args.qry_pv.strip() if args.qry_pv else _join_prefix_pv(args.prefix, 'MCU-Cmd.AINP')
     sketch_image = args.sketch_image.strip()
-    if not sketch_image:
-        base_dir = Path(__file__).resolve().parent
-        for name in ('original.png', 'controller_sketch.png'):
-            candidate = base_dir / name
-            if candidate.exists():
-                sketch_image = str(candidate)
-                break
 
     app = QtWidgets.QApplication(sys.argv)
     w = CntrlWindow(
