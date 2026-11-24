@@ -1,5 +1,6 @@
 """Reusable Qt series plot with selection, zoom and pan."""
 import math
+from ecmc_stream_qt import compact_float_text
 from qt_compat import QtCore, QtGui, QtWidgets
 
 Signal = getattr(QtCore, "pyqtSignal", None) or QtCore.Signal
