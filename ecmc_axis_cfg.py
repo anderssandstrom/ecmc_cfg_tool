@@ -4,6 +4,8 @@ import csv
 import json
 import re
 from ecmc_caqtdm import launch_caqtdm
+from ecmc_diagnostic_presets import axis_diagnostic_pvs
+from ecmc_app_launcher import launch_tool
 import subprocess
 import sys
 import time
@@ -875,23 +877,12 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             self._log(f"Failed to start motion window: {ex}")
 
     def _open_daq_window(self):
-        script = Path(__file__).with_name("start_daq.sh")
-        if not script.exists():
-            self._log(f"Launcher not found: {script.name}")
-            return
-        prefix = self.title_prefix or ""
-        if not prefix:
-            cmd_pv = self.cmd_pv.text().strip()
-            m = re.match(r"^(.*):MCU-Cmd\\.AOUT$", cmd_pv)
-            prefix = m.group(1) if m else "IOC:ECMC"
+        prefix = self._ioc_prefix_for_title() or 'IOC:ECMC'
         try:
-            subprocess.Popen(
-                ["bash", str(script), str(prefix)],
-                cwd=str(script.parent),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            self._log(f"Started DAQ window (prefix {prefix})")
+            base = self._resolve_motor_record_name(self._axis_id())
+            pvs = axis_diagnostic_pvs(base, profile="position", extra=())
+            launch_tool("daq", prefix, *pvs)
+            self._log(f"Started DAQ window (prefix {prefix}, {len(pvs)} preset PVs)")
         except Exception as ex:
             self._log(f"Failed to start DAQ window: {ex}")
 
