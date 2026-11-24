@@ -6,6 +6,7 @@ import json
 import math
 import os
 from ecmc_native_motion import NativeAxisConnection
+from ecmc_motor_motion import set_move_params, request_stop
 from ecmc_iso230_math import compute_metrics, linear_regression
 from ecmc_iso230_analysis import compensation_rows, compare_metrics, session_metrics, settling_time
 import random
@@ -2645,18 +2646,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._native_bounds = (lo, hi)
 
     def _set_move_params(self, velo, accl, accs=None, vmax=None):
-        if vmax is not None:
-            try:
-                self._put("VMAX", vmax)
-            except Exception as ex:
-                self._log(f"VMAX unavailable ({ex})")
-        if accs is not None:
-            try:
-                self._put("ACCS", accs)
-            except Exception as ex:
-                self._log(f"ACCS unavailable ({ex})")
-        self._put("VELO", velo)
-        self._put("ACCL", accl)
+        set_move_params(self._put, self._log, velo, accl, accs, vmax)
 
     def _refresh_status_from_loaded_data(self):
         vals = {}
@@ -3629,28 +3619,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self._test_timer.start()
             return
         try:
-            try:
-                self._put("JOGF", 0, quiet=True)
-            except Exception:
-                pass
-            try:
-                self._put("JOGR", 0, quiet=True)
-            except Exception:
-                pass
-            stop_ok = False
-            try:
-                self._put("STOP", 1)
-                stop_ok = True
-            except Exception as ex:
-                self._log(f"STOP field failed ({ex}), trying SPMG=0")
-            if not stop_ok:
-                try:
-                    self._put("SPMG", 0)
-                    stop_ok = True
-                except Exception as ex:
-                    self._log(f"SPMG stop failed ({ex})")
-            if not stop_ok:
-                raise RuntimeError("No supported stop field worked")
+            request_stop(self._put, self._log)
         except Exception as ex:
             self._log(f"Stop failed: {ex}")
 
