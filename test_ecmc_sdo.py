@@ -43,6 +43,16 @@ class SdoTests(unittest.TestCase):
             "c6025a", "/opt/etherlab/bin/ethercat download -p 1 0x2000 0 string 'hello world'"
         ])
 
+    def test_ssh_rejects_option_injection(self):
+        for host in ("", "-oProxyCommand=bad", "host name", "host;bad", "host\nother"):
+            with self.subTest(host=host), self.assertRaises(ValueError):
+                build_ssh_command(host, ["sdos"])
+
+    def test_ssh_destination_and_separator(self):
+        for host in ("user@host.example.org", "192.168.1.1", "2001:db8::1"):
+            cmd = build_ssh_command(host, ["sdos"])
+            self.assertEqual(cmd[-3:-1], ["--", host])
+
     def test_remote_binary_can_be_overridden(self):
         self.assertEqual(build_ssh_command("host", ["sdos"], "/custom/ethercat")[-1], "/custom/ethercat sdos")
 
