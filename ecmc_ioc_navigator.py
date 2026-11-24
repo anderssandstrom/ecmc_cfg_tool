@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import json
 from ecmc_caqtdm import launch_caqtdm, panel_directories
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from qt_compat import QtCore, QtWidgets
+from qt_compat import QtCore, QtGui, QtWidgets
 from ecmc_stream_qt import EpicsClient, MainWindow as StreamWindow, _join_prefix_pv
 from ecmc_axis_cfg import AxisYamlConfigWindow
 from ecmc_mtn_qt import MotionWindow
@@ -124,9 +125,18 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.thread_pool = QtCore.QThreadPool.globalInstance()
         self._tasks = set()
         self._snapshot = {}
+        self._demo=demo
+        self._health_pvs={}
+        self._health_values={}
+        self._health_generation=0
+        self._health_client=None
         self._ssh_host = ssh_host
         self._embedded_tools = []
         self._build_ui(prefix, ssh_host, ssh_host_pv)
+        self._health_timer=QtCore.QTimer(self)
+        self._health_timer.setInterval(500)
+        self._health_timer.timeout.connect(self._update_health)
+        self._health_timer.start()
         if demo:
             self._snapshot = demo_ioc(prefix)
             self._ssh_host = ssh_host or self._snapshot["ssh_host"]
@@ -183,15 +193,27 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.collapse_tree_btn.clicked.connect(self._toggle_tree_collapsed)
         filter_row.addWidget(self.collapse_tree_btn)
         nav_layout.addLayout(filter_row)
+        health_row=QtWidgets.QHBoxLayout()
+        self.health_check=QtWidgets.QCheckBox('Live status')
+        self.health_check.setChecked(True)
+        self.health_check.toggled.connect(self._configure_health)
+        self.errors_only=QtWidgets.QCheckBox('Problems only')
+        self.errors_only.toggled.connect(self._filter_tree)
+        health_row.addWidget(self.health_check)
+        health_row.addWidget(self.errors_only)
+        export=QtWidgets.QPushButton('Snapshot')
+        export.clicked.connect(self._export_health)
+        health_row.addWidget(export)
+        nav_layout.addLayout(health_row)
 
         self.tree = QtWidgets.QTreeWidget()
-        self.tree.setHeaderLabels(["Object", "ID", "Type / Panel", "PV / Motor"])
+        self.tree.setHeaderLabels(["Object", "ID", "Type / Panel", "PV / Motor", "Health"])
         self.tree.setAlternatingRowColors(True)
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._context_menu)
         self.tree.itemDoubleClicked.connect(self._default_action)
         header = self.tree.header()
-        for column in range(4):
+        for column in range(5):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.Interactive)
         self.tree.setColumnWidth(0, 190)
         self.tree.setColumnWidth(1, 55)
@@ -284,6 +306,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.thread_pool.start(task)
 
     def _populate(self, snapshot):
+        self._disconnect_health()
         self.tree.clear()
         self._add_ecmc_info(snapshot)
         specs = [
@@ -327,6 +350,7 @@ class IocNavigator(QtWidgets.QMainWindow):
                 parent.addChild(item)
                 total += 1
             parent.setExpanded(True)
+        self._configure_health()
         self._filter_tree()
         self.statusBar().showMessage(
             f"Discovered {total} objects on {snapshot.get('prefix', '')} (EtherCAT master {snapshot.get('master', '0')})"
@@ -384,22 +408,119 @@ class IocNavigator(QtWidgets.QMainWindow):
                 item.setData(0, self.DATA_ROLE, {"kind": "ecmc_info", **info})
                 group_item.addChild(item)
 
+    def _disconnect_health(self):
+        for pv in self._health_pvs.values():
+            try:
+                pv.disconnect()
+            except Exception:
+                pass
+        self._health_pvs.clear()
+        self._health_values.clear()
+        self._health_generation+=1
+
+    def _health_items(self):
+        for i in range(self.tree.topLevelItemCount()):
+            parent=self.tree.topLevelItem(i)
+            for j in range(parent.childCount()):
+                item=parent.child(j)
+                data=item.data(0,self.DATA_ROLE) or {}
+                kind=data.get('kind')
+                if kind=='hardware' and data.get('pv_base'):
+                    base=_join_prefix_pv(self._snapshot.get('prefix',''),data['pv_base'])
+                    yield item,kind,(base+'-Online',base+'-Operational')
+                elif kind=='axis' and data.get('motor'):
+                    base=data['motor']
+                    yield item,kind,(base+'-ErrId',base+'-EnaAct')
+
+    def _configure_health(self, *_):
+        self._disconnect_health()
+        if not self.health_check.isChecked():
+            self._update_health()
+            return
+        if not self._demo:
+            if self._health_client is None:
+                self._health_client=EpicsClient(timeout=self.timeout)
+            ep=getattr(self._health_client,'_epics',None)
+            if ep is not None:
+                for _,_,names in self._health_items():
+                    for name in names:
+                        if name not in self._health_pvs:
+                            try:
+                                self._health_pvs[name]=ep.PV(name,auto_monitor=True)
+                            except Exception:
+                                pass
+        self._update_health()
+
+    def _health_value(self,name):
+        pv=self._health_pvs.get(name)
+        if pv is None or not pv.connected:
+            return None
+        try:
+            # Never block the UI on an unavailable PV.
+            value=pv.get(use_monitor=True,timeout=0.001)
+            return float(value) if value is not None and pv.severity!=3 else None
+        except Exception:
+            return None
+
+    def _update_health(self):
+        enabled=self.health_check.isChecked()
+        self._health_values={}
+        for item,kind,names in self._health_items():
+            if not enabled:
+                status=''
+            elif self._demo:
+                status='OP' if kind=='hardware' else 'Enabled' if item.text(1)=='1' else 'Disabled'
+            else:
+                a,b=(self._health_value(p) for p in names)
+                if kind=='hardware':
+                    status='Offline' if a==0 else 'Not OP' if b==0 else 'OP' if a==1 and b==1 else 'Unknown'
+                else:
+                    status=f'Error {int(a)}' if a is not None and a!=0 else 'Enabled' if a==0 and b==1 else 'Disabled' if a==0 and b==0 else 'Unknown'
+            item.setText(4,status)
+            problem=status.startswith('Error') or status in ('Offline','Not OP','Unknown')
+            item.setForeground(4,QtGui.QBrush(QtGui.QColor('#b91c1c' if problem else '#16803b' if status in ('OP','Enabled') else '#64748b')))
+            self._health_values['|'.join(names)]={'status':status,'pvs':names}
+        for i in range(self.tree.topLevelItemCount()):
+            parent=self.tree.topLevelItem(i)
+            statuses=[parent.child(j).text(4) for j in range(parent.childCount())]
+            count=sum(v.startswith('Error') or v in ('Offline','Not OP','Unknown') for v in statuses)
+            parent.setText(4,f'{count} problems' if count else '')
+        self._filter_tree()
+
+    def _export_health(self):
+        path,_=QtWidgets.QFileDialog.getSaveFileName(self,'Save diagnostic snapshot','ioc_snapshot.json','JSON (*.json)')
+        if not path:
+            return
+        try:
+            with open(path,'w',encoding='utf-8') as fp:
+                json.dump({'timestamp':time.time(),'demo':self._demo,'discovery':self._snapshot,'health':self._health_values},fp,indent=2)
+        except Exception as ex:
+            QtWidgets.QMessageBox.warning(self,'Snapshot failed',str(ex))
+
+    def closeEvent(self,event):
+        self._health_timer.stop()
+        self._disconnect_health()
+        super().closeEvent(event)
+
     def _filter_tree(self, _text=None):
         needle = self.filter_edit.text().strip().lower()
         for i in range(self.tree.topLevelItemCount()):
             parent = self.tree.topLevelItem(i)
             visible = self._filter_item(parent, needle)
-            parent.setHidden(bool(needle) and not visible)
+            parent.setHidden(not visible)
 
     def _filter_item(self, item, needle):
-        own_match = not needle or needle in " ".join(item.text(c).lower() for c in range(4))
+        own_match = not needle or needle in " ".join(item.text(c).lower() for c in range(5))
+        if self.errors_only.isChecked():
+            state=item.text(4)
+            own_match=own_match and (state.startswith("Error") or state in ("Offline","Not OP","Unknown"))
         child_match = False
         for i in range(item.childCount()):
             child = item.child(i)
             visible = self._filter_item(child, needle)
-            child.setHidden(bool(needle) and not visible)
+            child.setHidden(not visible)
             child_match = child_match or visible
-        if needle and child_match:
+        if (needle or self.errors_only.isChecked()) and child_match:
             item.setExpanded(True)
         return own_match or child_match
 
