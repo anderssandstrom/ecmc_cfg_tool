@@ -31,6 +31,8 @@ from ecmc_sdo import (
 )
 
 
+from ecmc_sdo_compare import compare_snapshots, decode_word, canonical_value
+
 SDO_UNKNOWN_BG = "#f3f6fb"
 SDO_BUSY_BG = "#e0f2fe"
 SDO_READ_BG = "#dff5dd"
@@ -144,6 +146,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         self.timeout = float(timeout)
         self._tasks = set()
         self._active_task = None
+        self._dictionary_connection=None
         self._askpass_dir = tempfile.TemporaryDirectory(prefix="ecmc_sdo_askpass_")
         self._askpass_socket_path = str(Path(self._askpass_dir.name) / "socket")
         self._askpass_listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -282,6 +285,13 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         footer.addWidget(self.write_selected_btn)
         footer.addWidget(self.report_btn)
         footer.addWidget(self.snippet_btn)
+        self.snapshot_btn=QtWidgets.QPushButton('Snapshots…')
+        snapshot_menu=QtWidgets.QMenu(self.snapshot_btn)
+        snapshot_menu.addAction('Read all readable entries',self._read_all_snapshot)
+        snapshot_menu.addAction('Save verified readback snapshot',self._save_snapshot)
+        snapshot_menu.addAction('Compare with saved snapshot',self._compare_snapshot)
+        self.snapshot_btn.setMenu(snapshot_menu)
+        footer.addWidget(self.snapshot_btn)
         footer.addWidget(self.log_btn)
         footer.addWidget(self.expand_btn)
         footer.addWidget(self.collapse_btn)
@@ -433,6 +443,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         if code != 0:
             self._command_error("Could not read SDO dictionary", code, stdout, stderr)
             return
+        self._dictionary_connection=tuple(self._connection())
         self._populate_tree(stdout, "SDO dictionary loaded")
 
     def load_example(self):
@@ -442,6 +453,7 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         except OSError as ex:
             QtWidgets.QMessageBox.critical(self, "Could not load example", str(ex))
             return
+        self._dictionary_connection=None
         self._populate_tree(text, "Offline example loaded")
 
     def _populate_tree(self, text, status_message):
@@ -598,6 +610,10 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
         ]
         if entry.writable:
             details.append("Download command: " + " ".join(download_arguments(master, slave, entry, value or "<value>")))
+        if raw and source=='read':
+            bits=decode_word(entry.index,entry.subindex,display_upload_value(entry,raw),entry.bit_count,entry.effective_data_type)
+            if bits:
+                details.extend(['','Bit interpretation:',*bits])
         self.details.setPlainText("\n".join(details))
 
     def _read_index(self, item):
@@ -851,6 +867,103 @@ class SdoBrowserWindow(QtWidgets.QMainWindow):
             if value:
                 rows.append((item, entry, value))
         return rows
+
+    def _read_all_snapshot(self):
+        if self._active_task is not None or not self.read_selected_btn.isEnabled():
+            return
+        if self._validate_connection() is None:
+            return
+        if self._dictionary_connection!=tuple(self._connection()):
+            QtWidgets.QMessageBox.warning(self,'Refresh required','Refresh the SDO dictionary for this slave first.')
+            return
+        rows=[(item,entry) for item,entry in self._all_entry_items() if entry.readable]
+        if not rows:
+            return
+        if QtWidgets.QMessageBox.question(self,'Read all SDOs',f'Read {len(rows)} entries, including hidden entries? This may generate substantial mailbox traffic.',QtWidgets.QMessageBox.Yes|QtWidgets.QMessageBox.No,QtWidgets.QMessageBox.No)!=QtWidgets.QMessageBox.Yes:
+            return
+        # Invalidate old measurements before a full snapshot.
+        for item,entry in rows:
+            item.setData(0,self.KNOWN_ROLE,False)
+            item.setData(0,self.RAW_VALUE_ROLE,'')
+            item.setData(0,self.SOURCE_ROLE,'')
+        self._read_queue=rows
+        self._read_queue_total=len(rows)
+        self._set_bulk_actions_enabled(False)
+        self._run_next_selected_read()
+
+    def _snapshot_payload(self):
+        if self._active_task is not None or not self.read_selected_btn.isEnabled():
+            raise RuntimeError('Wait for the current SDO operation to finish')
+        if self._dictionary_connection!=tuple(self._connection()):
+            raise RuntimeError('Refresh the dictionary for the selected slave before taking a snapshot')
+        host,master,slave=self._dictionary_connection
+        rows=[]
+        readable=0
+        for item,entry in self._all_entry_items():
+            if entry.readable:
+                readable+=1
+            raw=item.data(0,self.RAW_VALUE_ROLE)
+            if item.text(self.COL_STATUS)!='Read' or item.data(0,self.SOURCE_ROLE)!='read' or raw is None:
+                continue
+            value=display_upload_value(entry,str(raw))
+            rows.append(dict(index=entry.index,subindex=entry.subindex,name=entry.name,type=entry.data_type,
+                bits=entry.bit_length,access=entry.access,value=value,raw_upload=str(raw)))
+        return dict(version=1,generated=datetime.now().isoformat(),host=host,master=master,slave=slave,
+                    readable_count=readable,entries=rows)
+
+    def _save_snapshot(self):
+        try:
+            payload=self._snapshot_payload()
+            if not payload['entries']:
+                raise RuntimeError('Read some SDO values first')
+            path,_=QtWidgets.QFileDialog.getSaveFileName(self,'Save SDO readback snapshot','sdo_snapshot.json','JSON (*.json)')
+            if path:
+                Path(path).write_text(json.dumps(payload,indent=2),encoding='utf-8')
+        except Exception as ex:
+            QtWidgets.QMessageBox.warning(self,'Snapshot failed',str(ex))
+
+    def _compare_snapshot(self):
+        try:
+            current=self._snapshot_payload()
+            path,_=QtWidgets.QFileDialog.getOpenFileName(self,'Select baseline SDO snapshot','','JSON (*.json)')
+            if not path:
+                return
+            baseline=json.loads(Path(path).read_text(encoding='utf-8'))
+            changes=compare_snapshots(baseline,current)
+            dlg=QtWidgets.QDialog(self)
+            dlg.setWindowTitle('SDO snapshot comparison')
+            dlg.resize(900,550)
+            layout=QtWidgets.QVBoxLayout(dlg)
+            label=QtWidgets.QLabel(f"Baseline: {baseline.get('host','?')} m{baseline.get('master','?')} s{baseline.get('slave','?')} — {len(baseline['entries'])} readbacks | Current: {len(current['entries'])}/{current['readable_count']} readable entries")
+            label.setWordWrap(True)
+            layout.addWidget(label)
+            table=QtWidgets.QTableWidget(len(changes),5)
+            table.setHorizontalHeaderLabels(['Index','Name','Baseline','Current','Difference'])
+            table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+            table.horizontalHeader().setSectionResizeMode(1,QtWidgets.QHeaderView.Stretch)
+            snippets=['# Review before using. Current verified values differing from baseline; no writes performed.']
+            entries={(e.index.lower(),e.subindex.lower()):e for _,e in self._all_entry_items()}
+            for i,row in enumerate(changes):
+                key=row['key']
+                old=row.get('old') or {}
+                new=row.get('new') or {}
+                for j,value in enumerate((':'.join(key),new.get('name',old.get('name','')),old.get('value','—'),new.get('value','—'),row['state'])):
+                    table.setItem(i,j,QtWidgets.QTableWidgetItem(str(value)))
+                entry=entries.get(key)
+                if row['state']=='Changed' and entry and entry.writable:
+                    snippets.append(ecmc_add_sdo_line(current['slave'],entry,new['value']))
+            layout.addWidget(table)
+            row=QtWidgets.QHBoxLayout()
+            copy=QtWidgets.QPushButton('Copy changed writable SDO snippet')
+            copy.clicked.connect(lambda:QtWidgets.QApplication.clipboard().setText('\n'.join(snippets)+'\n'))
+            row.addWidget(copy)
+            close=QtWidgets.QPushButton('Close')
+            close.clicked.connect(dlg.accept)
+            row.addWidget(close)
+            layout.addLayout(row)
+            dlg.exec_() if hasattr(dlg,'exec_') else dlg.exec()
+        except Exception as ex:
+            QtWidgets.QMessageBox.warning(self,'Comparison failed',str(ex))
 
     def _report_text(self, selected_only=False):
         host, master, slave = self._connection()
