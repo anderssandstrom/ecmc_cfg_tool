@@ -2,6 +2,19 @@
 from qt_compat import QtCore
 
 
+class _GeometryObserver(QtCore.QObject):
+    def __init__(self, settings, window):
+        super().__init__(window)
+        self.settings = settings
+
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.Close:
+            self.settings.save_geometry(obj)
+            self.settings.sync()
+        return False
+
+
+
 class UiSettings:
     def __init__(self, tool, settings=None):
         self.tool = str(tool)
@@ -35,6 +48,13 @@ class UiSettings:
 
     def save_layout(self, key, widget):
         self.settings.setValue(self._key(key), widget.saveState())
+
+    def attach_window(self, window):
+        """Restore a standalone window and save geometry on close."""
+        self.restore_geometry(window)
+        observer = _GeometryObserver(self, window)
+        window._ui_geometry_observer = observer
+        window.installEventFilter(observer)
 
     def sync(self):
         self.settings.sync()
