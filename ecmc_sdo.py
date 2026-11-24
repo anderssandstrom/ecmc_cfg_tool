@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import re
 import shlex
+import os
+import stat
+from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Sequence
@@ -14,7 +17,27 @@ SDO_RE = re.compile(r'^SDO\s+(0x[0-9a-fA-F]+),\s*"(.*)"\s*$')
 ENTRY_RE = re.compile(
     r'^\s+(0x[0-9a-fA-F]+):([0-9a-fA-F]{2}),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*"(.*)"\s*$'
 )
-SSH_CONTROL_PATH = "/tmp/ecmc_sdo_ssh_%C"
+def ssh_control_path():
+    """Use a short, private socket directory, rejecting symlinks."""
+    directory = Path("/tmp") / f"ecmc-ssh-{os.getuid()}"
+    try:
+        directory.mkdir(mode=0o700)
+    except FileExistsError:
+        pass
+    info = directory.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o700):
+        raise RuntimeError(f"Unsafe SSH control directory: {directory}")
+    return str(directory / "%C")
+
+
+def validate_ssh_host(host):
+    host = str(host or "").strip()
+    if (not host or host.startswith("-") or
+            not re.fullmatch(r"[A-Za-z0-9_.@:%\[\]-]+", host)):
+        raise ValueError("Invalid SSH destination")
+    return host
+
 SSH_CONTROL_PERSIST_SECONDS = 600
 DEFAULT_ETHERCAT_BINARY = "/opt/etherlab/bin/ethercat"
 
@@ -111,15 +134,16 @@ def build_remote_command(arguments: Sequence[str], binary: str = DEFAULT_ETHERCA
 
 
 def build_ssh_command(host: str, arguments: Sequence[str], binary: str = DEFAULT_ETHERCAT_BINARY) -> list[str]:
+    host = validate_ssh_host(host)
     return [
         "ssh",
         "-o", "ControlMaster=auto",
         "-o", f"ControlPersist={SSH_CONTROL_PERSIST_SECONDS}",
-        "-o", f"ControlPath={SSH_CONTROL_PATH}",
+        "-o", f"ControlPath={ssh_control_path()}",
         "-o", "ConnectTimeout=10",
         "-o", "ServerAliveInterval=10",
         "-o", "ServerAliveCountMax=2",
-        host,
+        "--", host,
         build_remote_command(arguments, binary),
     ]
 
