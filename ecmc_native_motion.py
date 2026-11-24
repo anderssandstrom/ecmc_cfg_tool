@@ -5,6 +5,23 @@ Writes are ordered and fail closed when the execute mode is unknown.
 """
 import math
 
+NATIVE_PV_SUFFIXES = {
+    'PosSet': 'PosSet', 'PosAct': 'PosAct', 'PosErr': 'PosErr',
+    'ErrId': 'ErrId', 'Enabled': 'EnaAct', 'EnableCmd': 'EnaCmd-RB',
+    'Stat': 'Stat', 'Auto': 'AutoExecuteOnTargetPos-RB', 'TrajType': 'TrajType',
+    'VELO': 'TgtVelCmd', 'ACC': 'AccCmd', 'DEC': 'DecCmd',
+    'Command': 'MtnCmd', 'CmdData': 'MtnCmdData', 'Target': 'TgtPosCmd',
+    'Execute': 'ExeCmd', 'Stop': 'StpCmd', 'EnableWrite': 'EnaCmd',
+}
+
+
+def numeric_readback(value, severity=None):
+    try:
+        value = float(value)
+        return value if math.isfinite(value) and severity != 3 else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
 
 class NativeMotionMixin:
     def _bit(self,bit):
@@ -67,3 +84,44 @@ class NativeMotionMixin:
             except Exception as ex:
                 errors.append(str(ex))
         return errors
+
+
+class NativeAxisConnection(NativeMotionMixin):
+    """Direct, non-monitored native PV access independent of the GUI."""
+    def __init__(self, client, base, timeout=0.7):
+        ep = getattr(client, '_epics', None)
+        if ep is None:
+            raise RuntimeError('Native motion requires pyepics')
+        self.base = str(base).strip()
+        if not self.base:
+            raise ValueError('Native axis PV base is required')
+        self.timeout = float(timeout)
+        if not math.isfinite(self.timeout) or self.timeout <= 0:
+            raise ValueError('Invalid connection timeout')
+        self.pvs = {}
+        try:
+            for key, suffix in NATIVE_PV_SUFFIXES.items():
+                if key != 'PosErr':
+                    self.pvs[key] = ep.PV(self.base + '-' + suffix, auto_monitor=False)
+            for pv in self.pvs.values():
+                pv.wait_for_connection(timeout=self.timeout)
+        except Exception:
+            self.close()
+            raise
+
+    def _value(self, key):
+        pv = self.pvs.get(key)
+        if pv is None or not pv.connected:
+            return None
+        try:
+            return numeric_readback(pv.get(use_monitor=False, timeout=self.timeout), pv.severity)
+        except Exception:
+            return None
+
+    def close(self):
+        for pv in self.pvs.values():
+            try:
+                pv.disconnect()
+            except Exception:
+                pass
+        self.pvs.clear()
