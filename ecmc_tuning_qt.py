@@ -183,10 +183,6 @@ class TuningWindow(QtWidgets.QDialog):
             self.inputs['velo'].setText('1')
             self.inputs['acc'].setText('5')
             self.inputs['dec'].setText('5')
-            self.demo_mode=QtWidgets.QCheckBox('Auto execute (demo)')
-            self.demo_mode.setChecked(True)
-            self.demo_mode.toggled.connect(lambda checked: setattr(self,'sim_auto',int(checked)))
-            controls.addWidget(self.demo_mode,3,0,1,3)
         else:
             self._connect()
         self.timer.start()
