@@ -10,6 +10,9 @@ from functools import lru_cache
 from pathlib import Path
 
 from qt_compat import QtCore, QtGui, QtWidgets
+# Backward-compatible exports for existing application imports.
+from ecmc_formatting import compact_float_text
+from ecmc_widgets import CompactDoubleSpinBox, SpinBoxWithButtons, reset_combo
 from ecmc_command_client import CommandClient, command_transaction
 # Re-export for existing applications and third-party imports.
 from ecmc_epics import EpicsClient, _join_prefix_pv, _proc_pv_for_readback
@@ -102,36 +105,6 @@ def normalize_float_literals(cmd):
     return FLOAT_LITERAL_RE.sub(lambda m: _trim_float_literal_zeros(m.group(1)), s)
 
 
-def compact_float_text(value, sig_digits=15):
-    if isinstance(value, bool):
-        return str(value)
-    if isinstance(value, int):
-        return str(value)
-
-    if isinstance(value, float):
-        v = float(value)
-    else:
-        s = str(value or '').strip()
-        if not s:
-            return s
-        if FLOAT_DISPLAY_COMMA_RE.match(s) and '.' not in s:
-            s = s.replace(',', '.')
-        if not FLOAT_DISPLAY_RE.match(s):
-            return str(value)
-        # Preserve plain integer strings exactly as entered/read.
-        if '.' not in s and 'e' not in s.lower():
-            return s
-        try:
-            v = float(s)
-        except Exception:
-            return str(value)
-
-    out = f'{v:.{int(sig_digits)}g}'
-    if out in {'-0', '+0'}:
-        return '0'
-    return out
-
-
 def compact_query_message_value(msg):
     s = str(msg or '')
     if not s.startswith('QRY <- ') or ': ' not in s:
@@ -211,94 +184,6 @@ def summarize_error_text(text, error_name_by_code=None):
         return f'Error:{code_txt} ({name})'
     return f'Error:{code_txt}'
 
-
-class CompactDoubleSpinBox(QtWidgets.QDoubleSpinBox):
-    def textFromValue(self, value):
-        return compact_float_text(value)
-
-
-class SpinBoxWithButtons(QtWidgets.QWidget):
-    def __init__(self, float_mode=False):
-        super().__init__()
-        self.float_mode = bool(float_mode)
-        self._build_ui()
-
-    def _build_ui(self):
-        layout = QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        if self.float_mode:
-            self.spin = CompactDoubleSpinBox()
-            self.spin.setDecimals(4)
-            self.spin.setSingleStep(0.1)
-        else:
-            self.spin = QtWidgets.QSpinBox()
-            self.spin.setSingleStep(1)
-
-        self.spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
-        self.spin.setFixedSize(100, 24)
-        self.spin.setKeyboardTracking(False)
-        self.spin.setFocusPolicy(QtCore.Qt.StrongFocus)
-
-        btn_col = QtWidgets.QWidget()
-        btn_col_l = QtWidgets.QVBoxLayout(btn_col)
-        btn_col_l.setContentsMargins(2, 0, 0, 0)
-        btn_col_l.setSpacing(0)
-        self.up_btn = QtWidgets.QPushButton('^')
-        self.down_btn = QtWidgets.QPushButton('v')
-        self.up_btn.setFixedSize(20, 12)
-        self.down_btn.setFixedSize(20, 12)
-        self.up_btn.setFocusPolicy(QtCore.Qt.NoFocus)
-        self.down_btn.setFocusPolicy(QtCore.Qt.NoFocus)
-        self.up_btn.setCursor(QtCore.Qt.ArrowCursor)
-        self.down_btn.setCursor(QtCore.Qt.ArrowCursor)
-        arrow_btn_style = (
-            'QPushButton {'
-            ' background: #6a6a6a;'
-            ' color: #ffffff;'
-            ' border: 1px solid #4c4c4c;'
-            ' border-radius: 2px;'
-            ' padding: 0px;'
-            ' font-size: 10px;'
-            ' font-weight: 700;'
-            '}'
-            'QPushButton:pressed { background: #4f4f4f; }'
-        )
-        self.up_btn.setStyleSheet(arrow_btn_style)
-        self.down_btn.setStyleSheet(arrow_btn_style)
-        self.up_btn.clicked.connect(self.spin.stepUp)
-        self.down_btn.clicked.connect(self.spin.stepDown)
-        btn_col_l.addWidget(self.up_btn)
-        btn_col_l.addWidget(self.down_btn)
-
-        layout.addWidget(self.spin)
-        layout.addWidget(btn_col)
-        self.setFixedSize(120, 24)
-
-    def setRange(self, low, high):
-        self.spin.setRange(low, high)
-
-    def setSingleStep(self, step):
-        self.spin.setSingleStep(step)
-
-    def setDecimals(self, dec):
-        if isinstance(self.spin, QtWidgets.QDoubleSpinBox):
-            self.spin.setDecimals(dec)
-
-    def setHexMode(self):
-        if isinstance(self.spin, QtWidgets.QSpinBox):
-            self.spin.setDisplayIntegerBase(16)
-            self.spin.setPrefix('0x')
-
-    def value(self):
-        return self.spin.value()
-
-    def setValue(self, value):
-        self.spin.setValue(value)
-
-    def on_value_changed(self, cb):
-        self.spin.valueChanged.connect(cb)
 
 
 class ParamInputWidget(QtWidgets.QWidget):
@@ -1073,9 +958,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._log(f'Failed to start caQtDM main panel: {ex}')
 
     def _reset_open_app_combo(self):
-        self.open_app_combo.blockSignals(True)
-        self.open_app_combo.setCurrentIndex(0)
-        self.open_app_combo.blockSignals(False)
+        reset_combo(self.open_app_combo)
 
     def _on_open_app_selected(self, index):
         action = str(self.open_app_combo.itemData(index) or '')
