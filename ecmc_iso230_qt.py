@@ -6,6 +6,7 @@ import json
 import math
 import os
 from ecmc_native_motion import NativeAxisConnection
+from ecmc_command_client import CommandClient
 from ecmc_motor_motion import set_move_params, request_stop
 from ecmc_iso230_math import compute_metrics, linear_regression
 from ecmc_iso230_analysis import compensation_rows, compare_metrics, session_metrics, settling_time
@@ -2589,10 +2590,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self._init_motion_settings_from_pv()
 
     def _native_query(self, settings, command):
-        prefix = settings["prefix"]
-        self.client.put(_join_prefix_pv(prefix, "MCU-Cmd.AOUT"), command, wait=True)
-        self.client.put(_join_prefix_pv(prefix, "MCU-Cmd.PROC"), 1, wait=True)
-        return str(self.client.get(_join_prefix_pv(prefix, "MCU-Cmd.AINP"), as_string=True)).strip()
+        return CommandClient.for_ioc(self.client, settings["prefix"]).query(command)
 
     def _prepare_native_motion(self, settings):
         axis_id = int(settings["axis_id"])
