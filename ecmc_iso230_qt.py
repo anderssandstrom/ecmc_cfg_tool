@@ -24,6 +24,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from qt_compat import QT_BINDING, QSvgWidget, QtCore, QtGui, QtWidgets
+from ecmc_settings import UiSettings
+from ecmc_widgets import reset_combo
 
 if QT_BINDING == "PyQt5":
     from PyQt5.QtSvg import QSvgRenderer
@@ -37,7 +39,8 @@ from ecmc_mtn_qt import (
     _to_float,
     _truthy_pv,
 )
-from ecmc_stream_qt import EpicsClient, _join_prefix_pv, compact_float_text
+from ecmc_epics import EpicsClient, _join_prefix_pv
+from ecmc_formatting import compact_float_text
 
 _FORMAT_DECIMALS = 5
 _MAX_REFERENCE_PVS = 5
@@ -1488,9 +1491,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.live_graph_placeholder.show()
 
     def _reset_open_app_combo(self):
-        self.open_app_combo.blockSignals(True)
-        self.open_app_combo.setCurrentIndex(0)
-        self.open_app_combo.blockSignals(False)
+        reset_combo(self.open_app_combo)
 
     def _on_open_app_selected(self, index):
         action = str(self.open_app_combo.itemData(index) or "")
@@ -4838,6 +4839,7 @@ def main():
         axis_id_was_provided=bool((args.axis_id or "").strip()),
         standalone=bool(args.standalone),
     )
+    UiSettings("iso230").attach_window(w)
     w.show()
     sys.exit(app.exec_())
 
