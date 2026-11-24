@@ -6,6 +6,7 @@ import os
 import json
 from ecmc_caqtdm import launch_caqtdm, panel_directories
 from ecmc_app_launcher import script_command
+from ecmc_diagnostic_presets import axis_diagnostic_pvs
 import subprocess
 import sys
 import time
@@ -589,6 +590,9 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._menu_action(menu, "Open Axis Config App", lambda: self._open_axis_config(data))
             self._menu_action(menu, "Open Controller App", lambda: self._open_controller(data))
             self._menu_action(menu, "Open ISO230 App", lambda: self._open_iso230(data))
+            self._menu_action(menu, "Open Axis Diagnostics in DAQ",
+                              lambda: self._open_daq(axis_diagnostic_pvs(data.get("motor"), "controller"),
+                                                     title=f"DAQ Axis {data.get('id', '')}"))
             menu.addSeparator()
             self._menu_action(menu, "Open Axis Panel", lambda: self._open_axis_panel(data, "ecmcAxis.ui"))
             self._menu_action(menu, "Open Axis Expert Panel", lambda: self._open_axis_panel(data, "ecmcAxisExpert.ui"))
