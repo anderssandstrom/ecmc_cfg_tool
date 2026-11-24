@@ -5,6 +5,7 @@ import html
 import json
 import math
 import os
+from ecmc_native_motion import NativeMotionMixin
 from ecmc_iso230_math import compute_metrics, linear_regression
 from ecmc_iso230_analysis import compensation_rows, compare_metrics, session_metrics, settling_time
 import random
@@ -780,6 +781,32 @@ class _TargetSweepSchematic(QtWidgets.QWidget):
 
 
 
+class _IsoNativeAxis(NativeMotionMixin):
+    """Dedicated native PV connection, independent of motor-record coordinates."""
+    def __init__(self, client, base):
+        ep = getattr(client, '_epics', None)
+        if ep is None:
+            raise RuntimeError('Native motion requires pyepics')
+        self.pvs = {key: ep.PV(base + '-' + suffix, auto_monitor=False) for key, suffix in {
+            'Stat':'Stat', 'Auto':'AutoExecuteOnTargetPos-RB', 'ErrId':'ErrId',
+            'Enabled':'EnaAct', 'EnableCmd':'EnaCmd-RB', 'PosAct':'PosAct', 'PosSet':'PosSet',
+            'TrajType':'TrajType', 'Target':'TgtPosCmd', 'Execute':'ExeCmd', 'Stop':'StpCmd',
+            'Command':'MtnCmd', 'CmdData':'MtnCmdData', 'VELO':'TgtVelCmd',
+            'ACC':'AccCmd', 'DEC':'DecCmd', 'EnableWrite':'EnaCmd'}.items()}
+        for pv in self.pvs.values():
+            pv.wait_for_connection(timeout=0.7)
+
+    def _value(self, key):
+        pv = self.pvs.get(key)
+        if pv is None or not pv.connected:
+            return None
+        try:
+            value = float(pv.get(use_monitor=False, timeout=0.7))
+            return value if math.isfinite(value) and pv.severity != 3 else None
+        except (TypeError, ValueError):
+            return None
+
+
 class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
     SAMPLE_INTERVAL_MS = 150
 
@@ -1050,6 +1077,12 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self.estimated_duration_value = QtWidgets.QLabel("-")
         self.estimated_duration_value.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
 
+        self._native_axis = None
+        self.motion_interface = QtWidgets.QComboBox()
+        self.motion_interface.addItems(["Motor Record", "Native ECMC"])
+        self.native_jerk_edit = QtWidgets.QLineEdit("")
+        self.native_jerk_edit.setPlaceholderText("Keep IOC jerk")
+        self.native_jerk_edit.setEnabled(False)
         self.motion_velo_edit = QtWidgets.QLineEdit("1")
         self.motion_acc_edit = QtWidgets.QLineEdit("1")
         self.motion_vmax_edit = QtWidgets.QLineEdit("")
@@ -1133,14 +1166,21 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         motion_row.setSpacing(6)
         motion_row.addWidget(QtWidgets.QLabel("VELO"))
         motion_row.addWidget(self.motion_velo_edit)
-        motion_row.addWidget(QtWidgets.QLabel("ACCL"))
+        self.motion_acc_label = QtWidgets.QLabel("ACCL")
+        motion_row.addWidget(self.motion_acc_label)
         motion_row.addWidget(self.motion_acc_edit)
         motion_row.addWidget(QtWidgets.QLabel("VMAX"))
         motion_row.addWidget(self.motion_vmax_edit)
-        motion_row.addWidget(QtWidgets.QLabel("ACCS"))
+        self.motion_dec_label = QtWidgets.QLabel("ACCS")
+        motion_row.addWidget(self.motion_dec_label)
         motion_row.addWidget(self.motion_accs_edit)
         motion_row.addStretch(1)
         axis_grid.addLayout(motion_row, 4, 0, 1, 7)
+        axis_grid.addWidget(QtWidgets.QLabel("Motion interface"), 5, 0)
+        axis_grid.addWidget(self.motion_interface, 5, 1, 1, 2)
+        axis_grid.addWidget(QtWidgets.QLabel("Ruckig jerk [EGU/s³]"), 5, 3)
+        axis_grid.addWidget(self.native_jerk_edit, 5, 4, 1, 2)
+        self.motion_interface.currentIndexChanged.connect(self._motion_interface_changed)
         axis_grid.setColumnStretch(1, 2)
         axis_grid.setColumnStretch(4, 3)
         axis_grid.setColumnStretch(6, 1)
@@ -2129,6 +2169,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         velo, accl, accs, vmax = self._shared_motion_params()
         settings.update(
             {
+                "motion_interface": "native" if self.motion_interface.currentIndex() == 1 else "motor_record",
+                "jerk": _to_float(self.native_jerk_edit.text(), "Jerk") if self.motion_interface.currentIndex() == 1 and self.native_jerk_edit.text().strip() else None,
                 "cycles": int(self.cycles_spin.value()),
                 "settle_s": float(self.settle_spin.value()),
                 "record_settling": self.settle_capture.isChecked() if hasattr(self,"settle_capture") else False,
@@ -2540,6 +2582,87 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             f"gain={_fmt(corrected_gain)}, offset={_fmt(corrected_offset)}"
         )
 
+    def _motion_interface_changed(self):
+        native = self.motion_interface.currentIndex() == 1
+        self.motion_acc_label.setText("ACC [EGU/s²]" if native else "ACCL")
+        self.motion_dec_label.setText("DEC [EGU/s²]" if native else "ACCS")
+        self.motion_vmax_edit.setEnabled(not native)
+        self.native_jerk_edit.setEnabled(False)
+        self.native_jerk_edit.clear()
+        if self._standalone:
+            return
+        if native:
+            for edit in (self.motion_velo_edit, self.motion_acc_edit, self.motion_accs_edit):
+                edit.clear()
+            try:
+                base = self._motor_base()
+                for edit, suffix in ((self.motion_velo_edit, "TgtVelCmd"),
+                                     (self.motion_acc_edit, "AccCmd"),
+                                     (self.motion_accs_edit, "DecCmd")):
+                    edit.setText(str(self.client.get(base + "-" + suffix, as_string=True)))
+                self.native_jerk_edit.setEnabled(float(self.client.get(base + "-TrajType", as_string=True)) == 1)
+            except Exception as ex:
+                self._log(f"Native motion settings unavailable: {ex}")
+        else:
+            self._init_motion_settings_from_pv()
+
+    def _native_query(self, settings, command):
+        prefix = settings["prefix"]
+        self.client.put(_join_prefix_pv(prefix, "MCU-Cmd.AOUT"), command, wait=True)
+        self.client.put(_join_prefix_pv(prefix, "MCU-Cmd.PROC"), 1, wait=True)
+        return str(self.client.get(_join_prefix_pv(prefix, "MCU-Cmd.AINP"), as_string=True)).strip()
+
+    def _prepare_native_motion(self, settings):
+        axis_id = int(settings["axis_id"])
+        base = settings["motor"]
+        # Resolve the selected axis again; never use an arbitrary manually edited motor base.
+        prefix = settings["prefix"]
+        axis_pfx = self._read_cfg_pv(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-Pfx"))
+        name = self._read_cfg_pv(_join_prefix_pv(prefix, f"MCU-Cfg-AX{axis_id}-Nam"))
+        if self._combine_motor_record(axis_pfx, name) != base:
+            raise RuntimeError("Native axis identity does not match resolved motor base")
+        axis = _IsoNativeAxis(self.client, base)
+        axis._ready()
+        if axis._bit(3) != 0 or axis._bit(5) != 0:
+            raise RuntimeError("Native axis must be stationary")
+        def read(name):
+            value = float(self._native_query(settings, f"{name}({axis_id})"))
+            if not math.isfinite(value):
+                raise RuntimeError(f"Invalid native configuration: {name}")
+            return value
+        lo, hi = read("GetAxisSoftLimitPosBwd"), read("GetAxisSoftLimitPosFwd")
+        if read("GetAxisEnableSoftLimitBwd") != 1 or read("GetAxisEnableSoftLimitFwd") != 1 or not lo < hi:
+            raise RuntimeError("Both native soft limits must be enabled and valid")
+        if any(not lo <= step["target"] <= hi for step in self._build_test_plan(settings)):
+            raise RuntimeError("Test or approach target outside native soft limits")
+        velo, acc, dec = settings["velo"], settings["accl"], settings["accs"]
+        if any(v is None or not math.isfinite(v) or v <= 0 for v in (velo, acc, dec)):
+            raise RuntimeError("Native velocity, acceleration and deceleration must be positive")
+        if read("GetAxisMonEnableMaxVel") == 1 and velo > read("GetAxisMonMaxVel"):
+            raise RuntimeError("Velocity exceeds native monitoring limit")
+        jerk = settings.get("jerk")
+        if jerk is not None and (axis._value("TrajType") != 1 or not math.isfinite(jerk) or jerk <= 0):
+            raise RuntimeError("Positive jerk requires Ruckig trajectory")
+        mode = axis._mode()
+        answer = QtWidgets.QMessageBox.question(self, "Confirm native ISO230 motion",
+            f"{base}: native engineering coordinates, including approach moves. Motion parameters remain changed. Continue?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No, QtWidgets.QMessageBox.No)
+        if answer != QtWidgets.QMessageBox.Yes:
+            raise RuntimeError("Native test cancelled")
+        axis._ready()
+        if axis._mode() != mode or axis._bit(3) != 0 or axis._bit(5) != 0:
+            raise RuntimeError("Native axis state changed")
+        for field, value in (("TgtVelCmd", velo), ("AccCmd", acc), ("DecCmd", dec)):
+            axis._put(field, value)
+        if jerk is not None:
+            self._native_query(settings, f"Cfg.SetAxisJerk({axis_id},{jerk:.17g})")
+            actual = read("GetAxisJerk")
+            if abs(actual-jerk) > max(1e-12, abs(jerk)*1e-8):
+                raise RuntimeError("Ruckig jerk readback mismatch")
+        self._native_axis = axis
+        self._native_mode = mode
+        self._native_bounds = (lo, hi)
+
     def _set_move_params(self, velo, accl, accs=None, vmax=None):
         if vmax is not None:
             try:
@@ -2882,6 +3005,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._test_active = bool(running)
         self.start_btn.setEnabled(not running)
         self.abort_btn.setEnabled(running)
+        for widget in (self.motion_interface, self.prefix_edit, self.axis_edit, self.axis_apply_btn, self.resolve_btn, self.motor_record_edit, self.axis_pfx_cfg_pv_edit, self.motor_name_cfg_pv_edit):
+            widget.setEnabled(not running)
         self._update_progress_display()
 
     def start_test(self):
@@ -2893,7 +3018,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self._reset_optimal_fit_state(clear_checkbox=True)
             settings = self._test_settings()
             self.preview_targets()
-            self._set_move_params(settings["velo"], settings["accl"], accs=settings.get("accs"), vmax=settings.get("vmax"))
+            self._native_axis = None
+            if settings["motion_interface"] == "native":
+                self._prepare_native_motion(settings)
+            else:
+                self._set_move_params(settings["velo"], settings["accl"], accs=settings.get("accs"), vmax=settings.get("vmax"))
             self._measurements = []
             self._latest_metrics = {}
             self._latest_report_markdown = ""
@@ -2934,7 +3063,11 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._next_sample_at = 0.0
         self._update_progress_display()
         try:
-            self._put("VAL", self._current_step["target"])
+            if self._native_axis is not None:
+                self._native_start_pos = self._native_axis._value("PosAct")
+                self._native_axis.native_move_absolute(self._current_step["target"], self._native_mode, self._native_bounds)
+            else:
+                self._put("VAL", self._current_step["target"])
         except Exception as ex:
             self._fail_test(f"Move failed for target {_fmt(self._current_step['target'])}: {ex}")
             return
@@ -2957,6 +3090,26 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             self._test_timer.stop()
             return
         try:
+            if self._native_axis is not None:
+                axis = self._native_axis
+                axis._ready()
+                if axis._mode() != self._native_mode:
+                    raise RuntimeError("Native execute mode changed")
+                stationary = axis._bit(3) == 0 and axis._bit(5) == 0
+                pos = axis._value("PosSet")
+                target = self._current_step["target"]
+                reached = pos is not None and abs(pos-target) <= max(1e-8, abs(target)*1e-10)
+                if self._current_phase == "wait_motion_start":
+                    elapsed = time.monotonic() - self._move_issued_at
+                    cfg = self._test_settings_cache
+                    timeout = max(10, 4*abs(target-self._native_start_pos)/cfg["velo"] + 4*cfg["velo"]/min(cfg["accl"], cfg["accs"]))
+                    if stationary and reached and elapsed >= 0.35:
+                        self._enter_settle_phase()
+                    elif elapsed > timeout:
+                        raise RuntimeError("Native motion timed out or target not accepted")
+                    return
+                if not stationary or not reached:
+                    raise RuntimeError("Unexpected native motion during measurement")
             if self._current_phase == "wait_motion_start":
                 dmov = self.client.get(self._pv("DMOV"), as_string=True)
                 if not _truthy_pv(dmov):
@@ -3033,8 +3186,12 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 reference_gain,
                 reference_offset,
             )
-        rbv_raw = self.client.get(self._pv("RBV"), as_string=True)
-        val_raw = self.client.get(self._pv("VAL"), as_string=True)
+        if self._native_axis is not None:
+            rbv_raw = self._native_axis._value("PosAct")
+            val_raw = self._native_axis._value("PosSet")
+        else:
+            rbv_raw = self.client.get(self._pv("RBV"), as_string=True)
+            val_raw = self.client.get(self._pv("VAL"), as_string=True)
         return {
             "cycle": step["cycle"],
             "direction": step["direction"],
@@ -3413,6 +3570,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
 
     def _fail_test(self, message):
         self._test_timer.stop()
+        if self._native_axis is not None:
+            self.stop_motion()
         self._set_test_running_state(False)
         self._current_phase = "error"
         self.step_label.setText(message)
@@ -3442,6 +3601,13 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._update_progress_display()
 
     def stop_motion(self):
+        if self._native_axis is not None:
+            try:
+                self._native_axis._put("StpCmd", 1)
+                self._log("Native STOP requested; verify stationary readback")
+            except Exception as ex:
+                self._log(f"Native STOP failed: {ex}; verify axis locally")
+            return
         try:
             try:
                 self._put("JOGF", 0, quiet=True)
@@ -3502,6 +3668,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             f"- IOC prefix: `{settings.get('prefix', '')}`",
             f"- Axis ID: `{settings.get('axis_id', '')}`",
             f"- Motor record: `{settings.get('motor', '')}`",
+            f"- Motion interface: `{settings.get('motion_interface', 'motor_record')}`",
+            f"- Native jerk: `{_fmt(settings.get('jerk'))}`",
             f"- Configured reference PVs: `{_reference_pv_summary_text(settings)}`",
             f"- Reference used for report calculations: `{settings.get('reference_pv', '')}`",
             f"- Reference gain: `{_fmt(settings.get('reference_gain', 1.0))}`",
