@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from ecmc_demo import DemoClient
 from qt_compat import QtCore, QtGui, QtWidgets
 
 from ecmc_stream_qt import (
@@ -462,6 +463,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         title_prefix="",
         error_db_path="",
         axis_id_was_provided=True,
+        demo=False,
     ):
         super().__init__()
         self._base_title = f"ecmc Axis Configurator [{title_prefix}]" if title_prefix else "ecmc Axis Configurator"
@@ -471,7 +473,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             _f.setPointSize(max(8, _f.pointSize() - 1))
             self.setFont(_f)
         self.resize(620, 340)
-        self.client = EpicsClient(timeout=timeout)
+        self.demo = bool(demo)
+        if self.demo:
+            self._base_title += ' [OFFLINE DEMO]'
+            self.setWindowTitle(self._base_title)
+        self.client = DemoClient(timeout=timeout) if self.demo else EpicsClient(timeout=timeout)
         self.catalog = self._load_catalog(catalog_path)
         self.catalog_desc_by_named = self._build_catalog_description_index(self.catalog)
         self.command_pairs = build_axis_command_pairs(self.catalog)
@@ -584,6 +590,9 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_MAIN, "caqtdm_main")
         self.open_app_combo.addItem(APP_LAUNCH_CAQTDM_AXIS, "caqtdm_axis")
         self.open_app_combo.activated.connect(self._on_open_app_selected)
+        if self.demo:
+            self.open_app_combo.setEnabled(False)
+            self.open_app_combo.setToolTip('External IOC applications are disabled in offline demo mode.')
         self.axis_pick_combo = QtWidgets.QComboBox()
         self.axis_pick_combo.setMinimumWidth(170)
         self.axis_pick_combo.setMaximumWidth(300)
@@ -1938,6 +1947,11 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         dlg.exec_()
 
     def _startup_axis_presence_check(self):
+        if self.demo:
+            self._did_startup_axis_presence_check = True
+            self._startup_axis_probe_ok = True
+            self._initial_read_all_and_copy()
+            return
         if self._did_startup_axis_presence_check:
             return
         self._did_startup_axis_presence_check = True
@@ -2719,7 +2733,13 @@ def main():
     ap.add_argument("--axis-id", default="")
     ap.add_argument("--timeout", type=float, default=2.0)
     ap.add_argument("--error-db", default="")
+    ap.add_argument('--demo', action='store_true', help='Offline demo with simulated configuration values')
     args = ap.parse_args()
+    if args.demo:
+        args.prefix = 'DEMO'
+        args.cmd_pv = ''
+        args.qry_pv = ''
+        args.axis_id = '1'
 
     default_cmd_pv = args.cmd_pv.strip() if args.cmd_pv else _join_prefix_pv(args.prefix, "MCU-Cmd.AOUT")
     default_qry_pv = args.qry_pv.strip() if args.qry_pv else _join_prefix_pv(args.prefix, "MCU-Cmd.AINP")
@@ -2736,6 +2756,7 @@ def main():
         title_prefix=args.prefix,
         error_db_path=args.error_db,
         axis_id_was_provided=bool((args.axis_id or "").strip()),
+        demo=args.demo,
     )
     w.show()
     sys.exit(app.exec_())

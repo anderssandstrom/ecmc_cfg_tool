@@ -4,6 +4,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/qt_runtime.sh"
 
+DEMO_ARGS=()
+if [[ "${1:-}" == "--demo" ]]; then
+  DEMO_ARGS=(--demo)
+  shift
+fi
+
 PREFIX="${1:-${PREFIX:-IOC:ECMC}}"
 AXIS_ID="${2-}"
 SKETCH_IMAGE_ARG="${3:-}"
@@ -46,4 +52,4 @@ exec "${PYTHON_BIN}" ecmc_cntrl_qt.py \
   --prefix "${PREFIX}" \
   --axis-id "${AXIS_ID}" \
   --sketch-image "${SKETCH_IMAGE}" \
-  --timeout "${TIMEOUT}"
+  --timeout "${TIMEOUT}" "${DEMO_ARGS[@]}"
