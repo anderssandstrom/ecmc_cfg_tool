@@ -3,6 +3,7 @@
 Preserves the legacy epicsPV, pyepics and CLI backend selection.
 """
 import re
+import math
 import shutil
 import subprocess
 
@@ -10,7 +11,9 @@ FLOAT_DISPLAY_COMMA_RE = re.compile(r'^[+-]?(?:(?:\d+,\d*)|(?:,\d+)|(?:\d+(?:,\d
 
 class EpicsClient:
     def __init__(self, timeout=2.0):
-        self.timeout = timeout
+        self.timeout = float(timeout)
+        if not math.isfinite(self.timeout) or self.timeout <= 0:
+            raise ValueError('EPICS timeout must be finite and positive')
         self.backend = None
         self._epics = None
         self._epicspv_mod = None
@@ -127,7 +130,15 @@ class EpicsClient:
             s = s.replace(',', '.')
         return s
 
+    @staticmethod
+    def _validate_pv(pv):
+        name = str(pv or "").strip()
+        if not name or name.startswith("-") or any(ch.isspace() or ord(ch) < 32 for ch in name):
+            raise ValueError("Invalid EPICS PV name")
+        return name
+
     def put(self, pv, value, wait=True):
+        pv = self._validate_pv(pv)
         if self.backend == 'epicsPV':
             try:
                 obj = self._epicspv(str(pv))
@@ -144,7 +155,7 @@ class EpicsClient:
         if self.backend == 'pyepics':
             try:
                 ok = self._epics.caput(pv, value, wait=wait, timeout=self.timeout)
-                if ok is None:
+                if ok is None or ok <= 0:
                     raise RuntimeError(f'caput failed for {pv}')
                 return
             except Exception as ex:
@@ -164,11 +175,13 @@ class EpicsClient:
             universal_newlines=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            timeout=self.timeout + 2.0,
         )
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f'caput failed for {pv}')
 
     def get(self, pv, as_string=True):
+        pv = self._validate_pv(pv)
         if self.backend == 'epicsPV':
             try:
                 obj = self._epicspv(str(pv))
@@ -200,6 +213,7 @@ class EpicsClient:
             universal_newlines=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            timeout=self.timeout + 2.0,
         )
         if proc.returncode != 0:
             # Some caget variants may not support all formatting flags.
@@ -209,6 +223,7 @@ class EpicsClient:
                 universal_newlines=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                timeout=self.timeout + 2.0,
             )
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f'caget failed for {pv}')
