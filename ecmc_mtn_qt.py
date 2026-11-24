@@ -2,6 +2,7 @@
 import argparse
 import re
 from ecmc_caqtdm import launch_caqtdm
+from ecmc_motor_motion import set_move_params, set_jog_params, request_stop, request_kill
 import subprocess
 import sys
 import time
@@ -1502,36 +1503,10 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
         return a or m
 
     def _set_move_params(self, velo, accl, accs=None, vmax=None):
-        if vmax is not None:
-            try:
-                self._put("VMAX", vmax)
-            except Exception as ex:
-                self._log(f"VMAX unavailable ({ex})")
-        if accs is not None:
-            try:
-                self._put("ACCS", accs)
-            except Exception as ex:
-                self._log(f"ACCS unavailable ({ex})")
-        self._put("VELO", velo)
-        self._put("ACCL", accl)
+        set_move_params(self._put, self._log, velo, accl, accs, vmax)
 
     def _set_jog_params(self, velo, accl, accs=None, vmax=None):
-        if vmax is not None:
-            try:
-                self._put("VMAX", vmax)
-            except Exception as ex:
-                self._log(f"VMAX unavailable ({ex})")
-        if accs is not None:
-            try:
-                self._put("ACCS", accs)
-            except Exception as ex:
-                self._log(f"ACCS unavailable ({ex})")
-        self._put("ACCL", accl)
-        try:
-            self._put("JVEL", velo)
-        except Exception as ex:
-            self._log(f"JVEL unavailable, using VELO ({ex})")
-            self._put("VELO", velo)
+        set_jog_params(self._put, self._log, velo, accl, accs, vmax)
 
     def _shared_motion_params(self):
         velo = _to_float(self.motion_velo_edit.text(), "VELO/JVEL")
@@ -2154,29 +2129,7 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
         self._clear_active_motion_mode()
         self._close_jog_stop_dialog()
         try:
-            try:
-                self._put("JOGF", 0, quiet=True)
-            except Exception:
-                pass
-            try:
-                self._put("JOGR", 0, quiet=True)
-            except Exception:
-                pass
-            stop_ok = False
-            try:
-                self._put("STOP", 1)
-                stop_ok = True
-            except Exception as ex:
-                self._log(f"STOP field failed ({ex}), trying SPMG=0")
-            if not stop_ok:
-                try:
-                    # 0=Stop in standard motor record SPMG menu
-                    self._put("SPMG", 0)
-                    stop_ok = True
-                except Exception as ex:
-                    self._log(f"SPMG stop failed ({ex})")
-            if not stop_ok:
-                raise RuntimeError("No supported stop field worked (tried STOP and SPMG)")
+            request_stop(self._put, self._log)
             self._log("Stop requested")
             self._refresh_status_if_enabled()
         except Exception as ex:
@@ -2191,19 +2144,7 @@ class MotionWindow(_MotionPvMixin, QtWidgets.QMainWindow):
         self._clear_active_motion_mode()
         self._close_jog_stop_dialog()
         try:
-            try:
-                self._put("JOGF", 0, quiet=True)
-            except Exception:
-                pass
-            try:
-                self._put("JOGR", 0, quiet=True)
-            except Exception:
-                pass
-            try:
-                self._put("STOP", 1, quiet=True)
-            except Exception:
-                pass
-            self._put("CNEN", 0)
+            request_kill(self._put)
             self._log("KILL requested (CNEN=0)")
             self._refresh_status_if_enabled()
         except Exception as ex:
