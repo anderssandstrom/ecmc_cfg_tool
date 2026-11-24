@@ -5,7 +5,7 @@ import html
 import json
 import math
 import os
-from ecmc_native_motion import NativeMotionMixin
+from ecmc_native_motion import NativeAxisConnection
 from ecmc_iso230_math import compute_metrics, linear_regression
 from ecmc_iso230_analysis import compensation_rows, compare_metrics, session_metrics, settling_time
 import random
@@ -781,30 +781,8 @@ class _TargetSweepSchematic(QtWidgets.QWidget):
 
 
 
-class _IsoNativeAxis(NativeMotionMixin):
-    """Dedicated native PV connection, independent of motor-record coordinates."""
-    def __init__(self, client, base):
-        ep = getattr(client, '_epics', None)
-        if ep is None:
-            raise RuntimeError('Native motion requires pyepics')
-        self.pvs = {key: ep.PV(base + '-' + suffix, auto_monitor=False) for key, suffix in {
-            'Stat':'Stat', 'Auto':'AutoExecuteOnTargetPos-RB', 'ErrId':'ErrId',
-            'Enabled':'EnaAct', 'EnableCmd':'EnaCmd-RB', 'PosAct':'PosAct', 'PosSet':'PosSet',
-            'TrajType':'TrajType', 'Target':'TgtPosCmd', 'Execute':'ExeCmd', 'Stop':'StpCmd',
-            'Command':'MtnCmd', 'CmdData':'MtnCmdData', 'VELO':'TgtVelCmd',
-            'ACC':'AccCmd', 'DEC':'DecCmd', 'EnableWrite':'EnaCmd'}.items()}
-        for pv in self.pvs.values():
-            pv.wait_for_connection(timeout=0.7)
-
-    def _value(self, key):
-        pv = self.pvs.get(key)
-        if pv is None or not pv.connected:
-            return None
-        try:
-            value = float(pv.get(use_monitor=False, timeout=0.7))
-            return value if math.isfinite(value) and pv.severity != 3 else None
-        except (TypeError, ValueError):
-            return None
+# Compatibility alias for the former application-local native connection.
+_IsoNativeAxis = NativeAxisConnection
 
 
 class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
