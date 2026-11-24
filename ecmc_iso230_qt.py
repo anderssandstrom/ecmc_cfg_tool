@@ -5,6 +5,7 @@ import html
 import json
 import math
 from ecmc_iso230_math import compute_metrics, linear_regression
+from ecmc_iso230_analysis import compensation_rows, compare_metrics, session_metrics, settling_time
 import random
 import re
 import tempfile
@@ -808,6 +809,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._current_step = None
         self._current_phase = "idle"
         self._settle_deadline = 0.0
+        self._settle_started = 0.0
+        self._settle_trace = []
         self._sample_buffer = []
         self._next_sample_at = 0.0
         self._latest_metrics = {}
@@ -1189,6 +1192,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         plan_grid.addWidget(self.decimals_spin, 1, 7)
         plan_grid.addWidget(QtWidgets.QLabel("Estimated duration"), 2, 0)
         plan_grid.addWidget(self.estimated_duration_value, 2, 1, 1, 7)
+        self.settle_capture=QtWidgets.QCheckBox('Record settling trace')
+        self.settle_capture.setToolTip('Poll the selected reference during the configured settling interval. Does not change when measurements are taken.')
+        plan_grid.addWidget(self.settle_capture,3,0,1,4)
         plan_grid.setColumnStretch(8, 1)
 
         plan_box_layout.addLayout(plan_grid)
@@ -1209,6 +1215,15 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         tools_grid.addWidget(self.open_report_md_btn, 0, 2)
         tools_grid.addWidget(self.data_btn, 1, 0)
         tools_grid.addWidget(self.export_csv_btn, 1, 1)
+        analysis_btn=QtWidgets.QToolButton()
+        analysis_btn.setText('Analysis…')
+        analysis_menu=QtWidgets.QMenu(analysis_btn)
+        analysis_menu.addAction('Compare saved session',self._compare_session)
+        analysis_menu.addAction('Export compensation CSV',self._export_compensation)
+        analysis_menu.addAction('Settling traces',self._show_settling)
+        analysis_btn.setMenu(analysis_menu)
+        analysis_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        tools_grid.addWidget(analysis_btn,1,2)
         tools_grid.setColumnStretch(3, 1)
         tools_layout.addLayout(tools_grid)
         tools_note = QtWidgets.QLabel("Less frequently used actions.")
@@ -2110,6 +2125,7 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             {
                 "cycles": int(self.cycles_spin.value()),
                 "settle_s": float(self.settle_spin.value()),
+                "record_settling": self.settle_capture.isChecked() if hasattr(self,"settle_capture") else False,
                 "samples_per_point": int(self.samples_spin.value()),
                 "sample_interval_ms": self.SAMPLE_INTERVAL_MS,
                 "velo": velo,
@@ -2921,7 +2937,9 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
         self._log(f"Executing step {self._test_plan_index + 1}/{len(self._test_plan)}: {self._current_step['label']}")
 
     def _enter_settle_phase(self):
-        self._settle_deadline = time.monotonic() + float(self._test_settings_cache["settle_s"])
+        self._settle_started = time.monotonic()
+        self._settle_trace = []
+        self._settle_deadline = self._settle_started + float(self._test_settings_cache["settle_s"])
         self._current_phase = "settling"
         if self._current_step and self._current_step.get("measure"):
             self.step_label.setText(f"{self._current_step['label']} | settling")
@@ -2949,6 +2967,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                 return
 
             if self._current_phase == "settling":
+                if self._current_step.get("measure") and self._test_settings_cache.get("record_settling") and self._test_settings_cache.get("reference_pv"):
+                    self._record_settling_sample()
                 remaining = self._settle_deadline - time.monotonic()
                 if remaining > 0:
                     if self._current_step.get("measure"):
@@ -2967,6 +2987,12 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                     return
                 sample = self._capture_sample(self._current_step)
                 self._sample_buffer.append(sample)
+                if self._test_settings_cache.get("record_settling"):
+                    slot=self._test_settings_cache.get("reference_slot")
+                    value=sample.get("references",{}).get(slot)
+                    raw=sample.get("raw_references",{}).get(slot)
+                    if value is not None and math.isfinite(value):
+                        self._settle_trace.append([time.monotonic()-self._settle_started,float(value),raw])
                 need = int(self._test_settings_cache["samples_per_point"])
                 self.step_label.setText(
                     f"{self._current_step['label']} | sample {len(self._sample_buffer)}/{need}"
@@ -2977,6 +3003,14 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
                     self._advance_test_step()
         except Exception as ex:
             self._fail_test(f"Test execution failed: {ex}")
+
+    def _record_settling_sample(self):
+        settings=self._test_settings_cache
+        start=time.monotonic()
+        raw=_to_float(self.client.get(settings["reference_pv"],as_string=True),"Settling reference")
+        value=_apply_reference_transform(raw,settings.get("reference_gain"),settings.get("reference_offset"))
+        if math.isfinite(value):
+            self._settle_trace.append([start-self._settle_started,float(value),float(raw)])
 
     def _capture_sample(self, step):
         reference_values = {}
@@ -3041,6 +3075,8 @@ class Iso230Window(_MotionPvMixin, QtWidgets.QMainWindow):
             "command_mean": _mean(cmd_vals),
             "rbv_error": (_mean(rbv_vals) - target) if _mean(rbv_vals) is not None else None,
             "timestamp": samples[-1]["timestamp"],
+            "settling_trace": list(self._settle_trace) if self._test_settings_cache.get("record_settling") else [],
+            "settling_reference_pv": self._test_settings_cache.get("reference_pv",""),
         }
         self._project_row_reference(row, self._test_settings_cache, self._test_settings_cache.get("reference_slot"))
         self._measurements.append(row)
@@ -4001,6 +4037,120 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
                 table.setItem(r, c, _table_item(val, align_right=(c not in {1, 9})))
         return table
 
+    def _analysis_dataset(self):
+        if self._test_active:
+            raise RuntimeError('Finish or abort the measurement first')
+        if not self._measurements:
+            raise RuntimeError('Run or load a measurement first')
+        return dict(self._test_settings_cache),compute_metrics(self._measurements)
+
+    def _compare_session(self):
+        try:
+            settings,current=self._analysis_dataset()
+            path,_=QtWidgets.QFileDialog.getOpenFileName(self,'Select baseline session','','JSON (*.json)')
+            if not path:
+                return
+            payload=json.loads(Path(path).read_text(encoding='utf-8'))
+            baseline=session_metrics(payload)
+            rows=compare_metrics(baseline,current)
+            dlg=QtWidgets.QDialog(self)
+            dlg.setWindowTitle('ISO230 session comparison')
+            dlg.resize(760,460)
+            layout=QtWidgets.QVBoxLayout(dlg)
+            meta=payload.get('settings',{})
+            note=QtWidgets.QLabel(f"Baseline: {Path(path).name} | {meta.get('motor','')} | {meta.get('reference_pv','')}\\nCurrent: {settings.get('motor','')} | {settings.get('reference_pv','')}\\nCheck coordinate system, range, reference calibration and test conditions before comparing.")
+            note.setWordWrap(True)
+            layout.addWidget(note)
+            table=QtWidgets.QTableWidget(len(rows),4)
+            table.setHorizontalHeaderLabels(['Metric','Baseline','Current','Current − baseline'])
+            table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+            table.horizontalHeader().setSectionResizeMode(0,QtWidgets.QHeaderView.Stretch)
+            for i,row in enumerate(rows):
+                for j,v in enumerate(row):
+                    table.setItem(i,j,QtWidgets.QTableWidgetItem(v if isinstance(v,str) else _fmt(v)))
+            layout.addWidget(table)
+            buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+            buttons.rejected.connect(dlg.reject)
+            layout.addWidget(buttons)
+            dlg.exec_() if hasattr(dlg,'exec_') else dlg.exec()
+        except Exception as ex:
+            QtWidgets.QMessageBox.warning(self,'Session comparison',str(ex))
+
+    def _export_compensation(self):
+        try:
+            settings,metrics=self._analysis_dataset()
+            rows=compensation_rows(metrics,settings.get('targets'),settings.get('cycles'))
+            answer=QtWidgets.QMessageBox.question(self,'Export compensation',
+                'Export offline correction suggestions in the measured coordinate system? Position correction = negative mean error; reversal = forward − reverse. Verify reference calibration, fit correction and controller sign convention before applying. No IOC settings will be written.',
+                QtWidgets.QMessageBox.Yes|QtWidgets.QMessageBox.No,QtWidgets.QMessageBox.No)
+            if answer!=QtWidgets.QMessageBox.Yes:
+                return
+            path,_=QtWidgets.QFileDialog.getSaveFileName(self,'Save compensation table','iso230_compensation.csv','CSV (*.csv)')
+            if not path:
+                return
+            with open(path,'w',newline='',encoding='utf-8') as fp:
+                writer=csv.DictWriter(fp,fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+            self._log(f'Exported {len(rows)} compensation points: {path}')
+        except Exception as ex:
+            QtWidgets.QMessageBox.warning(self,'Compensation export',str(ex))
+
+    def _show_settling(self):
+        try:
+            settings,_=self._analysis_dataset()
+            rows=[r for r in self._measurements if r.get('settling_trace')]
+            if not rows:
+                raise RuntimeError('No settling traces available. Enable Record settling trace before running a test.')
+            dlg=QtWidgets.QDialog(self)
+            dlg.setWindowTitle('Measured reference settling')
+            dlg.resize(800,520)
+            layout=QtWidgets.QVBoxLayout(dlg)
+            controls=QtWidgets.QHBoxLayout()
+            pick=QtWidgets.QComboBox()
+            for row in rows:
+                pick.addItem(f"Cycle {row['cycle']} / {row['direction']} / {_fmt(row['target'])}")
+            controls.addWidget(pick,1)
+            tol=QtWidgets.QDoubleSpinBox()
+            tol.setDecimals(9)
+            tol.setRange(1e-9,1e9)
+            tol.setValue(.001)
+            hold=QtWidgets.QDoubleSpinBox()
+            hold.setRange(.1,120)
+            hold.setValue(.5)
+            hold.setSuffix(' s')
+            controls.addWidget(QtWidgets.QLabel('Tolerance ±'))
+            controls.addWidget(tol)
+            controls.addWidget(QtWidgets.QLabel('Minimum hold'))
+            controls.addWidget(hold)
+            layout.addLayout(controls)
+            from ecmc_daq_qt import SeriesPlotWidget
+            plot=SeriesPlotWidget()
+            plot.set_axes(title='Settling after motion completion',x_label='Elapsed [s]',y_label='Deviation from final reference')
+            layout.addWidget(plot,1)
+            label=QtWidgets.QLabel()
+            label.setWordWrap(True)
+            layout.addWidget(label)
+            def update(*_):
+                row=rows[pick.currentIndex()]
+                trace=[(float(p[0]),float(p[1])) for p in row['settling_trace']]
+                final=sum(v for _,v in trace[-min(3,len(trace)):])/min(3,len(trace))
+                limit=tol.value()
+                result=settling_time(trace,final,limit,hold.value())
+                points=[(t,v-final) for t,v in trace]
+                plot.set_series({'Reference − final':points,'+ tolerance':[(points[0][0],limit),(points[-1][0],limit)],'- tolerance':[(points[0][0],-limit),(points[-1][0],-limit)]})
+                label.setText(f"Reference at acquisition: {row.get('settling_reference_pv','')} | Observed settling: "+(f'{result:.3f} s' if result is not None else 'not demonstrated')+". Relative to final three recorded samples; CA polling, not real-time acquisition. No automatic change to test dwell.")
+            pick.currentIndexChanged.connect(update)
+            tol.valueChanged.connect(update)
+            hold.valueChanged.connect(update)
+            update()
+            buttons=QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Close)
+            buttons.rejected.connect(dlg.reject)
+            layout.addWidget(buttons)
+            dlg.exec_() if hasattr(dlg,'exec_') else dlg.exec()
+        except Exception as ex:
+            QtWidgets.QMessageBox.warning(self,'Settling analysis',str(ex))
+
     def _current_session_settings(self):
         settings = dict(self._test_settings_cache or {})
         try:
@@ -4050,6 +4200,8 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
                     "rbv_error": row.get("rbv_error"),
                     "reference_stats": _serialize_reference_stats(row.get("reference_stats")),
                     "timestamp": row.get("timestamp").isoformat() if row.get("timestamp") else "",
+                    "settling_trace": row.get("settling_trace",[]),
+                    "settling_reference_pv": row.get("settling_reference_pv",""),
                 }
                 for row in self._measurements
             ],
@@ -4148,8 +4300,8 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
         self.motor_record_edit.setText(str(settings.get("motor", "")))
         self._committed_motor_record = str(settings.get("motor", "") or "")
         self._last_auto_reference_pv = f"{self._committed_motor_record}-PosAct" if self._committed_motor_record else ""
-        self.reference_gain_edit.setText(_fmt(settings.get("reference_gain", 1.0)))
-        self.reference_offset_edit.setText(_fmt(settings.get("reference_offset", 0.0)))
+        self.reference_gain_edit.setText(format(float(settings.get("reference_gain",1.0)), ".17g"))
+        self.reference_offset_edit.setText(format(float(settings.get("reference_offset",0.0)), ".17g"))
         reference_pvs = _settings_reference_pvs(settings)
         self._refresh_reference_pv_presets()
         for edit in self.reference_pv_edits:
@@ -4183,6 +4335,7 @@ tr:nth-child(even) td {{ background: #fafcfe; }}
             self._last_auto_reversal_margin = ""
         self.cycles_spin.setValue(int(settings.get("cycles") or 1))
         self.settle_spin.setValue(float(settings.get("settle_s") or 0.0))
+        self.settle_capture.setChecked(bool(settings.get("record_settling",False)))
         self.samples_spin.setValue(int(settings.get("samples_per_point") or 1))
         self.motion_velo_edit.setText(_fmt(settings.get("velo")))
         self.motion_acc_edit.setText(_fmt(settings.get("accl")))
