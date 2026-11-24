@@ -1636,7 +1636,20 @@ class CntrlWindow(QtWidgets.QMainWindow):
             self._log('Tuning: axis PV prefix unavailable')
             return
         from ecmc_tuning_qt import TuningWindow
-        self._tuning_window = TuningWindow(self, self.client, base, demo=self.demo)
+        def read_config():
+            if (self.axis_all_edit.text().strip() or self.default_axis_id) != axis or self._resolve_motor_record_name(axis) != base:
+                raise RuntimeError('Controller selection changed; reopen tuning for this axis')
+            values = {}
+            for key, name in (
+                ('lo','GetAxisSoftLimitPosBwd'), ('hi','GetAxisSoftLimitPosFwd'),
+                ('lo_enabled','GetAxisEnableSoftLimitBwd'), ('hi_enabled','GetAxisEnableSoftLimitFwd'),
+                ('vmax','GetAxisMonMaxVel'), ('vmax_enabled','GetAxisMonEnableMaxVel')):
+                ok, reply = self.read_raw_command(f'{name}({axis})', quiet=True)
+                if not ok:
+                    raise RuntimeError(f'Cannot read native scan limits: {name}')
+                values[key] = float(reply.rsplit(': ',1)[1])
+            return values
+        self._tuning_window = TuningWindow(self, self.client, base, demo=self.demo, read_config=read_config)
         self._tuning_window.show()
 
     def closeEvent(self, event):

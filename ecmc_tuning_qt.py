@@ -1,4 +1,4 @@
-"""Modeless controller tuning window, using motor-record moves and CA monitors."""
+"""Modeless controller tuning window, using native ECMC moves and CA monitors."""
 import math
 import time
 from collections import deque
@@ -103,12 +103,19 @@ class Trend(QtWidgets.QWidget):
 class TuningWindow(QtWidgets.QDialog):
     sample = QtCore.Signal(str,float,object) if hasattr(QtCore,'Signal') else QtCore.pyqtSignal(str,float,object)
 
-    def __init__(self,parent,client,base,demo=False):
+    def __init__(self,parent,client,base,demo=False,read_config=None):
         super().__init__(parent)
         self.setWindowTitle('Controller tuning — '+base+(' [DEMO]' if demo else ''))
         self.setModal(False)
         self.resize(760,510)
         self.client,self.base,self.demo=client,base,demo
+        self.read_config=read_config
+        self.killing=False
+        self.sim_enabled=1
+        self.sim_auto=1
+        self.scan_mode=None
+        self.bounds=None
+        self.busy_seen_at=0.
         self.active=False
         self.stop_pending=False
         self.pvs={}
@@ -123,7 +130,7 @@ class TuningWindow(QtWidgets.QDialog):
         self.inputs={}
         for i,(key,title,default) in enumerate((
             ('a','A',''),('b','B',''),('steps','Steps','1'),
-            ('dwell','Dwell [s]','0.2'),('velo','VELO',''),('accl','ACCL [s]',''))):
+            ('dwell','Dwell [s]','0.2'),('velo','Velocity',''),('acc','Acc [EGU/s²]',''),('dec','Dec [EGU/s²]',''))):
             edit=QtWidgets.QLineEdit(default)
             self.inputs[key]=edit
             controls.addWidget(QtWidgets.QLabel(title),0,i)
@@ -137,8 +144,14 @@ class TuningWindow(QtWidgets.QDialog):
         self.stop_btn.setStyleSheet('font-weight:bold;color:white;background:#a52e2e')
         self.start_btn.clicked.connect(self.start_scan)
         self.stop_btn.clicked.connect(self.stop_scan)
-        for i,w in enumerate((self.relative,self.snake,self.start_btn,self.stop_btn)):
+        self.kill_btn=QtWidgets.QPushButton('KILL')
+        self.kill_btn.setStyleSheet('font-weight:bold;color:white;background:#711414')
+        self.kill_btn.setToolTip('Cancel scan and disable drive. Not a safety-rated emergency stop.')
+        self.kill_btn.clicked.connect(self.kill_scan)
+        self.mode_label=QtWidgets.QLabel('Mode: unknown')
+        for i,w in enumerate((self.relative,self.snake,self.start_btn,self.stop_btn,self.kill_btn)):
             controls.addWidget(w,2,i)
+        controls.addWidget(self.mode_label,2,5,1,2)
         layout.addLayout(controls)
         self.status=QtWidgets.QLabel('Idle — enter scan endpoints explicitly')
         self.status.setWordWrap(True)
@@ -168,7 +181,12 @@ class TuningWindow(QtWidgets.QDialog):
             self.inputs['a'].setText('-1')
             self.inputs['b'].setText('1')
             self.inputs['velo'].setText('1')
-            self.inputs['accl'].setText('0.2')
+            self.inputs['acc'].setText('5')
+            self.inputs['dec'].setText('5')
+            self.demo_mode=QtWidgets.QCheckBox('Auto execute (demo)')
+            self.demo_mode.setChecked(True)
+            self.demo_mode.toggled.connect(lambda checked: setattr(self,'sim_auto',int(checked)))
+            controls.addWidget(self.demo_mode,3,0,1,3)
         else:
             self._connect()
         self.timer.start()
@@ -184,10 +202,11 @@ class TuningWindow(QtWidgets.QDialog):
             return
         # Keep all graph samples, not just the most recent value at repaint.
         for key,suffix in {'PosSet':'-PosSet','PosAct':'-PosAct','PosErr':'-PosErr',
-                'ErrId':'-ErrId','Enabled':'-EnaAct','DMOV':'.DMOV','RBV':'.RBV',
-                'LLM':'.LLM','HLM':'.HLM','VELO':'.VELO','ACCL':'.ACCL',
-                'VMAX':'.VMAX','SPMG':'.SPMG','LVIO':'.LVIO','HLS':'.HLS',
-                'LLS':'.LLS','MOVN':'.MOVN'}.items():
+                'ErrId':'-ErrId','Enabled':'-EnaAct','EnableCmd':'-EnaCmd-RB',
+                'Stat':'-Stat','Auto':'-AutoExecuteOnTargetPos-RB',
+                'VELO':'-TgtVelCmd','ACC':'-AccCmd','DEC':'-DecCmd',
+                'Command':'-MtnCmd','CmdData':'-MtnCmdData','Target':'-TgtPosCmd',
+                'Execute':'-ExeCmd','Stop':'-StpCmd','EnableWrite':'-EnaCmd'}.items():
             def cb(pvname=None,value=None,severity=None,_key=key,**kw):
                 try:
                     v=float(value)
@@ -203,77 +222,129 @@ class TuningWindow(QtWidgets.QDialog):
 
     def _sample(self,key,stamp,value):
         self.latest[key]=value
+        if key=='Stat' and value is not None and int(value)&(1<<3):
+            self.busy_seen_at=stamp
         if key in self.position.samples:
             self.position.append(key,stamp,value)
         if key in self.error.samples:
             self.error.append(key,stamp,value)
-        if key in ('VELO','ACCL') and value is not None:
+        if key in ('VELO','ACC','DEC') and value is not None:
             edit=self.inputs[key.lower()]
             if not edit.text().strip():
                 edit.setText(f'{value:g}')
 
     def _value(self,key):
         if self.demo:
-            return {'DMOV':int(abs(self.sim_target-self.sim_pos)<1e-9),'RBV':self.sim_pos,
-                    'LLM':-100,'HLM':100,'VMAX':10,'ErrId':0,'Enabled':1,
-                    'SPMG':3,'LVIO':0,'HLS':0,'LLS':0,'MOVN':int(self.sim_target!=self.sim_pos)}.get(key)
+            busy=int(abs(self.sim_target-self.sim_pos)>1e-9)
+            stat=(self.sim_enabled<<1)|(busy<<3)|(int(not busy)<<4)|(1<<6)|(1<<7)|(1<<10)|(self.sim_auto<<24)
+            return {'Stat':stat,'Auto':self.sim_auto,'PosAct':self.sim_pos,
+                    'PosSet':self.sim_pos,'Enabled':self.sim_enabled,'EnableCmd':self.sim_enabled,
+                    'ErrId':0,'Command':3,'CmdData':0,'Target':self.sim_target}.get(key)
         pv=self.pvs.get(key)
         if pv is None or not pv.connected:
             return None
         return self.latest.get(key)
 
+    def _bit(self,bit):
+        stat=self._value('Stat')
+        return None if stat is None else (int(stat)>>bit)&1
+
+    def _mode(self):
+        # Dedicated PV indicates this IOC supports the status-bit contract.
+        # Do not interpret a reserved bit on older firmware as explicit mode.
+        auto=self._value('Auto')
+        bit=self._bit(24)
+        return int(auto) if auto in (0,1) and bit==auto else None
+
     def _put(self,field,value):
         if self.demo:
-            if field=='VAL':
-                self.sim_target=value
-            elif field=='STOP':
+            if field=='TgtPosCmd':
+                self.sim_staged=value
+                if self.sim_auto:
+                    self.sim_target=value
+            elif field=='ExeCmd':
+                self.sim_target=self.sim_staged
+            elif field=='StpCmd':
+                self.sim_target=self.sim_pos
+            elif field=='EnaCmd' and value==0:
+                self.sim_enabled=0
                 self.sim_target=self.sim_pos
             return
-        self.client.put(self.base+'.'+field,value,wait=False)
+        # Wait for each write so command/data/target/execute are ordered.
+        # Use a dedicated CA PV and a bounded timeout; STOP/KILL are independent.
+        keys={'TgtPosCmd':'Target','ExeCmd':'Execute','StpCmd':'Stop',
+              'EnaCmd':'EnableWrite','MtnCmd':'Command','MtnCmdData':'CmdData',
+              'TgtVelCmd':'VELO','AccCmd':'ACC','DecCmd':'DEC'}
+        pv=self.pvs.get(keys[field])
+        if pv is None or not pv.connected or not pv.write_access:
+            raise RuntimeError(field+' unavailable or not writable')
+        result=pv.put(value,wait=True,timeout=0.7)
+        if result!=1:
+            raise RuntimeError(field+' write not confirmed')
 
     def _ready(self):
-        if self._value('ErrId')!=0 or self._value('Enabled')!=1:
+        if self._value('ErrId')!=0 or self._value('Enabled')!=1 or self._value('EnableCmd')!=1:
             raise RuntimeError('Axis error, disabled, or status unavailable')
-        if self._value('SPMG')!=3:
-            raise RuntimeError('Motor record must be in Go mode')
-        if any(self._value(k)!=0 for k in ('LVIO','HLS','LLS')):
-            raise RuntimeError('Limit active or limit status unavailable')
-        if self._value('DMOV') is None or self._value('RBV') is None:
-            raise RuntimeError('Motor record status unavailable')
+        if self._bit(10)!=1 or self._bit(11)!=0 or self._bit(23)!=0:
+            raise RuntimeError('Axis not in RT, external trajectory, or blocked')
+        if any(self._bit(k)!=1 for k in (6,7)) or any(self._bit(k)!=0 for k in (17,18)):
+            raise RuntimeError('Limit/interlock active or status unavailable')
+        if self._mode() is None:
+            raise RuntimeError('Native execute mode unknown; scan blocked')
+        if self._bit(3) is None or self._value('PosAct') is None:
+            raise RuntimeError('Native axis status unavailable')
+
+    def _scan_limits(self):
+        if self.demo:
+            return -100.,100.,10.
+        if self.read_config is None:
+            raise RuntimeError('Native axis limit configuration unavailable')
+        c=self.read_config()
+        lo,hi=c.get('lo'),c.get('hi')
+        if c.get('lo_enabled')!=1 or c.get('hi_enabled')!=1 or lo is None or hi is None or not lo<hi:
+            raise RuntimeError('Both native soft limits must be enabled and valid for tuning scans')
+        vmax=c.get('vmax') if c.get('vmax_enabled')==1 else None
+        return lo,hi,vmax
 
     def start_scan(self):
         if self.active or self.stop_pending:
             return
         try:
             self._ready()
-            if self._value('DMOV')!=1 or self._value('MOVN')!=0:
+            if self._bit(3)!=0 or self._bit(5)!=0:
                 raise RuntimeError('Axis must be stationary before starting')
-            a,b,dwell,velo,accl=(float(self.inputs[k].text()) for k in ('a','b','dwell','velo','accl'))
+            a,b,dwell,velo,acc,dec=(float(self.inputs[k].text()) for k in ('a','b','dwell','velo','acc','dec'))
             steps=int(self.inputs['steps'].text())
-            if not all(math.isfinite(v) for v in (a,b,dwell,velo,accl)) or dwell<0 or velo<=0 or accl<=0:
+            if not all(math.isfinite(v) for v in (a,b,dwell,velo,acc,dec)) or dwell<0 or min(velo,acc,dec)<=0:
                 raise ValueError('Invalid scan parameters')
             if self.relative.isChecked():
-                rbv=self._value('RBV')
-                a,b=a+rbv,b+rbv
+                actual=self._value('PosAct')
+                a,b=a+actual,b+actual
             points=scan_points(a,b,steps)
-            lo,hi,vmax=(self._value(k) for k in ('LLM','HLM','VMAX'))
-            if lo is None or hi is None or not lo<hi or min(a,b)<lo or max(a,b)>hi:
-                raise RuntimeError('Scan outside known motor-record soft limits')
-            if vmax is None or (vmax>0 and velo>vmax):
-                raise RuntimeError('Velocity exceeds VMAX or VMAX unavailable')
+            lo,hi,vmax=self._scan_limits()
+            if min(a,b)<lo or max(a,b)>hi:
+                raise RuntimeError('Scan outside native ECMC soft limits')
+            if vmax is not None and (vmax<=0 or velo>vmax):
+                raise RuntimeError('Velocity exceeds native monitoring limit')
+            mode=self._mode()
             if not self.demo:
-                answer=QtWidgets.QMessageBox.question(self,'Confirm repetitive motion',
-                    f'{self.base}: repeat {a:g} ↔ {b:g} at VELO={velo:g}, ACCL={accl:g}?\nSTOP or close the popup to stop. Motion parameters remain changed.',
+                answer=QtWidgets.QMessageBox.question(self,'Confirm repetitive native motion',
+                    f'{self.base}: repeat {a:g} ↔ {b:g} in native coordinates at velocity={velo:g}, acc={acc:g}, dec={dec:g}?\\nSTOP cancels motion; KILL disables drive. Motion parameters remain changed.',
                     QtWidgets.QMessageBox.Yes|QtWidgets.QMessageBox.No,QtWidgets.QMessageBox.No)
                 if answer!=QtWidgets.QMessageBox.Yes:
                     return
                 self._ready()
-                if self._value('DMOV')!=1 or self._value('MOVN')!=0:
-                    raise RuntimeError('Axis is no longer stationary')
+                if self._bit(3)!=0 or self._bit(5)!=0 or self._mode()!=mode:
+                    raise RuntimeError('Axis state or execute mode changed')
             self.points,self.index,self.direction=points,0,1
-            self.dwell,self.velo,self.accl,self.use_snake=dwell,velo,accl,self.snake.isChecked()
-            self._put('VELO',velo)
-            self._put('ACCL',accl)
+            self.dwell,self.velo,self.acc,self.dec,self.use_snake=dwell,velo,acc,dec,self.snake.isChecked()
+            self.scan_mode=mode
+            self.bounds=(lo,hi)
+            self._put('MtnCmd',3)
+            self._put('MtnCmdData',0)
+            self._put('TgtVelCmd',velo)
+            self._put('AccCmd',acc)
+            self._put('DecCmd',dec)
             self.active=True
             self.start_btn.setEnabled(False)
             for w in [*self.inputs.values(),self.relative,self.snake]:
@@ -285,27 +356,46 @@ class TuningWindow(QtWidgets.QDialog):
             self.status.setText(str(ex))
 
     def _move(self):
+        self._ready()
+        if self._mode()!=self.scan_mode or self._bit(3)!=0 or self._bit(5)!=0:
+            raise RuntimeError('Axis busy or execute mode changed')
         self.sent=time.monotonic()
-        self.seen_busy=False
+        self.start_pos=self._value('PosAct')
         self.idle_until=None
         self.target=self.points[self.index]
-        self._put('VAL',self.target)
+        if not self.bounds[0]<=self.target<=self.bounds[1]:
+            raise RuntimeError('Target outside native limits')
+        self._put('MtnCmd',3)
+        self._put('MtnCmdData',0)
+        self._put('TgtPosCmd',self.target)
+        if self.scan_mode==0:
+            if self._mode()!=0:
+                raise RuntimeError('Execute mode changed after target write')
+            self._put('ExeCmd',1)
         self.status.setText(f'Step {self.index+1}/{len(self.points)} → {self.target:g}')
 
     def stop_scan(self):
-        was_active=self.active or self.stop_pending
         self.active=False
-        self.stop_pending=False
-        if was_active:
+        self.stop_pending=True
+        self.killing=False
+        try:
+            self._put('StpCmd',1)
+            self.status.setText('STOP requested — waiting for stationary axis')
+        except Exception as ex:
+            self.status.setText(f'STOP failed: {ex}. Retry or use local controls.')
+
+    def kill_scan(self):
+        self.active=False
+        self.stop_pending=True
+        self.killing=True
+        errors=[]
+        for field,value in (('StpCmd',1),('EnaCmd',0)):
             try:
-                self._put('STOP',1)
-                self.stop_pending=True
-                self.status.setText('STOP requested — waiting for stationary axis')
+                self._put(field,value)
             except Exception as ex:
-                self.stop_pending=True
-                self.status.setText(f'STOP failed: {ex}. Retry STOP or use local controls.')
-        if not self.stop_pending:
-            self._unlock()
+                errors.append(str(ex))
+        self.status.setText('KILL requested — waiting for disable readback' if not errors else
+                            'KILL write failure: '+'; '.join(errors)+' — verify drive locally')
 
     def _unlock(self):
         for w in [*self.inputs.values(),self.relative,self.snake]:
@@ -314,6 +404,8 @@ class TuningWindow(QtWidgets.QDialog):
 
     def _tick(self):
         now=time.monotonic()
+        mode=self._mode()
+        self.mode_label.setText('Mode: '+('auto execute' if mode==1 else 'execute required' if mode==0 else 'unknown'))
         if self.demo:
             diff=self.sim_target-self.sim_pos
             step=min(abs(diff),max(0,now-self.last_tick)*getattr(self,'velo',1.))
@@ -326,39 +418,41 @@ class TuningWindow(QtWidgets.QDialog):
         self.error.update()
         self.readout.setText('   '.join(k+': '+('—' if self.latest.get(k) is None else f'{self.latest[k]:.6g}') for k in ('PosSet','PosAct','PosErr')))
         if self.stop_pending:
-            if self._value('DMOV')==1 and self._value('MOVN')==0:
+            if self._bit(3)==0 and self._bit(5)==0 and (not self.killing or (self._value('Enabled')==0 and self._value('EnableCmd')==0)):
                 self.stop_pending=False
                 self._unlock()
-                self.status.setText('Stopped')
+                self.status.setText('Drive disabled' if self.killing else 'Stopped')
             return
         if not self.active:
             return
         try:
             self._ready()
-            dmov=self._value('DMOV')
-            if dmov==0:
-                self.seen_busy=True
+            if self._mode()!=self.scan_mode:
+                raise RuntimeError('Native execute mode changed')
             if self.idle_until is not None:
+                if self._bit(3)!=0 or self._bit(5)!=0:
+                    raise RuntimeError('Unexpected motion during dwell')
                 if now>=self.idle_until:
                     self.index,self.direction=next_step(self.index,self.direction,len(self.points),self.use_snake)
                     self._move()
                 return
-            # Require a fresh busy/done transition, or a settled readback at
-            # the commanded target for a no-op move. Never advance on old DMOV.
-            rbv=self._value('RBV')
-            reached=abs(rbv-self.target)<=max(1e-8,abs(self.target)*1e-10)
-            if dmov==1 and self._value('MOVN')==0 and (self.seen_busy or (now-self.sent>=0.5 and reached)):
+            # Verify completion using native busy/moving and trajectory position,
+            # not motor-record DMOV. The setpoint must reach the intended point.
+            pos=self._value('PosSet')
+            reached=pos is not None and abs(pos-self.target)<=max(1e-8,abs(self.target)*1e-10)
+            if self._bit(3)==0 and self._bit(5)==0 and reached and now-self.sent>=0.25:
                 self.idle_until=now+self.dwell
                 self.status.setText(f'Dwell at {self.target:g}')
-            elif now-self.sent>max(10,4*abs(self.target-rbv)/self.velo+4*self.accl) and not self.seen_busy:
-                raise RuntimeError('Move did not start or target was not accepted')
+            elif now-self.sent>max(10,4*abs(self.target-self.start_pos)/self.velo+4*self.velo/min(self.acc,self.dec)):
+                raise RuntimeError('Native move timed out or target was not accepted')
         except Exception as ex:
             self.stop_scan()
             self.status.setText(f'Scan aborted: {ex}; STOP requested if connected')
 
     def closeEvent(self,event):
         if self.active or self.stop_pending:
-            self.stop_scan()
+            if self.active:
+                self.stop_scan()
             if self.stop_pending and not self.demo:
                 event.ignore()
                 self.status.setText('Waiting for STOP confirmation before closing')
