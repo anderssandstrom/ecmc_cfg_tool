@@ -37,6 +37,8 @@ class DemoClient:
             return 'DEMO:'
         if re.search(r'MCU-Cfg-AX\d+-Nam$', pv):
             return 'X'
+        if pv.endswith('-DrvMode'):
+            return 'CSV'
         if pv.endswith('-Type'):
             return 'REAL'
         if pv.endswith('MCU-Cfg-Rate'):

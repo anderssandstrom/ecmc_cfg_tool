@@ -7,7 +7,7 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
     WIDTH = 1000
     HEIGHT = 438
 
-    def __init__(self, make_cell, row_def, pid_ms=False, timing_ms=False):
+    def __init__(self, make_cell, row_def, pid_ms=False, timing_ms=False, mode='UNKNOWN'):
         super().__init__()
         scene = QtWidgets.QGraphicsScene(self)
         self.setScene(scene)
@@ -19,6 +19,8 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         self.setFrameShape(QtWidgets.QFrame.NoFrame)
         self.setRenderHint(QtGui.QPainter.Antialiasing)
         scene.setBackgroundBrush(QtGui.QBrush(QtGui.QColor('#e9edf0')))
+        self.mode = mode
+        self.live_items = {}
         blue = '#527a99'
         green = '#548675'
         ink = '#273b4b'
@@ -34,6 +36,11 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
                 x -= item.boundingRect().width()/2
             item.setPos(x, y)
             item.setZValue(2)
+            return item
+
+        def live_label(key,x,y,center=False):
+            item = label(x,y,'',10,True,center)
+            self.live_items[key] = (item,x,center)
             return item
 
         def box(x, y, w, h, title, monitoring=False, tooltip=None):
@@ -84,8 +91,8 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         # compression. Native widgets remain editable inside graphics proxies.
         box(100,8,300,116,'PID parameters — P / I / D',
             tooltip='Inner gains are selected only if inner tolerance > 0 and the absolute difference between the final target position and actual position is strictly smaller than that tolerance.')
-        label(252,25,'Outer',11,True,True)
-        label(350,25,'Inner',11,True,True)
+        self.outer_heading = label(252,25,'Outer',11,True,True)
+        self.inner_heading = label(350,25,'Inner',11,True,True)
         for i,key in enumerate(('Kp','Ki','Kd')):
             y=39+22*i
             label(110,y+4, {'Ki':'Ti [ms]', 'Kd':'Td [ms]'}.get(key,key) if pid_ms else key,11)
@@ -94,17 +101,21 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         field(110,102,'Inner tolerance','AxisCntrlInnerTol',96)
         label(299,105,'|target−act| < tol',10).setToolTip('Inner tolerance must also be greater than zero.')
 
-        box(425,22,178,53,'Velocity feedforward',
+        box(425,22,178,53,'Velocity feedforward' if mode != 'CSP' else 'Kff (unused in CSP)',
             tooltip='CSV: trajectory velocity setpoint × Kff. CSP with ECMC correction uses zero feedforward.')
         field(437,47,'Kff','AxisCntrlKff',62)
 
-        label(799,8,'CSV position controller',16,True,True)
+        label(799,8,{'CSV':'CSV position controller','CSP':'CSP position control'}.get(mode,'Drive mode unknown'),16,True,True)
         box(610,32,382,96,'Control / monitoring conditions',True,
             tooltip='ECMC 11.2.0: enabled at-target monitoring qualifies each tolerance counter when the setpoint is within the at-target tolerance of the final target and the local trajectory is not busy. With external trajectory source, the controller-deadband flag is supplied by PLC instead.')
         label(620,55,'At-target enabled; setpoint near final target',11)
         label(620,71,'Local trajectory not busy; error tolerance + time',11)
-        label(620,91,'CSP: direct position or PID correction; FF = 0',11)
-        label(620,107,'CSP correction holds its last offset in deadband.',11)
+        if mode == 'CSP':
+            label(620,91,'Optional ECMC PID offset; variant not detected.',11)
+            label(620,107,'Direct CSP bypasses PID; correction holds in deadband.',11)
+        else:
+            label(620,91,'CSP: direct position or PID correction; FF = 0',11)
+            label(620,107,'CSP correction holds its last offset in deadband.',11)
         box(8,190,91,58,'Trajectory')
         label(53,211,'Position',11,False,True)
         label(53,226,'setpoint',11,False,True)
@@ -125,10 +136,10 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
             tooltip='Limits the sum of P + I + D + FF only when max > min.')
         field(528,205,'Min','AxisCntrlOutLL',62)
         field(528,228,'Max','AxisCntrlOutHL',62)
-        box(710,190,68,58,'Run / 0',True,
+        box(710,190,68,58,'Run / 0' if mode != 'CSP' else 'Hold / +',True,
             tooltip='CSV: when not busy and in controller deadband, skip PID calculation, reset controller state and send zero velocity to the drive. Axis disabled, invalid feedback or interlocks can also suppress control.')
-        label(744,212,'PID reset',10,False,True)
-        label(744,225,'if gated',10,False,True)
+        label(744,212,'PID reset' if mode != 'CSP' else 'PID offset',10,False,True)
+        label(744,225,'if gated' if mode != 'CSP' else '+ setpoint',10,False,True)
         box(800,181,192,76,'Drive scaling')
         field(808,205,'Numerator','AxisDrvScaleNum',86)
         field(808,228,'Denominator','AxisDrvScaleDenom',86)
@@ -146,10 +157,17 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         line([(392,219),(408,219)])
         line([(278,327),(420,327),(420,231)])
         line([(432,219),(478,219)])
-        line([(490,75),(490,207)])
-        # Separate velocity signal from the same trajectory generator.
-        line([(53,190),(53,132),(412,132),(412,48),(425,48)])
-        label(60,135,'Trajectory velocity',11)
+        if mode != 'CSP':
+            line([(490,75),(490,207)])
+            # Separate velocity signal from the same trajectory generator.
+            line([(53,190),(53,132),(412,132),(412,48),(425,48)])
+            label(60,135,'Trajectory velocity',11)
+        else:
+            # Optional correction path is illustrated; the direct setpoint
+            # bypass runs above the arithmetic blocks, to the final sum.
+            line([(53,190),(53,132),(744,132),(744,190)])
+            label(60,135,'Position setpoint (direct or + correction)',11)
+            label(490,90,'FF = 0',11,True,True)
         line([(502,219),(520,219)])
         line([(688,219),(710,219)])
         line([(778,219),(800,219)])
@@ -162,7 +180,7 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         # the path at the feedback crossing to make clear there is no junction.
         line([(505,372),(505,365)],True,False,green)
         line([(505,353),(505,263),(744,263),(744,248)],True,True,green)
-        label(515,265,'Deadband + not busy',10).setToolTip('CSV control gate: reset PID and command zero.')
+        label(515,265,'Deadband + not busy',10).setToolTip('CSV: reset PID and command zero. CSP correction: hold last offset.')
 
         # Monitoring is shown separately from the arithmetic signal path.
         box(8,372,330,64,'At-target monitoring',True,
@@ -179,6 +197,57 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
             tooltip='Separate tolerance and time qualification for slave control; defaults to the at-target settings if not configured.')
         field(681,394,'Tolerance','AxisMonSlvCtrlDbTol',92)
         field(681,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonSlvCtrlDbTime',92)
+
+        # Live data occupies unused whitespace; no editable configuration
+        # widget is touched by the monitor.
+        live_label('setpoint',53,252,True)
+        live_label('error',130,175,True)
+        live_label('actual',686,350,True)
+        live_label('velocity',921,332,True)
+        live_label('target',8,278)
+        live_label('status',8,294)
+        live_label('at_target',238,415)
+        live_label('deadband',550,415)
+        live_label('pid',620,145)
+        live_label('message',620,159)
+
+    def _set_live(self,key,text,color='#273b4b'):
+        item,x,center = self.live_items[key]
+        item.setText(text)
+        item.setBrush(QtGui.QBrush(QtGui.QColor(color)))
+        item.setX(x-item.boundingRect().width()/2 if center else x)
+
+    def clear_live(self):
+        for key in self.live_items:
+            self._set_live(key,'')
+        for heading in (self.outer_heading,self.inner_heading):
+            heading.setBrush(QtGui.QBrush(QtGui.QColor('#273b4b')))
+
+    def set_live_message(self,message):
+        self.clear_live()
+        self._set_live('message',message)
+
+    def update_live(self,values,inner,deadband):
+        def val(key):
+            v = values.get(key)
+            return '—' if v is None else f'{v:.5g}'
+        self._set_live('setpoint','Set: '+val('setpoint'))
+        self._set_live('error','e: '+val('error'))
+        self._set_live('actual','Act: '+val('actual'))
+        self._set_live('velocity','Vel: '+val('velocity'))
+        self._set_live('target','Target: '+val('target'))
+        status = 'Disabled' if values.get('enabled') == 0 else 'Busy' if values.get('busy') == 1 else 'Idle' if values.get('busy') == 0 else 'Unknown'
+        if values.get('error_id') not in (None,0):
+            status = 'Axis error'
+        self._set_live('status',status)
+        at = values.get('at_target')
+        self._set_live('at_target','At target' if at == 1 else 'Not at target' if at == 0 else 'Unknown',
+                       '#237b4b' if at == 1 else '#273b4b')
+        self._set_live('deadband',deadband, '#237b4b' if deadband.startswith('likely') else '#273b4b')
+        self._set_live('pid','Gain selection (est.): '+('inner' if inner is True else 'outer' if inner is False else 'unknown'))
+        self._set_live('message','Live PVs; deadband estimated' if values else 'Waiting for live PVs')
+        self.outer_heading.setBrush(QtGui.QBrush(QtGui.QColor('#237b4b' if inner is False else '#273b4b')))
+        self.inner_heading.setBrush(QtGui.QBrush(QtGui.QColor('#237b4b' if inner is True else '#273b4b')))
 
     def resizeEvent(self,event):
         super().resizeEvent(event)
