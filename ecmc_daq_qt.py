@@ -1362,10 +1362,16 @@ def main():
     ap.add_argument("--prefix", default="", help="Optional default IOC prefix for short PV names")
     ap.add_argument("--pv", action="append", default=[], help="Initial PV name (can be passed multiple times)")
     ap.add_argument("--timeout", type=float, default=2.0, help="EPICS timeout in seconds")
+    ap.add_argument("--motion-trigger", default="", help="Preset rising Busy trigger PV; does not arm capture")
     args = ap.parse_args()
 
     app = QtWidgets.QApplication(sys.argv)
     window = DaqWindow(default_prefix=args.prefix, initial_pvs=args.pv, timeout=args.timeout)
+    if args.motion_trigger:
+        window.trigger_pv.setText(args.motion_trigger)
+        window.trigger_edge.setCurrentIndex(0)
+        window.trigger_threshold.setValue(0.5)
+        window.trigger_enabled.setChecked(True)
     window.show()
     sys.exit(app.exec_())
 
