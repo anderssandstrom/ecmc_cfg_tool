@@ -7,13 +7,15 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import importlib
+import faulthandler
+import gc
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 from contextlib import ExitStack
 
-from qt_compat import QtWidgets, QtGui
+from qt_compat import QtWidgets, QtGui, QtCore
 from ecmc_demo import DemoClient
 
 ROOT = Path(__file__).resolve().parent
@@ -21,7 +23,24 @@ ROOT = Path(__file__).resolve().parent
 class QtSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        faulthandler.enable()
         cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+        cls.app.setQuitOnLastWindowClosed(False)
+
+    @classmethod
+    def _drain_events(cls):
+        for _ in range(3):
+            QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+            cls.app.processEvents()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.app.closeAllWindows()
+        cls._drain_events()
+        if not QtCore.QThreadPool.globalInstance().waitForDone(5000):
+            raise AssertionError('Qt background tasks did not finish')
+        gc.collect()
+        cls._drain_events()
 
     def test_windows(self):
         cases = [
@@ -55,8 +74,16 @@ class QtSmokeTests(unittest.TestCase):
                         self.app.processEvents()
                         self.assertTrue(window.isVisible())
                     finally:
-                        window.close()
-                        self.app.processEvents()
+                        self.assertTrue(window.close(), f'{name} refused to close')
+                        if hasattr(window, '_askpass_thread'):
+                            self.assertFalse(window._askpass_thread.is_alive())
+                        for timer in window.findChildren(QtCore.QTimer):
+                            timer.stop()
+                        window.deleteLater()
+                        del window
+                        self._drain_events()
+                        gc.collect()
+                        self._drain_events()
 
     def test_report_png(self):
         from ecmc_iso230_qt import build_demo_report_files
