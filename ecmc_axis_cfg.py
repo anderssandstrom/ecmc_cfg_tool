@@ -15,14 +15,14 @@ from pathlib import Path
 from ecmc_demo import DemoClient
 import ecmc_parameter_conversion as units
 from qt_compat import QtCore, QtGui, QtWidgets
+from ecmc_settings import UiSettings
+from ecmc_widgets import reset_combo
 from ecmc_command_client import CommandClient, command_transaction
 
+from ecmc_epics import EpicsClient, _join_prefix_pv, _proc_pv_for_readback
+from ecmc_formatting import compact_float_text
+from ecmc_widgets import CompactDoubleSpinBox
 from ecmc_stream_qt import (
-    CompactDoubleSpinBox,
-    EpicsClient,
-    _join_prefix_pv,
-    _proc_pv_for_readback,
-    compact_float_text,
     normalize_float_literals,
     query_value_indicates_error,
 )
@@ -782,9 +782,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         self.changes_toggle_btn.setText("Hide Changes" if visible else "Show Changes")
 
     def _reset_open_app_combo(self):
-        self.open_app_combo.blockSignals(True)
-        self.open_app_combo.setCurrentIndex(0)
-        self.open_app_combo.blockSignals(False)
+        reset_combo(self.open_app_combo)
 
     def _on_open_app_selected(self, index):
         action = str(self.open_app_combo.itemData(index) or "")
@@ -2833,6 +2831,8 @@ def main():
         axis_id_was_provided=bool((args.axis_id or "").strip()),
         demo=args.demo,
     )
+    if not args.demo:
+        UiSettings("axis").attach_window(w)
     w.show()
     sys.exit(app.exec_())
 
