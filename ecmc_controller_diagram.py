@@ -94,11 +94,11 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         self.outer_heading = label(252,25,'Outer',11,True,True)
         self.inner_heading = label(350,25,'Inner',11,True,True)
         for i,key in enumerate(('Kp','Ki','Kd')):
-            y=39+22*i
+            y=39+21*i
             label(110,y+4, {'Ki':'Ti [ms]', 'Kd':'Td [ms]'}.get(key,key) if pid_ms else key,11)
             cell(206,y,'AxisCntrl'+key)
             cell(304,y,'AxisCntrlInner'+key)
-        field(110,102,'Inner tolerance','AxisCntrlInnerTol',96)
+        field(110,103,'Inner tolerance','AxisCntrlInnerTol',96)
         label(299,105,'|target−act| < tol',10).setToolTip('Inner tolerance must also be greater than zero.')
 
         box(425,22,178,53,'Velocity feedforward' if mode != 'CSP' else 'Kff (unused in CSP)',
@@ -124,20 +124,21 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         label(230,158,'Proportional',11,False,True)
         box(182,190,210,106,'I — accumulator',
             tooltip='Integral contribution is clamped only if max > min. Internal trajectory busy: reset takes precedence over freeze; otherwise integrate Ki × position error.')
-        field(192,211,'Min','AxisCntrlIPartLL',110)
-        field(192,232,'Max','AxisCntrlIPartHL',110)
-        field(192,253,'Reset on busy','AxisCntrlResetIAtRmp',110)
-        field(192,274,'Freeze on busy','AxisCntrlFreezeIAtRmp',110)
+        field(192,211,'Min','AxisCntrlIPartLL',105)
+        field(192,232,'Max','AxisCntrlIPartHL',105)
+        field(192,253,'Reset on busy','AxisCntrlResetIAtRmp',105)
+        field(192,274,'Freeze on busy','AxisCntrlFreezeIAtRmp',105)
         box(182,310,96,35,'D')
         label(230,326,'Difference',11,False,True)
         summing(420,219,'+')
-        summing(490,219,'+')
+        if mode != 'CSP':
+            summing(490,219,'+')
         box(520,181,168,76,'Output limits',
             tooltip='Limits the sum of P + I + D + FF only when max > min.')
         field(528,205,'Min','AxisCntrlOutLL',62)
         field(528,228,'Max','AxisCntrlOutHL',62)
         box(710,190,68,58,'Run / 0' if mode != 'CSP' else 'Hold / +',True,
-            tooltip='CSV: when not busy and in controller deadband, skip PID calculation, reset controller state and send zero velocity to the drive. Axis disabled, invalid feedback or interlocks can also suppress control.')
+            tooltip=('CSP with ECMC correction: when not busy and in controller deadband, hold the last PID offset and add it to the position setpoint. Direct CSP bypasses the correction.' if mode == 'CSP' else 'CSV: when not busy and in controller deadband, skip PID calculation, reset controller state and send zero velocity to the drive. Axis disabled, invalid feedback or interlocks can also suppress control.'))
         label(744,212,'PID reset' if mode != 'CSP' else 'PID offset',10,False,True)
         label(744,225,'if gated' if mode != 'CSP' else '+ setpoint',10,False,True)
         box(800,181,192,76,'Drive scaling')
@@ -156,8 +157,8 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         line([(278,160),(420,160),(420,207)])
         line([(392,219),(408,219)])
         line([(278,327),(420,327),(420,231)])
-        line([(432,219),(478,219)])
         if mode != 'CSP':
+            line([(432,219),(478,219)])
             line([(490,75),(490,207)])
             # Separate velocity signal from the same trajectory generator.
             line([(53,190),(53,132),(412,132),(412,48),(425,48)])
@@ -166,20 +167,22 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
             # Optional correction path is illustrated; the direct setpoint
             # bypass runs above the arithmetic blocks, to the final sum.
             line([(53,190),(53,132),(744,132),(744,190)])
-            label(60,135,'Position setpoint (direct or + correction)',11)
+            label(60,135,'Position setpoint',11)
+            line([(432,219),(520,219)])
             label(490,90,'FF = 0',11,True,True)
-        line([(502,219),(520,219)])
+        if mode != 'CSP':
+            line([(502,219),(520,219)])
         line([(688,219),(710,219)])
         line([(778,219),(800,219)])
         line([(921,257),(921,289)])
         line([(850,308),(794,308)])
-        line([(686,346),(686,359),(130,359),(130,231)])
+        line([(780,346),(780,364),(130,364),(130,231)])
         label(285,344,'Actual position feedback',11)
 
         # Dashed green control path, not a position or velocity signal. Break
         # the path at the feedback crossing to make clear there is no junction.
-        line([(505,372),(505,365)],True,False,green)
-        line([(505,353),(505,263),(744,263),(744,248)],True,True,green)
+        line([(505,372),(505,369)],True,False,green)
+        line([(505,359),(505,263),(744,263),(744,248)],True,True,green)
         label(515,265,'Deadband + not busy',10).setToolTip('CSV: reset PID and command zero. CSP correction: hold last offset.')
 
         # Monitoring is shown separately from the arithmetic signal path.
@@ -200,12 +203,12 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
 
         # Live data occupies unused whitespace; no editable configuration
         # widget is touched by the monitor.
-        live_label('setpoint',53,252,True)
-        live_label('error',130,175,True)
-        live_label('actual',686,350,True)
+        live_label('setpoint',8,252)
+        live_label('target',8,270)
+        live_label('error',8,288)
+        live_label('status',8,306)
+        live_label('actual',666,348,True)
         live_label('velocity',921,332,True)
-        live_label('target',8,278)
-        live_label('status',8,294)
         live_label('at_target',238,415)
         live_label('deadband',550,415)
         live_label('pid',620,145)
