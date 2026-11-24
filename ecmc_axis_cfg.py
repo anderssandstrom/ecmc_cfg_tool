@@ -13,6 +13,7 @@ from pathlib import Path
 from ecmc_demo import DemoClient
 import ecmc_parameter_conversion as units
 from qt_compat import QtCore, QtGui, QtWidgets
+from ecmc_command_client import CommandClient, command_transaction
 
 from ecmc_stream_qt import (
     CompactDoubleSpinBox,
@@ -2173,7 +2174,7 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
         if not cmd:
             return False, "ERROR: Command text is empty"
         try:
-            self.client.put(pv, cmd, wait=bool(wait))
+            CommandClient(self.client, pv, "").send(cmd, wait=bool(wait))
             msg = f"CMD -> {pv}: {cmd}"
             if not quiet:
                 self._log(msg)
@@ -2185,30 +2186,33 @@ class AxisYamlConfigWindow(QtWidgets.QMainWindow):
             return False, msg
 
     def read_raw_command(self, cmd, quiet=False):
-        fast_cli = bool(quiet and getattr(self.client, "backend", "") == "cli")
-        ok, msg = self.send_raw_command(cmd, quiet=quiet, wait=(not fast_cli))
-        if not ok:
-            return False, msg
-        qp = self.qry_pv.text().strip()
-        if not qp:
-            return True, "Command sent, no QRY PV configured"
-        try:
-            self.client.put(_proc_pv_for_readback(qp), 1, wait=(not fast_cli))
-            val = self.client.get(qp, as_string=True)
-            if query_value_indicates_error(val):
-                msg = f"QRY ERROR <- {qp}: {val}"
+        pv = self.cmd_pv.text().strip()
+        if not pv:
+            return False, "ERROR: Command PV is empty"
+        with command_transaction(pv):
+            ok, msg = self.send_raw_command(cmd, quiet=quiet, wait=True)
+            if not ok:
+                return False, msg
+            qp = self.qry_pv.text().strip()
+            if not qp:
+                return True, "Command sent, no QRY PV configured"
+            try:
+                self.client.put(_proc_pv_for_readback(qp), 1, wait=True)
+                val = self.client.get(qp, as_string=True)
+                if query_value_indicates_error(val):
+                    msg = f"QRY ERROR <- {qp}: {val}"
+                    if not quiet:
+                        self._log(msg)
+                    return False, msg
+                msg = f"QRY <- {qp}: {val}"
+                if not quiet:
+                    self._log(msg)
+                return True, msg
+            except Exception as ex:
+                msg = f"ERROR query read: {ex}"
                 if not quiet:
                     self._log(msg)
                 return False, msg
-            msg = f"QRY <- {qp}: {val}"
-            if not quiet:
-                self._log(msg)
-            return True, msg
-        except Exception as ex:
-            msg = f"ERROR query read: {ex}"
-            if not quiet:
-                self._log(msg)
-            return False, msg
 
     def _write_row(self, row):
         pair = row.get("pair")
