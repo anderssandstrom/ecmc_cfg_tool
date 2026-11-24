@@ -4,7 +4,7 @@ import csv
 import time
 from collections import deque
 from qt_compat import QtCore, QtGui, QtWidgets
-from ecmc_native_motion import NativeMotionMixin
+from ecmc_native_motion import NativeMotionMixin, NATIVE_PV_SUFFIXES, numeric_readback
 
 
 def scan_points(a, b, steps):
@@ -280,22 +280,11 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
             self.start_btn.setEnabled(False)
             return
         # Keep all graph samples, not just the most recent value at repaint.
-        for key,suffix in {'PosSet':'-PosSet','PosAct':'-PosAct','PosErr':'-PosErr',
-                'ErrId':'-ErrId','Enabled':'-EnaAct','EnableCmd':'-EnaCmd-RB',
-                'Stat':'-Stat','Auto':'-AutoExecuteOnTargetPos-RB','TrajType':'-TrajType',
-                'VELO':'-TgtVelCmd','ACC':'-AccCmd','DEC':'-DecCmd',
-                'Command':'-MtnCmd','CmdData':'-MtnCmdData','Target':'-TgtPosCmd',
-                'Execute':'-ExeCmd','Stop':'-StpCmd','EnableWrite':'-EnaCmd'}.items():
+        for key,suffix in NATIVE_PV_SUFFIXES.items():
             def cb(pvname=None,value=None,severity=None,_key=key,**kw):
-                try:
-                    v=float(value)
-                    if not math.isfinite(v) or severity==3:
-                        v=None
-                except (TypeError,ValueError):
-                    v=None
-                self.sample.emit(_key,time.monotonic(),v)
+                self.sample.emit(_key,time.monotonic(),numeric_readback(value,severity))
             try:
-                self.pvs[key]=ep.PV(self.base+suffix,auto_monitor=True,callback=cb)
+                self.pvs[key]=ep.PV(self.base+'-'+suffix,auto_monitor=True,callback=cb)
             except Exception:
                 pass
 
