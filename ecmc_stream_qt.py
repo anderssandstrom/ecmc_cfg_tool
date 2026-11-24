@@ -10,6 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from qt_compat import QtCore, QtGui, QtWidgets
+from ecmc_settings import UiSettings
 # Backward-compatible exports for existing application imports.
 from ecmc_formatting import compact_float_text
 from ecmc_widgets import CompactDoubleSpinBox, SpinBoxWithButtons, reset_combo
@@ -1336,6 +1337,7 @@ def main():
         timeout=args.timeout,
         error_db_path=args.error_db,
     )
+    UiSettings("command").attach_window(w)
     w.show()
     sys.exit(app.exec_())
 
