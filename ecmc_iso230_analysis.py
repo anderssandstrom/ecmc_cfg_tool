@@ -46,18 +46,35 @@ def compensation_rows(metrics,expected_targets=None,cycles=None):
                  reversal_forward_minus_reverse=r['reversal_value'])
             for r in rows]
 
-def settling_time(trace,final,tolerance,min_hold):
-    if not math.isfinite(final) or tolerance<=0 or min_hold<=0:
+def settling_time(trace, final, tolerance, min_hold, max_gap=None):
+    """Return start of the final observed in-band interval, or None.
+
+    Timestamps are elapsed seconds in acquisition order. A gap exceeding
+    max_gap (if supplied) breaks the observed interval; no interpolation
+    or extrapolation is used to claim settling between samples.
+    """
+    final, tolerance, min_hold = map(float, (final, tolerance, min_hold))
+    if not all(map(math.isfinite, (final, tolerance, min_hold))) or tolerance <= 0 or min_hold <= 0:
         raise ValueError('Invalid settling parameters')
-    points=sorted((float(t),float(v)) for t,v in trace)
-    if len(points)<2 or any(not math.isfinite(t) or not math.isfinite(v) for t,v in points):
+    if max_gap is not None:
+        max_gap = float(max_gap)
+        if not math.isfinite(max_gap) or max_gap <= 0:
+            raise ValueError('Invalid maximum sampling gap')
+    points = [(float(t), float(v)) for t, v in trace]
+    if len(points) < 2 or any(not math.isfinite(t) or not math.isfinite(v) or t < 0 for t, v in points):
         return None
-    start=None
-    for t,v in points:
-        if abs(v-final)>tolerance:
-            start=None
+    if any(b[0] <= a[0] for a, b in zip(points, points[1:])):
+        return None
+    start = None
+    previous = None
+    for t, v in points:
+        if previous is not None and max_gap is not None and t - previous > max_gap:
+            start = None
+        if abs(v-final) > tolerance:
+            start = None
         elif start is None:
-            start=t
-    if start is None or points[-1][0]-start<min_hold:
+            start = t
+        previous = t
+    if start is None or points[-1][0] - start < min_hold:
         return None
     return start
