@@ -18,7 +18,7 @@ class NativeMotionTests(unittest.TestCase):
     def test_explicit(self):
         axis=Fake(0)
         axis.native_move_absolute(2,0,(-3,3))
-        self.assertEqual(axis.writes,[('MtnCmd',3),('MtnCmdData',0),('TgtPosCmd',2),('ExeCmd',1)])
+        self.assertEqual(axis.writes,[('MtnCmd',3),('MtnCmdData',0),('TgtPosCmd',2),('ExeCmd',0),('ExeCmd',1)])
     def test_auto(self):
         axis=Fake(1)
         axis.native_move_absolute(2,1,(-3,3))
@@ -29,6 +29,15 @@ class NativeMotionTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             axis.native_move_absolute(2,0,(-3,3))
         self.assertEqual(axis.writes,[])
+    def test_auto_enable_disabled_drive(self):
+        for mode in (0,1):
+            axis=Fake(mode)
+            axis.auto_enable_timeout=5
+            axis.overrides.update(Enabled=0, EnableCmd=0)
+            axis.native_move_absolute(2,mode,(-3,3))
+            self.assertNotIn(('EnaCmd',1),axis.writes)
+            self.assertIn(('TgtPosCmd',2),axis.writes)
+
     def test_limits(self):
         axis=Fake(1)
         with self.assertRaises(RuntimeError):
