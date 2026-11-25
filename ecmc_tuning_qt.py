@@ -132,6 +132,7 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
         self.write_jerk=write_jerk
         self.read_auto_enable=read_auto_enable
         self.auto_enable_timeout=0.0
+        self.scan_failure=''
         self.traj_type=None
         self.paused=False
         self.pause_requested=False
@@ -355,6 +356,8 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
                 if value==0:
                     self.sim_target=self.sim_pos
             return
+        self._scan_stage=f'Write {self.base}-{field} = {value:g}'
+        print(f'Tuning: {self._scan_stage}', flush=True)
         return super()._put(field,value)
 
     def _scan_limits(self):
@@ -372,15 +375,24 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
     def start_scan(self):
         if self.active or self.stop_pending:
             return
+        self.scan_failure=''
+        self._scan_stage='Read auto-enable configuration'
         try:
             self.auto_enable_timeout=0.0
             if self.read_auto_enable is not None and not self.demo:
                 timeout=float(self.read_auto_enable())
                 if math.isfinite(timeout) and timeout>0:
                     self.auto_enable_timeout=timeout
+            self._scan_stage='Check native axis readiness'
+            if not self.demo:
+                for key in ('ErrId','Enabled','EnableCmd','Stat','Auto','PosAct'):
+                    pv=self.pvs.get(key)
+                    if pv is not None and pv.connected:
+                        self.latest[key]=numeric_readback(pv.get(use_monitor=False, timeout=0.7), pv.severity)
             self._ready()
             if self._bit(3)!=0 or self._bit(5)!=0:
                 raise RuntimeError('Axis must be stationary before starting')
+            self._scan_stage='Validate scan inputs'
             values = {}
             for key, label in (('a', 'Endpoint A'), ('b', 'Endpoint B'),
                                ('dwell', 'Dwell'), ('velo', 'Velocity'),
@@ -427,12 +439,14 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
                 actual=self._value('PosAct')
                 a,b=a+actual,b+actual
             points=scan_points(a,b,steps)
+            self._scan_stage='Read native scan limits'
             lo,hi,vmax=self._scan_limits()
             if min(a,b)<lo or max(a,b)>hi:
                 raise RuntimeError('Scan outside native ECMC soft limits')
             if vmax is not None and (vmax<=0 or velo>vmax):
                 raise RuntimeError('Velocity exceeds native monitoring limit')
             mode=self._mode()
+            self._scan_stage='Confirm motion'
             if not self.demo:
                 answer=QtWidgets.QMessageBox.question(self,'Confirm repetitive native motion',
                     f'{self.base}: repeat {a:g} ↔ {b:g} in native coordinates at velocity={velo:g}, acc={acc:g}, dec={dec:g}?\\nSTOP cancels motion; KILL disables drive. Motion parameters remain changed.',
@@ -446,8 +460,6 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
             self.dwell,self.velo,self.acc,self.dec,self.use_snake=dwell,velo,acc,dec,self.snake.isChecked()
             self.scan_mode=mode
             self.bounds=(lo,hi)
-            self._put('MtnCmd',3)
-            self._put('MtnCmdData',0)
             self._put('TgtVelCmd',velo)
             self._put('AccCmd',acc)
             self._put('DecCmd',dec)
@@ -467,9 +479,12 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
                 w.setEnabled(False)
             self._move()
         except Exception as ex:
+            stage=self._scan_stage
             if self.active:
                 self.stop_scan()
-            self.status.setText(str(ex))
+            self.scan_failure=f'{stage}: {ex}'
+            self.status.setText(self.scan_failure)
+            print(f'Tuning: {self.scan_failure}; Stat={self._value("Stat")}, Auto={self._value("Auto")}, EnaAct={self._value("Enabled")}, EnaCmd-RB={self._value("EnableCmd")}, auto-enable timeout={self.auto_enable_timeout:g}', flush=True)
 
     def _move(self):
         self._ready()
@@ -592,7 +607,7 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
             if now>=self.stop_confirm_after and self.stop_sent and self._bit(3)==0 and self._bit(5)==0 and (not self.killing or (self._value('Enabled')==0 and self._value('EnableCmd')==0)):
                 self.stop_pending=False
                 self._unlock()
-                self.status.setText('Drive disabled' if self.killing else 'Stopped')
+                self.status.setText(self.scan_failure or ('Drive disabled' if self.killing else 'Stopped'))
             return
         if not self.active:
             return
@@ -623,7 +638,9 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
                 raise RuntimeError('Native move timed out or target was not accepted')
         except Exception as ex:
             self.stop_scan()
-            self.status.setText(f'Scan aborted: {ex}; STOP requested if connected')
+            self.scan_failure=f'Scan aborted: {ex}; STOP requested if connected'
+            self.status.setText(self.scan_failure)
+            print(f'Tuning: {self.scan_failure}', flush=True)
 
     def closeEvent(self,event):
         if self.active or self.stop_pending:
