@@ -21,6 +21,10 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         scene.setBackgroundBrush(QtGui.QBrush(QtGui.QColor('#e9edf0')))
         self.mode = mode
         self.live_items = {}
+        self.pid_labels = {}
+        self.timing_labels = []
+        self.pid_ms = pid_ms
+        self.timing_ms = timing_ms
         blue = '#527a99'
         green = '#548675'
         ink = '#273b4b'
@@ -59,8 +63,9 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
             proxy.setZValue(3)
 
         def field(x,y,title,name,dx=70):
-            label(x,y+4,title,11)
+            item = label(x,y+4,title,11)
             cell(x+dx,y,name)
+            return item
 
         def line(points, dashed=False, arrow=True, color=None):
             color = color or ink
@@ -95,7 +100,7 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         self.inner_heading = label(350,25,'Inner',11,True,True)
         for i,key in enumerate(('Kp','Ki','Kd')):
             y=39+21*i
-            label(110,y+4, {'Ki':'Ti [ms]', 'Kd':'Td [ms]'}.get(key,key) if pid_ms else key,11)
+            self.pid_labels[key] = label(110,y+4, {'Ki':'Ti [ms]', 'Kd':'Td [ms]'}.get(key,key) if pid_ms else key,11)
             cell(206,y,'AxisCntrl'+key)
             cell(304,y,'AxisCntrlInner'+key)
         field(110,103,'Inner tolerance','AxisCntrlInnerTol',96)
@@ -190,20 +195,20 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
             tooltip='Determines the at-target status using the common trajectory qualification and its own tolerance/time. Its enable also gates internal deadband monitoring.')
         field(15,394,'Enable','AxisMonEnableAtTargetMon',82)
         field(15,414,'Tolerance','AxisMonAtTargetTol',82)
-        field(15,434,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonAtTargetTime',82)
+        self.timing_labels.append(field(15,434,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonAtTargetTime',82))
         box(260,372,230,84,'Controller deadband',True,
             tooltip='CSV: controller deadband AND not busy resets the PID and commands zero velocity. CSP with ECMC correction: holds the last correction. External trajectory: PLC supplies the controller-deadband status.')
         field(269,394,'Tolerance','AxisCntrlDeadband',82)
-        field(269,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisCntrlDeadbandTime',82)
+        self.timing_labels.append(field(269,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisCntrlDeadbandTime',82))
         box(498,372,234,84,'Slave control deadband',True,
             tooltip='Separate tolerance and time qualification for slave control; defaults to the at-target settings if not configured.')
         field(507,394,'Tolerance','AxisMonSlvCtrlDbTol',82)
-        field(507,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonSlvCtrlDbTime',82)
+        self.timing_labels.append(field(507,413,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonSlvCtrlDbTime',82))
         box(740,372,252,84,'Position lag monitor',True,
             tooltip='Independent following-error interlock. While enabled, |controller error| above tolerance for more than the configured cycles interlocks the trajectory; the drive interlock is at twice the configured cycle count.')
         field(748,394,'Enable','AxisMonEnableLagMon',82)
         field(748,414,'Tolerance','AxisMonPosLagTol',82)
-        field(748,434,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonPosLagTime',82)
+        self.timing_labels.append(field(748,434,('Time [ms]' if timing_ms else 'Time [cycles]'),'AxisMonPosLagTime',82))
 
         # Live data occupies unused whitespace; no editable configuration
         # widget is touched by the monitor.
@@ -217,6 +222,13 @@ class ControllerDiagram(QtWidgets.QGraphicsView):
         live_label('deadband',375,436,True)
         live_label('pid',620,145)
         live_label('message',620,159)
+
+    def set_units(self, pid_ms, timing_ms):
+        self.pid_ms, self.timing_ms = pid_ms, timing_ms
+        for key, item in self.pid_labels.items():
+            item.setText({'Ki':'Ti [ms]', 'Kd':'Td [ms]'}.get(key,key) if pid_ms else key)
+        for item in self.timing_labels:
+            item.setText('Time [ms]' if timing_ms else 'Time [cycles]')
 
     def _set_live(self,key,text,color='#273b4b'):
         item,x,center = self.live_items[key]
