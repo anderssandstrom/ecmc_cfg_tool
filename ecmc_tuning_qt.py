@@ -120,7 +120,7 @@ class Trend(QtWidgets.QWidget):
 class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
     sample = QtCore.Signal(str,float,object) if hasattr(QtCore,'Signal') else QtCore.pyqtSignal(str,float,object)
 
-    def __init__(self,parent,client,base,demo=False,read_config=None,read_lag=None,read_jerk=None,write_jerk=None):
+    def __init__(self,parent,client,base,demo=False,read_config=None,read_lag=None,read_jerk=None,write_jerk=None,read_auto_enable=None):
         super().__init__(parent)
         self.setWindowTitle('Controller tuning — '+base+(' [DEMO]' if demo else ''))
         self.setModal(False)
@@ -130,6 +130,8 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
         self.read_lag=read_lag
         self.read_jerk=read_jerk
         self.write_jerk=write_jerk
+        self.read_auto_enable=read_auto_enable
+        self.auto_enable_timeout=0.0
         self.traj_type=None
         self.paused=False
         self.pause_requested=False
@@ -371,6 +373,11 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
         if self.active or self.stop_pending:
             return
         try:
+            self.auto_enable_timeout=0.0
+            if self.read_auto_enable is not None and not self.demo:
+                timeout=float(self.read_auto_enable())
+                if math.isfinite(timeout) and timeout>0:
+                    self.auto_enable_timeout=timeout
             self._ready()
             if self._bit(3)!=0 or self._bit(5)!=0:
                 raise RuntimeError('Axis must be stationary before starting')
@@ -609,10 +616,10 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
             # not motor-record DMOV. The setpoint must reach the intended point.
             pos=self._value('PosSet')
             reached=pos is not None and abs(pos-self.target)<=max(1e-8,abs(self.target)*1e-10)
-            if self._bit(3)==0 and self._bit(5)==0 and reached and now-self.sent>=0.25:
+            if self._bit(3)==0 and self._bit(5)==0 and reached and now-self.sent>=0.25 and (self.auto_enable_timeout<=0 or self._value('Enabled')==1 or self.busy_seen_at>=self.sent):
                 self.idle_until=now+self.dwell
                 self.status.setText(f'Dwell at {self.target:g}')
-            elif now-self.sent>max(10,4*abs(self.target-self.start_pos)/self.velo+4*self.velo/min(self.acc,self.dec)):
+            elif now-self.sent>max(10,4*abs(self.target-self.start_pos)/self.velo+4*self.velo/min(self.acc,self.dec))+self.auto_enable_timeout:
                 raise RuntimeError('Native move timed out or target was not accepted')
         except Exception as ex:
             self.stop_scan()
