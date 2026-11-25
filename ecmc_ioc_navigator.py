@@ -820,12 +820,6 @@ class IocNavigator(QtWidgets.QMainWindow):
         if self.embed_tools_check.isChecked() and not separate:
             prefix = self._prefix()
             axis_id = str(data.get("id", ""))
-            sketch_image = ""
-            for name in ("original.png", "controller_sketch.png"):
-                candidate = self.app_dir / name
-                if candidate.exists():
-                    sketch_image = str(candidate)
-                    break
             try:
                 window = CntrlWindow(
                     catalog_path=str(self.app_dir / "ecmc_commands_cntrl.json"),
@@ -834,7 +828,6 @@ class IocNavigator(QtWidgets.QMainWindow):
                     timeout=max(self.timeout, 2.0),
                     default_axis_id=axis_id,
                     title_prefix=prefix,
-                    sketch_image_path=sketch_image,
                     error_db_path=str(self.app_dir / "ecmc_error_codes.json"),
                     axis_id_was_provided=True,
                 )
