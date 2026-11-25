@@ -163,6 +163,8 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
             ('dwell','Dwell [s]','0.2'),('velo','Velocity',''),('acc','Acc [EGU/s²]',''),('dec','Dec [EGU/s²]',''))):
             edit=QtWidgets.QLineEdit(default)
             self.inputs[key]=edit
+            if key in ('a', 'b'):
+                edit.setPlaceholderText('Required')
             controls.addWidget(QtWidgets.QLabel(title),0,i)
             controls.addWidget(edit,1,i)
         self.relative=QtWidgets.QCheckBox('Relative')
@@ -372,17 +374,48 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
             self._ready()
             if self._bit(3)!=0 or self._bit(5)!=0:
                 raise RuntimeError('Axis must be stationary before starting')
-            a,b,dwell,velo,acc,dec=(float(self.inputs[k].text()) for k in ('a','b','dwell','velo','acc','dec'))
-            steps=int(self.inputs['steps'].text())
+            values = {}
+            for key, label in (('a', 'Endpoint A'), ('b', 'Endpoint B'),
+                               ('dwell', 'Dwell'), ('velo', 'Velocity'),
+                               ('acc', 'Acceleration'), ('dec', 'Deceleration'),
+                               ('steps', 'Steps')):
+                edit = self.inputs[key]
+                raw = edit.text().strip()
+                try:
+                    if not raw:
+                        raise ValueError(f'{label}: enter a value')
+                    try:
+                        value = int(raw) if key == 'steps' else float(raw)
+                    except ValueError:
+                        raise ValueError(f'{label}: enter a valid number' if key != 'steps'
+                                         else 'Steps: enter an integer') from None
+                    if not math.isfinite(value):
+                        raise ValueError(f'{label}: enter a finite value')
+                    if key in ('velo', 'acc', 'dec') and value <= 0:
+                        raise ValueError(f'{label}: must be positive')
+                    if key == 'dwell' and value < 0:
+                        raise ValueError('Dwell: must not be negative')
+                    if key == 'steps' and not 1 <= value <= 10000:
+                        raise ValueError('Steps: must be 1–10000')
+                except ValueError:
+                    edit.setFocus()
+                    edit.selectAll()
+                    raise
+                values[key] = value
+            a,b,dwell,velo,acc,dec=(values[k] for k in ('a','b','dwell','velo','acc','dec'))
+            steps=values['steps']
             jerk=None
             if self.traj_type==1 and self.jerk_edit.text().strip():
-                jerk=float(self.jerk_edit.text())
+                try:
+                    jerk=float(self.jerk_edit.text())
+                except ValueError:
+                    self.jerk_edit.setFocus()
+                    self.jerk_edit.selectAll()
+                    raise ValueError('Jerk: enter a valid number or leave blank') from None
                 if not math.isfinite(jerk) or jerk<=0:
                     raise ValueError('Ruckig jerk must be finite and positive')
                 if not self.demo and self.write_jerk is None:
                     raise RuntimeError('Jerk configuration unavailable')
-            if not all(math.isfinite(v) for v in (a,b,dwell,velo,acc,dec)) or dwell<0 or min(velo,acc,dec)<=0:
-                raise ValueError('Invalid scan parameters')
             if self.relative.isChecked():
                 actual=self._value('PosAct')
                 a,b=a+actual,b+actual
