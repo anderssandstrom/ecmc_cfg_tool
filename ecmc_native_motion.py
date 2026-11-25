@@ -79,6 +79,10 @@ class NativeMotionMixin:
         if mode==0:
             if self._mode()!=0:
                 raise RuntimeError('Execute mode changed after target write')
+            # Match the native caQtDM EXEC button: press=0, release=1.
+            self._put('ExeCmd',0)
+            if self._mode()!=0:
+                raise RuntimeError('Execute mode changed before execute edge')
             self._put('ExeCmd',1)
 
     def native_kill(self):
