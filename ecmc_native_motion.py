@@ -49,8 +49,13 @@ class NativeMotionMixin:
             raise RuntimeError(field+' write not confirmed')
 
     def _ready(self):
-        if self._value('ErrId')!=0 or self._value('Enabled')!=1 or self._value('EnableCmd')!=1:
-            raise RuntimeError('Axis error, disabled, or status unavailable')
+        err, enabled, requested = (self._value(k) for k in ('ErrId','Enabled','EnableCmd'))
+        if err is None or enabled not in (0,1) or requested not in (0,1):
+            raise RuntimeError(f'Axis status unavailable: ErrId={err}, EnaAct={enabled}, EnaCmd-RB={requested}')
+        if err != 0:
+            raise RuntimeError(f'Axis error 0x{int(err):x}')
+        if (enabled != 1 or requested != 1) and not getattr(self, 'auto_enable_timeout', 0) > 0:
+            raise RuntimeError(f'Axis disabled (EnaAct={enabled:g}, EnaCmd-RB={requested:g}); auto-enable not confirmed')
         if self._bit(10)!=1 or self._bit(11)!=0 or self._bit(23)!=0:
             raise RuntimeError('Axis not in RT, external trajectory, or blocked')
         if any(self._bit(k)!=1 for k in (6,7)) or any(self._bit(k)!=0 for k in (17,18)):
