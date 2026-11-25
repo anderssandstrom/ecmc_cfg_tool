@@ -195,6 +195,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self._diagram_value_pairs = []
         self._changes_by_axis = {}
         self._current_values_by_axis = {}
+        self._display_rate_by_prefix = {}
         self._axis_is_real_cache = {}
         self.default_axis_id = str(default_axis_id).strip() or '1'
         self._axis_id_was_provided = bool(axis_id_was_provided)
@@ -379,7 +380,7 @@ class CntrlWindow(QtWidgets.QMainWindow):
         self.rate_label = QtWidgets.QLabel('Rate: —')
         for control in (self.pid_units, self.time_units):
             search_row.addWidget(control)
-            control.toggled.connect(self._on_view_mode_changed)
+            control.toggled.connect(self._on_display_units_changed)
         search_row.addWidget(self.rate_label)
         self.live_check = QtWidgets.QCheckBox('Live')
         self.live_check.setToolTip('Read-only CA monitor diagnostics (5 Hz GUI refresh; IOC PV update rate may be slower)')
@@ -479,6 +480,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
     def _set_read_all_busy(self, busy, total=0):
         self._read_all_in_progress = bool(busy)
         self.read_all_btn.setEnabled(not busy)
+        for control in (self.pid_units, self.time_units, self.view_mode):
+            control.setEnabled(not busy)
         if hasattr(self, 'copy_read_to_set_btn'):
             self.copy_read_to_set_btn.setEnabled(not busy)
         if busy:
@@ -1361,6 +1364,50 @@ class CntrlWindow(QtWidgets.QMainWindow):
             return self.rows
         return [r for r in self.rows if txt in r['name'].lower()]
 
+    def _on_display_units_changed(self, _checked=False):
+        scene = self._controller_scene
+        if self.view_mode.currentText() != 'Controller Sketch' or scene is None:
+            return
+        pid_ms, timing_ms = self.pid_units.isChecked(), self.time_units.isChecked()
+        axis = self.axis_all_edit.text().strip() or self.default_axis_id
+        hz = self._display_rate_by_prefix.get(self._ioc_prefix_for_title())
+        changes = []
+        for row, edit in self._diagram_read_rows:
+            native = self._controller_yaml_key(row['name'])
+            old = units.display_path(native, scene.pid_ms, scene.timing_ms)
+            new = units.display_path(native, pid_ms, timing_ms)
+            if old == new:
+                continue
+            readback = edit.property('lastReadbackText')
+            if readback is not None and not self._values_match_text(edit.text(), readback):
+                self._log('Read or write pending edits before switching display units')
+                for control, checked in ((self.pid_units, scene.pid_ms), (self.time_units, scene.timing_ms)):
+                    blocked = control.blockSignals(True)
+                    control.setChecked(checked)
+                    control.blockSignals(blocked)
+                return
+            raw = self._cached_current_value(axis, row['name'])
+            # Never reuse a failed or unconfirmed read as a confirmed value.
+            if not raw or readback is None or not self._values_match_text(edit.text(), readback):
+                changes.append((edit, '', False))
+                continue
+            try:
+                kp = None
+                if native in units.PID:
+                    kp_name = 'AxisCntrlInnerKp' if native.startswith('controller.inner.') else 'AxisCntrlKp'
+                    kp = self._cached_current_value(axis, kp_name)
+                value = units.from_runtime(new, raw, hz, kp) if new in units.REVERSE else raw
+                changes.append((edit, value, True))
+            except (ValueError, TypeError, OverflowError) as ex:
+                changes.append((edit, 'N/A', False))
+                self._log(f"{row['name']}: {ex}")
+        scene.set_units(pid_ms, timing_ms)
+        for edit, value, confirmed in changes:
+            edit.setProperty('lastReadbackText', value if confirmed else None)
+            edit.setProperty('lastWriteTargetText', value if confirmed else None)
+            edit.setText(value)
+            self._set_sketch_value_style(edit, confirmed)
+
     def _on_view_mode_changed(self, _mode=''):
         self._populate_table()
         try:
@@ -1499,9 +1546,11 @@ class CntrlWindow(QtWidgets.QMainWindow):
         prefix = self._ioc_prefix_for_title()
         try:
             hz = units.rate(self._get_pv_best_effort(_join_prefix_pv(prefix, 'MCU-Cfg-Rate')))
+            self._display_rate_by_prefix[prefix] = hz
             self.rate_label.setText(f'{hz:g} Hz')
             return hz
         except (ValueError, TypeError):
+            self._display_rate_by_prefix.pop(prefix, None)
             self.rate_label.setText('Rate: unavailable')
             return None
 
