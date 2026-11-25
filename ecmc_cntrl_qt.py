@@ -1694,6 +1694,13 @@ class CntrlWindow(QtWidgets.QMainWindow):
                 values[key] = float(reply.rsplit(': ',1)[1])
             return values
         identity = self._context_identity()
+        def read_auto_enable():
+            if self._context_identity() != identity:
+                raise RuntimeError('Controller selection changed; reopen tuning for this axis')
+            ok, reply = self.read_raw_command(f'GetAxisAutoEnableTimeout({axis})', quiet=True)
+            if not ok:
+                return 0.0
+            return float(reply.rsplit(': ',1)[1])
         def read_lag():
             if self._context_identity() != identity:
                 return None
@@ -1721,7 +1728,8 @@ class CntrlWindow(QtWidgets.QMainWindow):
             if abs(actual-value)>max(1e-12,abs(value)*1e-8):
                 raise RuntimeError(f'Jerk readback mismatch: {actual:g} != {value:g}')
         self._tuning_window = TuningWindow(self, self.client, base, demo=self.demo,
-            read_config=read_config, read_lag=read_lag, read_jerk=read_jerk, write_jerk=write_jerk)
+            read_config=read_config, read_lag=read_lag, read_jerk=read_jerk, write_jerk=write_jerk,
+            read_auto_enable=read_auto_enable)
         self._tuning_window.show()
 
     def closeEvent(self, event):
