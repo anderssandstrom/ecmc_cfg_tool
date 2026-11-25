@@ -2066,7 +2066,9 @@ class CntrlWindow(QtWidgets.QMainWindow):
                     continue
                 set_edit.setText(val)
                 if set_edit is read_edit and bool(read_edit.property('sketchValue')):
-                    read_edit.setProperty('lastWriteTargetText', compact_float_text(val))
+                    if not self._values_match_text(val, read_edit.property('lastReadbackText')):
+                        continue
+                    read_edit.setProperty('lastWriteTargetText', val)
                 self._update_value_match_visual(set_edit, read_edit)
                 copied += 1
             self._log(f'Copied readback to set fields ({copied} rows)')
@@ -2238,6 +2240,10 @@ class CntrlWindow(QtWidgets.QMainWindow):
                 return False
             if bool(read_edit.property('sketchValue')):
                 read_edit.setProperty('lastReadbackText', disp_val)
+                # A newly built cell has no write target yet. Its first successful
+                # read establishes the baseline in the currently displayed units.
+                if read_edit.property('lastWriteTargetText') is None:
+                    read_edit.setProperty('lastWriteTargetText', disp_val)
             read_edit.setText(disp_val)
             self._record_current_value(axis_edit.text().strip() or self.default_axis_id, row_def.get('name', ''), raw_value)
             if bool(read_edit.property('sketchValue')):
