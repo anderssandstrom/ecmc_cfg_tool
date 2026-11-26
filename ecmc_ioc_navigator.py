@@ -6,6 +6,7 @@ import os
 import json
 from ecmc_caqtdm import launch_caqtdm, panel_directories
 from ecmc_hardware_panel import HardwarePanel
+from ecmc_hardware_trend import HardwareTrendWindow
 from ecmc_app_launcher import script_command
 from ecmc_diagnostic_presets import axis_diagnostic_pvs
 from ecmc_settings import UiSettings
@@ -1073,8 +1074,8 @@ class IocNavigator(QtWidgets.QMainWindow):
     def _open_hardware_trend(self, pvs):
         if self._demo or not pvs:
             return
-        title = str(pvs[0]) if len(pvs) == 1 else "Hardware PV trend"
-        self._open_thread_trend(pvs, title=title, separate=True)
+        window = HardwareTrendWindow(pvs, parent=self)
+        window.show()
 
     def _open_native_hardware(self, slaves, title):
         panel = HardwarePanel(self._snapshot.get("prefix") or self._prefix(),
