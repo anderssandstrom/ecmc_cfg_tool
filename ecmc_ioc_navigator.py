@@ -26,6 +26,8 @@ from ecmc_rtlog_qt import RtLogWindow
 from ecmc_ioc_tree import demo_ioc, discover_ioc
 from ecmc_sdo_qt import SdoBrowserWindow
 
+INSTALLED_QT_DIR = Path("/ioc/modules/qt")
+
 
 class DiscoverySignals(QtCore.QObject):
     finished = QtCore.pyqtSignal(object, str) if hasattr(QtCore, "pyqtSignal") else QtCore.Signal(object, str)
@@ -996,41 +998,34 @@ class IocNavigator(QtWidgets.QMainWindow):
         macro = f"SYS={self._prefix()},IOC={self._prefix()},ID_1={item_id},ID_2={item_id:02d}"
         self._caqtdm("ecmcSMxx.ui", macro)
 
-    def _overview_script(self, script_name):
-        local = self.caqtdm_dir / script_name
-        if local.exists():
-            return str(local)
-        return f"/ioc/modules/qt/{script_name}"
+    def _open_overview(self, script_name, *filters):
+        for directory in (self.caqtdm_dir, INSTALLED_QT_DIR):
+            script = (directory / script_name).absolute()
+            if script.is_file():
+                self._spawn(
+                    ["python3", str(script), "--rows", "1", *filters, self._prefix()],
+                    script.parent,
+                )
+                return
+        QtWidgets.QMessageBox.critical(
+            self, "Launch failed",
+            f"{script_name} was not found in {self.caqtdm_dir} or {INSTALLED_QT_DIR}.",
+        )
 
     def _open_axis_groups_overview(self):
-        self._spawn(["python3", self._overview_script("ecmc_start_axesgroup_overview.py"), "--rows", "1", self._prefix()], self.caqtdm_dir)
+        self._open_overview("ecmc_start_axesgroup_overview.py")
 
     def _open_motion_overview(self):
-        self._spawn(
-            ["python3", self._overview_script("ecmc_start_axis_overview.py"), "--rows", "1", self._prefix()],
-            self.caqtdm_dir,
-        )
+        self._open_overview("ecmc_start_axis_overview.py")
 
     def _open_state_machines_overview(self):
-        self._spawn(["python3", self._overview_script("ecmc_start_sm_overview.py"), "--rows", "1", self._prefix()], self.caqtdm_dir)
+        self._open_overview("ecmc_start_sm_overview.py")
 
     def _open_axes_for_group(self, data):
-        self._spawn(
-            [
-                "python3", self._overview_script("ecmc_start_axis_overview.py"),
-                "--rows", "1", "--grp_id", str(data["id"]), self._prefix(),
-            ],
-            self.caqtdm_dir,
-        )
+        self._open_overview("ecmc_start_axis_overview.py", "--grp_id", str(data["id"]))
 
     def _open_axes_for_state_machine(self, data):
-        self._spawn(
-            [
-                "python3", self._overview_script("ecmc_start_axis_overview.py"),
-                "--rows", "1", "--sm_id_mst", str(data["id"]), self._prefix(),
-            ],
-            self.caqtdm_dir,
-        )
+        self._open_overview("ecmc_start_axis_overview.py", "--sm_id_mst", str(data["id"]))
 
     def _open_cpp_logic(self, data):
         self._caqtdm("ecmcCppLogic.ui", f"IOC={self._prefix()},CPP_ID={int(data['id'])}")
