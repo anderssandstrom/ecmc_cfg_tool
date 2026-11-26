@@ -12,27 +12,39 @@ def encoder_delta(position,primary):
         return None
 
 class EncoderOverview(QtWidgets.QWidget):
-    def __init__(self,base,demo=False,on_plot=None):
+    def __init__(self,base,demo=False,on_plot=None,on_select=None):
         super().__init__()
         self.base,self.demo,self.on_plot=base,demo,on_plot
+        self.on_select=on_select
         self.count=0
         self.primary=None
         self.pvs={}
         layout=QtWidgets.QVBoxLayout(self)
+        row=QtWidgets.QHBoxLayout()
+        self.mode_label=QtWidgets.QLabel("Accepted mode: —")
+        row.addWidget(self.mode_label)
+        self.mode_select=QtWidgets.QComboBox()
+        self.mode_select.addItem("Auto power",0)
+        row.addWidget(self.mode_select,1)
+        self.apply=QtWidgets.QPushButton("Apply")
+        self.apply.setEnabled(False)
+        self.apply.clicked.connect(lambda checked=False:self.on_select(self.mode_select.currentData()) if self.on_select else None)
+        row.addWidget(self.apply)
+        layout.addLayout(row)
         self.table=QtWidgets.QTableWidget(0,9)
         self.table.setHorizontalHeaderLabels(("Encoder","Position","Δ primary","Velocity","Homed","Absolute","Ready","Error","Trend"))
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
         layout.addWidget(self.table)
-        note=QtWidgets.QLabel("Δ is a direct numerical difference; compare only encoders with matching units and coordinate references. Primary is read-only.")
+        note=QtWidgets.QLabel("Δ is a direct numerical difference; compare only encoders with matching units and coordinate references. Disable the drive before changing encoder selection mode.")
         note.setWordWrap(True)
         layout.addWidget(note)
         self.timer=QtCore.QTimer(self)
         self.timer.setInterval(500)
         self.timer.timeout.connect(self._tick)
 
-    def set_axis_state(self,count,primary):
+    def set_axis_state(self,count,primary,mode=None,can_select=False):
         try:
             n=int(count)
             if float(count)!=n or not 1<=n<=8: n=0
@@ -41,8 +53,14 @@ class EncoderOverview(QtWidgets.QWidget):
             i=int(primary)
             self.primary=i if float(primary)==i and 1<=i<=n else None
         except (TypeError,ValueError,OverflowError): self.primary=None
+        self.mode_label.setText('Accepted mode: '+('Auto power' if mode==0 else f'Encoder {int(mode)}' if mode in range(1,9) else '—'))
+        self.apply.setEnabled(bool(can_select and mode is not None and n and self.on_select))
         if n==self.count: return
         self.count=n
+        self.mode_select.clear()
+        self.mode_select.addItem('Auto power',0)
+        for i in range(1,n+1): self.mode_select.addItem(f'Encoder {i}',i)
+        if mode in range(n+1): self.mode_select.setCurrentIndex(int(mode))
         self._disconnect()
         self.table.setRowCount(n)
         for row in range(n):

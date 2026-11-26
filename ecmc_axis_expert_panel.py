@@ -5,7 +5,7 @@ from qt_compat import QtCore, QtWidgets
 from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value, axis_status_value, decode_msta, MSTA_BITS
 from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
 from ecmc_axis_write import AxisWriteTask
-from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTask, KillTask
+from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTask, KillTask, EncoderModeTask
 from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
 from ecmc_encoder_homing_panel import EncoderHomingPanel
 from ecmc_encoder_overview import EncoderOverview
@@ -203,7 +203,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
             pages[title]=page_layout
             self.detail_tabs.addTab(page,title)
         if native:
-            self._encoder_overview=EncoderOverview(self.base,demo=self.demo,on_plot=self.on_plot)
+            self._encoder_overview=EncoderOverview(self.base,demo=self.demo,on_plot=self.on_plot,on_select=self._select_encoder_mode)
             pages["Encoders"].addWidget(self._encoder_overview)
         for index,(group,rows) in enumerate(axis_signals(self.base,self.interface.currentData())):
             box = QtWidgets.QGroupBox(group)
@@ -401,6 +401,22 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._update_controls()
         QtCore.QThreadPool.globalInstance().start(task)
         return True
+
+    def _select_encoder_mode(self,mode):
+        if mode is None or self.interface.currentData()!="native" or not self.arm.isChecked() or self._writes or not self.isVisible():
+            return
+        if not self._encoder_overview.isVisible() or not self._encoder_overview.apply.isEnabled():
+            return
+        if self.demo:
+            self._overrides["-EncMode-RB"]=mode
+            self._overrides["-SetEncIdCmd-RB"]=mode or 1
+            self._tick()
+            return
+        if QtWidgets.QMessageBox.question(self,"Encoder selection","Change encoder selection mode? Verify coordinate consistency before enabling the drive.",
+                QtWidgets.QMessageBox.Yes|QtWidgets.QMessageBox.No,QtWidgets.QMessageBox.No)!=QtWidgets.QMessageBox.Yes:
+            return
+        if self.arm.isChecked() and not self._writes and self.isVisible() and self.interface.currentData()=="native":
+            self._launch_position_task(EncoderModeTask(self.base,mode))
 
     def _home(self,procedure=None):
         if isinstance(procedure,bool): procedure=None
@@ -710,7 +726,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         if self._encoder_homing is not None:
             self._encoder_homing.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"))
         if self._encoder_overview is not None:
-            self._encoder_overview.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"))
+            self._encoder_overview.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"),samples.get("-EncMode-RB"),self.arm.isChecked() and not self._writes and all(samples.get(k)==0 for k in ("-EnaAct","-EnaCmd-RB","-Busy","-Moving")))
         self._overview.set_values(samples)
         samples.update({"msta:"+label: bit for label,bit in decode_msta(samples.get(".MSTA")).items()})
         for icon in self._status_icons + self._msta_icons:

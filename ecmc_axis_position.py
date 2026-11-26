@@ -231,3 +231,39 @@ class KillTask(PositionTask):
             except Exception:
                 pass
         self.signals.finished.emit("; ".join(errors))
+
+class EncoderModeTask(PositionTask):
+    """Use the native selection-mode contract only while disabled and idle."""
+    def __init__(self,base,mode):
+        super().__init__(base,True,False,0,1)
+        self.mode=mode
+
+    def run(self):
+        error=""
+        try:
+            for key,suffix in (("Enabled","-EnaAct"),("EnableCmd","-EnaCmd-RB"),
+                               ("Busy","-Busy"),("Moving","-Moving"),("Count","-EncCnt"),
+                               ("Mode","-EncMode"),("ModeRB","-EncMode-RB")):
+                self._connect(key,suffix)
+            count=self._value("Count")
+            if count is None or count not in range(1,9) or self.mode not in range(int(count)+1):
+                raise RuntimeError("Encoder selection outside configured range")
+            if any(self._value(k)!=0 for k in ("Enabled","EnableCmd","Busy","Moving")):
+                raise RuntimeError("Disable the axis and wait for standstill before changing encoder mode")
+            pv=self.pvs["Mode"]
+            pv.get_ctrlvars(timeout=.7)
+            labels=list(pv.enum_strs or [])
+            expected="Auto power" if self.mode==0 else f"Encoder {self.mode}"
+            if self.mode>=len(labels) or labels[self.mode]!=expected:
+                raise RuntimeError("Encoder mode enum does not match the supported ECMCCFG contract")
+            if any(self._value(k)!=0 for k in ("Enabled","EnableCmd","Busy","Moving")):
+                raise RuntimeError("Axis state changed")
+            self._motor_put("Mode",self.mode)
+            if self._value("ModeRB")!=self.mode:
+                raise RuntimeError("Write sent; accepted mode not yet confirmed. Check mode readback before enabling.")
+        except Exception as ex: error=str(ex)
+        finally:
+            for pv in self.pvs.values():
+                try: pv.disconnect()
+                except Exception: pass
+            self.signals.finished.emit(error)
