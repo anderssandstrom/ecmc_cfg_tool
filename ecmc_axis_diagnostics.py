@@ -8,7 +8,8 @@ NATIVE = (
     ("Homing", (("Procedure","-movHomCmd"),)),
     ("Interlocks", (("Forward limit","-LimFwd"), ("Backward limit","-LimBwd"), ("Home switch","-HomeSwitch"), ("Forward interlock","-SumIlockFwd"), ("Backward interlock","-SumIlockBwd"), ("Interlock text","-IlockTxt"))),
     ("ECMC soft limits", (("Lower limit (dial)","-CfgDLLM"), ("Upper limit (dial)","-CfgDHLM"), ("Forward enabled","-SftLimFwdEna-RB"), ("Backward enabled","-SftLimBwdEna-RB"), ("Forward interlock","-SftLimFwdIlock"), ("Backward interlock","-SftLimBwdIlock"), ("Forward enable command","-SftLimFwdEna"), ("Backward enable command","-SftLimBwdEna"))),
-    ("Controller and diagnostics", (("Error ID","-ErrId"), ("Warning ID","-WrnId"), ("Message","-MsgTxt"), ("Encoder count","-EncCnt"), ("Selected encoder RB","-SetEncIdCmd-RB"), ("Encoder source","-EncSrcTyp-RB"), ("Trajectory source","-TrjSrcTyp-RB"), ("Trajectory type","-TrajType"), ("Drive type","-DrvType"), ("Drive mode","-DrvMode"), ("Kp","-Ctrl-Kp"), ("Ki","-Ctrl-Ki"), ("Kd","-Ctrl-Kd"))),
+    ("Controller", (("Kp","-Ctrl-Kp"), ("Ki","-Ctrl-Ki"), ("Kd","-Ctrl-Kd"), ("Trajectory type","-TrajType"))),
+    ("Diagnostics", (("Error ID","-ErrId"), ("Warning ID","-WrnId"), ("Message","-MsgTxt"), ("Encoder count","-EncCnt"), ("Selected encoder RB","-SetEncIdCmd-RB"), ("Encoder source","-EncSrcTyp-RB"), ("Trajectory source","-TrjSrcTyp-RB"), ("Drive type","-DrvType"), ("Drive mode","-DrvMode"))),
 )
 MOTOR = (
     ("Motion (motor record user coordinates)", (("Actual position",".RBV"), ("Requested position",".VAL"), ("Velocity setting",".VELO"), ("Acceleration time",".ACCL"), ("Units",".EGU"), ("Tweak distance",".TWV"))),

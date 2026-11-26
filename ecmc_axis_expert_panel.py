@@ -8,6 +8,7 @@ from ecmc_axis_write import AxisWriteTask
 from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTask, KillTask
 from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
 from ecmc_encoder_homing_panel import EncoderHomingPanel
+from ecmc_encoder_overview import EncoderOverview
 from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
 
 class AxisExpertPanel(QtWidgets.QWidget):
@@ -29,6 +30,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._motion_widgets = []
         self._overview = None
         self._encoder_homing = None
+        self._encoder_overview = None
         self._status_icons = []
         self._msta_icons = []
         self._stop_pool = QtCore.QThreadPool(self)
@@ -93,6 +95,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.arm.setChecked(False)
         self._labels = {}
         self._encoder_homing = None
+        self._encoder_overview = None
         self._edit_widgets = {}
         self._action_buttons = []
         root = QtWidgets.QWidget()
@@ -175,6 +178,18 @@ class AxisExpertPanel(QtWidgets.QWidget):
             action_row.addWidget(button)
         action_row.addStretch()
         layout.addLayout(action_row)
+        self.detail_tabs=QtWidgets.QTabWidget()
+        layout.addWidget(self.detail_tabs,1)
+        pages={}
+        for title in (("Motion","Encoders","Homing","Limits","Controller","Diagnostics") if native else ("Motion","Limits","Diagnostics")):
+            page=QtWidgets.QWidget()
+            page_layout=QtWidgets.QVBoxLayout(page)
+            page_layout.setContentsMargins(4,4,4,4)
+            pages[title]=page_layout
+            self.detail_tabs.addTab(page,title)
+        if native:
+            self._encoder_overview=EncoderOverview(self.base,demo=self.demo,on_plot=self.on_plot)
+            pages["Encoders"].addWidget(self._encoder_overview)
         for index,(group,rows) in enumerate(axis_signals(self.base,self.interface.currentData())):
             box = QtWidgets.QGroupBox(group)
             grid = QtWidgets.QGridLayout(box)
@@ -238,22 +253,10 @@ class AxisExpertPanel(QtWidgets.QWidget):
             if group == "Homing":
                 self._encoder_homing = EncoderHomingPanel(self.base,demo=self.demo,on_plot=self.on_plot)
                 grid.addWidget(self._encoder_homing,grid.rowCount(),0,1,4)
-            if index == 0 or group in ("Limits","ECMC soft limits"):
-                layout.addWidget(box)
-            else:
-                toggle = QtWidgets.QToolButton()
-                box.setTitle("")
-                toggle.setText(group)
-                toggle.setCheckable(True)
-                toggle.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
-                toggle.setArrowType(QtCore.Qt.RightArrow)
-                toggle.toggled.connect(box.setVisible)
-                toggle.toggled.connect(lambda on,b=toggle: b.setArrowType(QtCore.Qt.DownArrow if on else QtCore.Qt.RightArrow))
-                layout.addWidget(toggle)
-                layout.addWidget(box)
-                box.hide()
-            if index == 0:
-                pass
+            tab=("Motion" if group.startswith("Motion") else "Homing" if group=="Homing" else
+                 "Limits" if group in ("Limits","ECMC soft limits","Interlocks") else
+                 "Controller" if group=="Controller" else "Diagnostics")
+            pages[tab].addWidget(box)
         if not native:
             toggle = QtWidgets.QToolButton()
             toggle.setText("Motor status bits (MSTA)")
@@ -270,10 +273,11 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 bits.addWidget(icon,i//2,i%2)
             toggle.toggled.connect(details.setVisible)
             toggle.toggled.connect(lambda on,b=toggle: b.setArrowType(QtCore.Qt.DownArrow if on else QtCore.Qt.RightArrow))
-            layout.addWidget(toggle)
-            layout.addWidget(details)
+            pages["Diagnostics"].addWidget(toggle)
+            pages["Diagnostics"].addWidget(details)
             details.hide()
-        layout.addStretch()
+        for page_layout in pages.values():
+            page_layout.addStretch()
         self.scroll.setWidget(root)
         self._update_controls()
         self._start()
@@ -636,6 +640,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
                     label.setText(text)
         if self._encoder_homing is not None:
             self._encoder_homing.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"))
+        if self._encoder_overview is not None:
+            self._encoder_overview.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"))
         self._overview.set_values(samples)
         samples.update({"msta:"+label: bit for label,bit in decode_msta(samples.get(".MSTA")).items()})
         for icon in self._status_icons + self._msta_icons:
