@@ -89,3 +89,44 @@ class PositionTask(QtCore.QRunnable, NativeMotionMixin):
                 except Exception:
                     pass
             self.signals.finished.emit(error)
+
+class HomeTask(PositionTask):
+    """Use configured homing procedure, never substitute a position move."""
+    def __init__(self,base):
+        super().__init__(base,True,False,0,1)
+
+    def run(self):
+        error = ""
+        try:
+            for key in ("Stat","Auto","ErrId","Enabled","EnableCmd","Command","CmdData","Execute"):
+                self._connect(key,"-"+NATIVE_PV_SUFFIXES[key])
+            self._connect("HomeProcedure","-movHomCmd")
+            proc = self._value("HomeProcedure")
+            if proc not in range(1,15):
+                raise RuntimeError("Homing procedure unavailable, disabled or manual position setting")
+            if self._value("ErrId") != 0 or self._value("Enabled") != 1 or self._value("EnableCmd") != 1:
+                raise RuntimeError("Axis not enabled or has an error")
+            if any(self._bit(bit)!=expected for bit,expected in ((10,1),(11,0),(23,0),(3,0),(5,0),(17,0),(18,0))):
+                raise RuntimeError("Axis busy, blocked, interlocked or not in local RT")
+            # HOME is enum index 10 in the verified ECMCCFG record.
+            # Confirm actual IOC enum label before writing.
+            pv = self.pvs["Command"]
+            pv.get_ctrlvars(timeout=.7)
+            labels = list(pv.enum_strs or [])
+            if "HOME" not in labels:
+                raise RuntimeError("IOC does not expose HOME command")
+            self._put("MtnCmd",labels.index("HOME"))
+            self._put("MtnCmdData",int(proc))
+            if self._value("HomeProcedure") != proc:
+                raise RuntimeError("Homing procedure changed")
+            self._put("ExeCmd",0)
+            self._put("ExeCmd",1)
+        except Exception as ex:
+            error = str(ex)
+        finally:
+            for pv in self.pvs.values():
+                try:
+                    pv.disconnect()
+                except Exception:
+                    pass
+            self.signals.finished.emit(error)

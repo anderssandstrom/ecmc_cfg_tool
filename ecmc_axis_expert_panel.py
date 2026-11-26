@@ -5,7 +5,7 @@ from qt_compat import QtCore, QtWidgets
 from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value, axis_status_value, decode_msta, MSTA_BITS
 from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
 from ecmc_axis_write import AxisWriteTask
-from ecmc_axis_position import PositionTask
+from ecmc_axis_position import PositionTask, HomeTask
 from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
 from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
 
@@ -148,7 +148,13 @@ class AxisExpertPanel(QtWidgets.QWidget):
             button.setAccessibleName(caption)
             button.setSizePolicy(QtWidgets.QSizePolicy.Fixed,QtWidgets.QSizePolicy.Fixed)
             button.setToolTip(caption)
-            if caption in available:
+            if native and caption == "Home reverse":
+                button.setText("⌂")
+                button.setAccessibleName("Home configured procedure")
+                button.setToolTip("Home using configured ECMC procedure")
+                button.clicked.connect(self._home)
+                self._action_buttons.append(button)
+            elif caption in available:
                 suffix,values = available[caption]
                 button.clicked.connect(lambda checked=False,suffix=suffix,values=values: self._write(suffix,values))
                 self._action_buttons.append(button)
@@ -341,11 +347,27 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 index = choices.index(current) if current in choices else 0
             choice,ok = QtWidgets.QInputDialog.getItem(self,"Motion command",pv,labels,max(0,min(index,len(labels)-1)),False)
             if ok and generation == self._generation:
-                self._write("-MtnCmd",(labels.index(choice),),enum=True)
+                self._write(pv[len(self.base):],(labels.index(choice),),enum=True)
         task.signals.finished.connect(ready)
         self._update_controls()
         QtCore.QThreadPool.globalInstance().start(task)
         return True
+
+    def _home(self):
+        if self.interface.currentData()!="native" or not self.arm.isChecked() or self._writes or self._enum_task is not None or not self.isVisible():
+            return
+        if self.demo:
+            self._overrides["-Homed"]=1
+            self._tick()
+            return
+        if QtWidgets.QMessageBox.question(self,"Home axis",
+                "Execute configured ECMC homing procedure?",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            return
+        if not self.arm.isChecked() or self._writes or not self.isVisible() or self.interface.currentData()!="native":
+            return
+        self._launch_position_task(HomeTask(self.base))
 
     def _move(self):
         if not self.arm.isChecked() or self._writes or self._enum_task is not None or not self.isVisible():
@@ -369,7 +391,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 self._overrides.update({".RBV":target,".VAL":target,".VELO":velocity})
             self._tick()
             return
-        task = PositionTask(self.base,native,relative,target,velocity)
+        self._launch_position_task(PositionTask(self.base,native,relative,target,velocity))
+
+    def _launch_position_task(self,task):
         self._position_task = task
         self._writes.add(task)
         def done(error):
@@ -453,7 +477,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                   "-VelAct":0,"-TgtVelCmd":1,"-AccCmd":2,"-DecCmd":2,
                   "-TgtPosCmd.EGU":"mm","-EnaCmd":1,"-EnaCmd-RB":1,"-EnaAct":1,"-Homed":1,
                   "-CfgDLLM":-50,"-CfgDHLM":50,"-LimFwd":1,"-LimBwd":1,"-SftLimFwdEna":1,"-SftLimBwdEna":1,"-SftLimFwdEna-RB":1,"-SftLimBwdEna-RB":1,
-                  "-AtTarget":1,"-InRT":1,"-EncCnt":1,"-SetEncIdCmd-RB":1,
+                  "-movHomCmd":14,"-AtTarget":1,"-InRT":1,"-EncCnt":1,"-SetEncIdCmd-RB":1,
                   "-MsgTxt":"","-IlockTxt":"","-Ctrl-Kp":1,"-Ctrl-Ki":0,"-Ctrl-Kd":0,
                   ".RBV":actual+5,".VAL":15,".VELO":1,".EGU":"mm",".DMOV":1,
                   ".CNEN":1,".MSTA":0x4102,".HLM":50,".LLM":-50,".TWV":0.1}
