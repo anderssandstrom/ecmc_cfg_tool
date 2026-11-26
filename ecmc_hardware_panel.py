@@ -45,6 +45,11 @@ class HardwarePanel(QtWidgets.QWidget):
         self.rows = {}
         self._monitor_lock = Lock()
         self._monitor_generation = 0
+        self._active_scope = set()
+        self._overview_pvs = set()
+        self._expert_pvs = []
+        self._expert_selector = None
+        self._scope_initialized = False
         self._monitors = {}
         self._monitor_pending = {}
         self._monitor_connected = {}
@@ -106,6 +111,7 @@ class HardwarePanel(QtWidgets.QWidget):
         layout.addLayout(buttons)
         self.selector.currentIndexChanged.connect(lambda _: self.write_enable.setChecked(False))
         self.selector.currentIndexChanged.connect(self.refresh)
+        self.views.currentChanged.connect(self._scope_changed)
         self.refresh()
 
     def refresh(self, *_):
@@ -115,6 +121,7 @@ class HardwarePanel(QtWidgets.QWidget):
         if not slave:
             return
         self._stop_monitors()
+        self._scope_initialized = False
         candidates = slave.get("panels") or [slave.get("panel"), slave.get("name")]
         pairs = hardware_pvs(self.prefix, slave.get("master", self.master), slave["id"], candidates)
         self.writable = hardware_writable_pvs(self.prefix, slave.get("master", self.master), slave["id"], candidates)
@@ -126,23 +133,72 @@ class HardwarePanel(QtWidgets.QWidget):
                 self.table.setItem(row, col, QtWidgets.QTableWidgetItem(value))
         self.table.resizeColumnsToContents()
         overview, experts = hardware_views(self.prefix, slave.get('master', self.master), slave['id'], candidates)
+        self._overview_pvs = {pv for _, pv in overview}
+        self._expert_pvs = [{pv for _, pv in pairs} for _, pairs in experts]
         self.build_cards(overview)
         self.build_experts(experts)
+        self._scope_initialized = True
+        self._scope_changed(force=True)
+
+    def _visible_scope(self):
+        if self.views.currentWidget() is self.table:
+            return set(self.rows)
+        if self.views.currentWidget() is self.expert:
+            index = self._expert_selector.currentIndex() if self._expert_selector is not None else -1
+            selected = self._expert_pvs[index] if 0 <= index < len(self._expert_pvs) else set()
+            return set(self.device_values) | selected
+        return set(self.device_values) | self._overview_pvs
+
+    def _invalidate_scope(self):
+        for pv in self.rows:
+            row = self.rows[pv]
+            self.table.item(row, 1).setText("—")
+            self.table.item(row, 2).setText("Paused")
+            self.update_card(pv, None, "Not currently monitored")
+        self._update_edit_cursors()
+
+    def _scope_changed(self, *_args, force=False):
+        if not self._scope_initialized or self._closed:
+            return
+        scope = self._visible_scope() if self.isVisible() else set()
+        if scope == self._active_scope and not force:
+            return
+        self._stop_monitors()
+        self._demo_timer.stop()
+        self._active_scope = scope
+        self._invalidate_scope()
+        if not scope:
+            self.status.setText("Monitoring paused — hardware tab hidden")
+            return
         if self.demo:
             self._demo_tick()
             self._update_edit_cursors()
             self._demo_timer.start()
-            self.status.setText("DEMO — simulated values and writes; no network requests")
+            self.status.setText(f"DEMO — {len(scope)} visible simulated PVs; no network requests")
+            return
+        if self._task is not None or self._write_task is not None:
             return
         if self.live_check.isChecked() and self._start_monitors():
             return
-        self.status.setText("Reading PVs…")
+        self.status.setText("Reading visible PVs…")
         self.selector.setEnabled(False)
         self.refresh_button.setEnabled(False)
-        self._task = ReadTask(list(self.rows), self.timeout)
+        self.live_check.setEnabled(False)
+        self._snapshot_scope = set(scope)
+        self._snapshot_generation = self._monitor_generation
+        self._task = ReadTask(sorted(scope), self.timeout)
         self._update_edit_cursors()
         self._task.signals.finished.connect(self._finished)
         QtCore.QThreadPool.globalInstance().start(self._task)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QtCore.QTimer.singleShot(0, self._scope_changed)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self._scope_initialized and not self._closed:
+            self._scope_changed(force=True)
 
     def _stop_monitors(self):
         self._monitor_timer.stop()
@@ -166,7 +222,7 @@ class HardwarePanel(QtWidgets.QWidget):
         except ImportError:
             return False
         generation = self._monitor_generation
-        for name in self.rows:
+        for name in sorted(self._active_scope):
             def connection(pvname=None, conn=None, key=name, **kwargs):
                 with self._monitor_lock:
                     if generation != self._monitor_generation:
@@ -204,13 +260,9 @@ class HardwarePanel(QtWidgets.QWidget):
             row = self.rows.get(pv)
             if row is None:
                 continue
-            self.table.item(row, 1).setText(str(value) if value is not None else "—")
-            item = self.table.item(row, 2)
-            item.setText("Read OK" if value is not None else "Unavailable")
-            item.setToolTip(error)
-            self.update_card(pv, value, error)
+            self._apply_value(pv, value, error)
         if self._write_task is None:
-            self.status.setText(f"Live CA monitoring — {connected}/{len(self.rows)} connected")
+            self.status.setText(f"Live CA monitoring — {connected}/{len(self._monitors)} connected | {len(self._monitors)} subscriptions")
         if pending:
             self._update_edit_cursors()
 
@@ -222,28 +274,38 @@ class HardwarePanel(QtWidgets.QWidget):
         if self._closed or not self.demo:
             self._demo_timer.stop()
             return
-        for pv, row in self.rows.items():
-            value = self._demo_value(pv)
-            self.table.item(row, 1).setText(str(value))
-            self.table.item(row, 2).setText("Simulated")
-            self.update_card(pv, value, "")
+        for pv in self._active_scope:
+            self._apply_value(pv, self._demo_value(pv), '', simulated=True)
+
+    def _apply_value(self, pv, value, error, simulated=False):
+        row = self.rows.get(pv)
+        if row is None or pv not in self._active_scope:
+            return
+        text = str(value) if value is not None else "—"
+        state = "Simulated" if simulated else "Read OK" if value is not None else "Unavailable"
+        item = self.table.item(row, 2)
+        if self.table.item(row, 1).text() == text and item.text() == state and item.toolTip() == error:
+            return
+        self.table.item(row, 1).setText(text)
+        item.setText(state)
+        item.setToolTip(error)
+        self.update_card(pv, value, error)
 
     def _finished(self, results):
         self._task = None
         if self._closed:
             return
-        available = 0
-        for pv, value, error in results:
-            row = self.rows[pv]
-            self.table.item(row, 1).setText(str(value) if value is not None else "—")
-            item = self.table.item(row, 2)
-            item.setText("Read OK" if value is not None else "Unavailable")
-            item.setToolTip(error)
-            self.update_card(pv, value, error)
-            available += value is not None
-        self.status.setText(f"{available}/{len(results)} PVs read successfully (snapshot)")
         self.selector.setEnabled(True)
         self.refresh_button.setEnabled(True)
+        self.live_check.setEnabled(True)
+        if self._snapshot_generation != self._monitor_generation:
+            self._scope_changed(force=True)
+            return
+        available = 0
+        for pv, value, error in results:
+            self._apply_value(pv, value, error)
+            available += value is not None
+        self.status.setText(f"{available}/{len(results)} visible PVs read (snapshot)")
         self._update_edit_cursors()
 
     def _bind(self, widget, pv):
@@ -411,12 +473,14 @@ class HardwarePanel(QtWidgets.QWidget):
         return card
 
     def build_experts(self, experts):
+        self._expert_selector = None
         root = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(root)
         if not experts:
             layout.addWidget(QtWidgets.QLabel("No expert panel definitions in the bundled catalog for this slave."))
         else:
             selector = QtWidgets.QComboBox()
+            self._expert_selector = selector
             stack = QtWidgets.QStackedWidget()
             for title, pairs in experts:
                 selector.addItem(title)
@@ -433,6 +497,7 @@ class HardwarePanel(QtWidgets.QWidget):
                 column.addStretch(1)
                 stack.addWidget(page)
             selector.currentIndexChanged.connect(stack.setCurrentIndex)
+            selector.currentIndexChanged.connect(self._scope_changed)
             layout.addWidget(selector)
             layout.addWidget(stack)
         layout.addStretch(1)
@@ -521,7 +586,7 @@ class HardwarePanel(QtWidgets.QWidget):
 
     def _can_write(self, pv):
         row = self.rows.get(pv)
-        return (not self._closed and self.write_enable.isChecked()
+        return (not self._closed and self.isVisible() and pv in self._active_scope and self.write_enable.isChecked()
                 and self._task is None and self._write_task is None
                 and pv in self.writable and row is not None
                 and self.table.item(row, 2).text() in ("Read OK", "Simulated"))
@@ -559,9 +624,9 @@ class HardwarePanel(QtWidgets.QWidget):
         self.selector.setEnabled(False)
         self.refresh_button.setEnabled(False)
         self.write_enable.setEnabled(False)
-        self._update_edit_cursors()
         self.status.setText("Writing " + pv)
         self._write_task = WriteTask(pv, value, self.timeout, self.writable[pv])
+        self._update_edit_cursors()
         self._write_task.signals.finished.connect(self._write_finished)
         QtCore.QThreadPool.globalInstance().start(self._write_task)
 
@@ -577,7 +642,7 @@ class HardwarePanel(QtWidgets.QWidget):
         if self._monitor_timer.isActive():
             self._update_edit_cursors()
         else:
-            self.refresh()
+            self._scope_changed(force=True)
 
     def plot_selected(self):
         pvs = [self.table.item(i.row(), 3).text()
