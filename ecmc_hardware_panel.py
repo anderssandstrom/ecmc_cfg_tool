@@ -65,10 +65,8 @@ class HardwarePanel(QtWidgets.QWidget):
         self.refresh_button = QtWidgets.QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh)
         buttons.addWidget(self.refresh_button)
-        plot = QtWidgets.QPushButton("Plot selected PVs")
-        plot.setEnabled(on_plot is not None and not demo)
-        plot.clicked.connect(self.plot_selected)
-        buttons.addWidget(plot)
+        buttons.addStretch(1)
+        buttons.addWidget(QtWidgets.QLabel("Right-click a signal to trend or copy PV"))
         layout.addLayout(buttons)
         self.selector.currentIndexChanged.connect(self.refresh)
         self.refresh()
@@ -116,59 +114,112 @@ class HardwarePanel(QtWidgets.QWidget):
         self.selector.setEnabled(True)
         self.refresh_button.setEnabled(True)
 
+    def _bind(self, widget, pv):
+        widget.setToolTip(pv)
+        widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        widget.customContextMenuRequested.connect(
+            lambda pos, w=widget, pv=pv: self.pv_menu(w.mapToGlobal(pos), pv))
+
+    def _group(self, title, rows):
+        card = QtWidgets.QGroupBox(title)
+        form = QtWidgets.QGridLayout(card)
+        form.setContentsMargins(5, 4, 5, 4)
+        form.setVerticalSpacing(2)
+        for row, (name, pv, short) in enumerate(rows):
+            key = QtWidgets.QLabel(short)
+            value = QtWidgets.QLabel("—")
+            value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+            for widget in (key, value):
+                self._bind(widget, pv)
+            form.addWidget(key, row, 0)
+            form.addWidget(value, row, 1)
+            self.card_values[pv] = (name, value)
+        form.setColumnStretch(1, 1)
+        return card
+
     def build_cards(self, pairs):
         root = QtWidgets.QWidget()
-        grid = QtWidgets.QGridLayout(root)
-        grid.setContentsMargins(4, 4, 4, 4)
-        grid.setSpacing(5)
-        groups = {}
+        layout = QtWidgets.QVBoxLayout(root)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
         self.card_values = {}
-        for label, pv in pairs:
-            m = re.match(r"(Drv|Enc|Tp|AI|AO|BI|BO)(\d+)", label)
-            group = ("Channel " + str(int(m[2]))) if m else "Device"
-            groups.setdefault(group, []).append((label, pv))
-        for index, (title, rows) in enumerate(groups.items()):
-            card = QtWidgets.QGroupBox(title)
-            form = QtWidgets.QGridLayout(card)
-            form.setContentsMargins(5, 5, 5, 5)
-            form.setVerticalSpacing(2)
-            for row, (name, pv) in enumerate(rows):
-                key = QtWidgets.QLabel(name)
-                value = QtWidgets.QLabel("—")
-                for widget in (key, value):
-                    widget.setToolTip(pv)
-                    widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
-                    widget.customContextMenuRequested.connect(
-                        lambda pos, w=widget, pv=pv: self.pv_menu(w.mapToGlobal(pos), pv))
-                form.addWidget(key, row, 0)
-                form.addWidget(value, row, 1)
-                self.card_values[pv] = (name, value)
-            form.setColumnStretch(1, 1)
-            grid.addWidget(card, index // 2, index % 2, QtCore.Qt.AlignTop)
-        grid.setRowStretch((len(groups) + 1) // 2, 1)
+        self.device_values = {}
+        header = QtWidgets.QHBoxLayout()
+        channels, other = {}, []
+        for name, pv in pairs:
+            if name == "PnlTyp":
+                continue
+            if name in ("HWType", "Online", "Operational") or name.startswith("Alstate-"):
+                label = QtWidgets.QLabel("—" if name == "HWType" else "○ " + name.replace("Alstate-", ""))
+                self._bind(label, pv)
+                header.addWidget(label)
+                self.device_values[pv] = (name, label)
+                continue
+            m = re.fullmatch(r"(Drv|Enc|Tp|AI|AO|BI|BO)(\d+)(?:-?(.*))", name)
+            if m:
+                kind, number, suffix = m.groups()
+                channels.setdefault(int(number), {}).setdefault(kind + number, []).append((name, pv, suffix or "Value"))
+            else:
+                other.append((name, pv, name))
+        header.addStretch(1)
+        layout.addLayout(header)
+        grid = QtWidgets.QGridLayout()
+        for i, (ch, groups) in enumerate(sorted(channels.items())):
+            col = QtWidgets.QWidget()
+            stack = QtWidgets.QVBoxLayout(col)
+            stack.setContentsMargins(0, 0, 0, 0)
+            stack.setSpacing(3)
+            title = QtWidgets.QLabel(f"Channel {ch:02d}")
+            title.setStyleSheet("font-weight: bold;")
+            stack.addWidget(title)
+            for group, rows in sorted(groups.items(), key=lambda item: ({"Drv":0,"Enc":1,"Tp":2}.get(re.sub(r"\d+$","",item[0]),3),item[0])):
+                stack.addWidget(self._group(group, rows))
+            stack.addStretch(1)
+            grid.addWidget(col, i // 2, i % 2, QtCore.Qt.AlignTop)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        layout.addLayout(grid)
+        if other:
+            layout.addWidget(self._group("Other signals", other))
+        layout.addStretch(1)
         self.cards.setWidget(root)
 
     def update_card(self, pv, value, error):
+        truth = {"1": True, "0": False, "1.0": True, "0.0": False,
+                 "true": True, "false": False, "yes": True, "no": False}.get(str(value).strip().lower())
+        if pv in self.device_values:
+            name, label = self.device_values[pv]
+            label.setToolTip(pv + ("\n" + error if error else ""))
+            if name == "HWType":
+                label.setText(str(value) if value is not None else "Unknown")
+                label.setStyleSheet("font-weight: bold;")
+                return
+            caption = name.replace("Alstate-", "")
+            if name.startswith("Alstate-"):
+                color = ("#26804b" if name == "Alstate-Op" else "#c43c3c") if truth else "#888"
+            else:
+                color = "#26804b" if truth is True else "#c43c3c" if truth is False else "#888"
+            label.setText(("● " if truth is not None else "○ ") + caption)
+            label.setStyleSheet("font-weight: bold; color: " + color + ";")
+            return
         if pv not in self.card_values:
             return
         name, label = self.card_values[pv]
-        label.setToolTip(error or pv)
+        label.setToolTip(pv + ("\n" + error if error else ""))
         if value is None:
             label.setText("—")
             label.setStyleSheet("color: #888;")
             return
-        text = str(value)
-        truth = {"1": True, "0": False, "true": True, "false": False,
-                 "yes": True, "no": False}.get(text.strip().lower())
         alarm = name.endswith("Alrm")
-        positive = name in ("Online", "Operational") or name.endswith(("Rdy", "RdyStat", "RdyToEna"))
+        positive = name.endswith(("Rdy", "RdyStat", "RdyToEna"))
         digital = bool(re.fullmatch(r"(BI|BO)\d+(-RB)?", name))
         if truth is not None and (alarm or positive or digital):
             color = ("#c43c3c" if truth == alarm else "#26804b") if (alarm or positive) else ("#26804b" if truth else "#888")
-            label.setText("● " + text)
+            label.setText("●")
+            label.setToolTip(f"{pv}: {value}")
             label.setStyleSheet("font-weight: bold; color: " + color + ";")
         else:
-            label.setText(text)
+            label.setText(str(value))
             label.setStyleSheet("font-weight: bold;")
 
     def table_menu(self, pos):

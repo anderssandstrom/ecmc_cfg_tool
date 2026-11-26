@@ -1065,13 +1065,22 @@ class IocNavigator(QtWidgets.QMainWindow):
         timer.start(1000)
 
     def _open_hardware_panel(self, data):
-        self._open_native_hardware([data], "EtherCAT Slave")
+        master = int(data.get("master", self._snapshot.get("master", "0")))
+        slave = int(data["id"])
+        name = data.get("name") or data.get("panel") or ""
+        self._open_native_hardware([data], f"m{master} s{slave:03d} {name}".strip())
+
+    def _open_hardware_trend(self, pvs):
+        if self._demo or not pvs:
+            return
+        title = str(pvs[0]) if len(pvs) == 1 else "Hardware PV trend"
+        self._open_thread_trend(pvs, title=title, separate=True)
 
     def _open_native_hardware(self, slaves, title):
         panel = HardwarePanel(self._snapshot.get("prefix") or self._prefix(),
                               self._snapshot.get("master", "0"), slaves,
                               timeout=self.timeout, demo=self._demo,
-                              on_plot=lambda pvs: self._open_daq(pvs))
+                              on_plot=self._open_hardware_trend)
         self._add_tool_tab(panel, title)
 
     def _open_object_panel(self, panel, data):
