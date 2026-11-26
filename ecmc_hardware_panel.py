@@ -1,9 +1,10 @@
-"""Native read-only EtherCAT process signal browser."""
+"""Native EtherCAT process signal browser with explicit write controls."""
 import re
 from qt_compat import QtCore, QtWidgets
 from ecmc_epics import EpicsClient
 from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs
 from ecmc_hardware_write import WriteTask
+from ecmc_hardware_widgets import HardwareSymbol, SignalValue, signal_role
 
 
 class ReadSignals(QtCore.QObject):
@@ -64,15 +65,17 @@ class HardwarePanel(QtWidgets.QWidget):
         self.card_values = {}
         self.table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.table_menu)
+        self.table.cellClicked.connect(self._table_click)
         buttons = QtWidgets.QHBoxLayout()
         self.refresh_button = QtWidgets.QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh)
         buttons.addWidget(self.refresh_button)
         self.write_enable = QtWidgets.QCheckBox("Enable writes")
         self.write_enable.setEnabled(not demo)
+        self.write_enable.toggled.connect(self._update_edit_cursors)
         buttons.addWidget(self.write_enable)
         buttons.addStretch(1)
-        buttons.addWidget(QtWidgets.QLabel("Right-click a signal to trend or copy PV"))
+        buttons.addWidget(QtWidgets.QLabel("Click writable values to edit; right-click for trend"))
         layout.addLayout(buttons)
         self.selector.currentIndexChanged.connect(lambda _: self.write_enable.setChecked(False))
         self.selector.currentIndexChanged.connect(self.refresh)
@@ -96,12 +99,14 @@ class HardwarePanel(QtWidgets.QWidget):
         self.table.resizeColumnsToContents()
         self.build_cards(pairs)
         if self.demo:
+            self._update_edit_cursors()
             self.status.setText("Demo mode — no network requests")
             return
         self.status.setText("Reading PVs…")
         self.selector.setEnabled(False)
         self.refresh_button.setEnabled(False)
         self._task = ReadTask(list(self.rows), self.timeout)
+        self._update_edit_cursors()
         self._task.signals.finished.connect(self._finished)
         QtCore.QThreadPool.globalInstance().start(self._task)
 
@@ -121,6 +126,7 @@ class HardwarePanel(QtWidgets.QWidget):
         self.status.setText(f"{available}/{len(results)} PVs read successfully (snapshot)")
         self.selector.setEnabled(True)
         self.refresh_button.setEnabled(True)
+        self._update_edit_cursors()
 
     def _bind(self, widget, pv):
         widget.setToolTip(pv)
@@ -128,21 +134,75 @@ class HardwarePanel(QtWidgets.QWidget):
         widget.customContextMenuRequested.connect(
             lambda pos, w=widget, pv=pv: self.pv_menu(w.mapToGlobal(pos), pv))
 
+    def _click_write(self, pv):
+        if not self._can_write(pv):
+            return False
+        self._write_pv(pv)
+        return True
+
+    def _table_click(self, row, column):
+        if column == 1 and self.table.item(row, 3) is not None:
+            self._click_write(self.table.item(row, 3).text())
+
+    def _update_edit_cursors(self, *_):
+        for pv, (_, widget) in self.card_values.items():
+            widget.setCursor(QtCore.Qt.PointingHandCursor if self._can_write(pv)
+                             else QtCore.Qt.ArrowCursor)
+
+    def _value_widget(self, name, pv, primary=False):
+        value = SignalValue("—", lambda pv=pv: self._click_write(pv))
+        value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        if primary:
+            font = value.font()
+            font.setPointSize(max(13, font.pointSize() + 4))
+            font.setBold(True)
+            value.setFont(font)
+        self._bind(value, pv)
+        self.card_values[pv] = (name, value)
+        return value
+
     def _group(self, title, rows):
         card = QtWidgets.QGroupBox(title)
-        form = QtWidgets.QGridLayout(card)
-        form.setContentsMargins(5, 4, 5, 4)
-        form.setVerticalSpacing(2)
-        for row, (name, pv, short) in enumerate(rows):
-            key = QtWidgets.QLabel(short)
-            value = QtWidgets.QLabel("—")
-            value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-            for widget in (key, value):
-                self._bind(widget, pv)
-            form.addWidget(key, row, 0)
-            form.addWidget(value, row, 1)
-            self.card_values[pv] = (name, value)
-        form.setColumnStretch(1, 1)
+        outer = QtWidgets.QVBoxLayout(card)
+        outer.setContentsMargins(5, 4, 5, 4)
+        outer.setSpacing(3)
+        kind = re.sub(r"\d+$", "", title)
+        primary = [r for r in rows if signal_role(kind, r[2]) == "primary"] if kind in ("Drv", "Enc") else []
+        status = [r for r in rows if signal_role(kind, r[2]) == "status"] if kind in ("Drv", "Enc") else []
+        detail = [r for r in rows if r not in primary and r not in status]
+        if primary:
+            hero = QtWidgets.QHBoxLayout()
+            hero.addWidget(HardwareSymbol(kind))
+            measurements = QtWidgets.QVBoxLayout()
+            for name, pv, short in primary:
+                line = QtWidgets.QHBoxLayout()
+                key = QtWidgets.QLabel(short)
+                self._bind(key, pv)
+                line.addWidget(key)
+                line.addWidget(self._value_widget(name, pv, primary=True), 1)
+                measurements.addLayout(line)
+            hero.addLayout(measurements, 1)
+            outer.addLayout(hero)
+        if status:
+            leds = QtWidgets.QGridLayout()
+            leds.setHorizontalSpacing(5)
+            leds.setVerticalSpacing(1)
+            for i, (name, pv, short) in enumerate(status):
+                label = QtWidgets.QLabel(short)
+                self._bind(label, pv)
+                leds.addWidget(label, i // 2, (i % 2) * 2)
+                leds.addWidget(self._value_widget(name, pv), i // 2, (i % 2) * 2 + 1)
+            outer.addLayout(leds)
+        if detail:
+            form = QtWidgets.QGridLayout()
+            form.setVerticalSpacing(2)
+            for row, (name, pv, short) in enumerate(detail):
+                key = QtWidgets.QLabel(short)
+                self._bind(key, pv)
+                form.addWidget(key, row, 0)
+                form.addWidget(self._value_widget(name, pv), row, 1)
+            form.setColumnStretch(1, 1)
+            outer.addLayout(form)
         return card
 
     def build_cards(self, pairs):
@@ -264,8 +324,12 @@ class HardwarePanel(QtWidgets.QWidget):
     def _write_pv(self, pv):
         if not self._can_write(pv):
             return
-        value, ok = QtWidgets.QInputDialog.getText(
-            self, "Write hardware PV", pv + "\nEnter new numeric value:")
+        current = self.table.item(self.rows[pv], 1).text()
+        if self.writable[pv] == "caToggleButton":
+            value, ok = QtWidgets.QInputDialog.getItem(self, "Write hardware PV", pv, ["0", "1"], 1 if current.strip() in ("1", "True", "Yes") else 0, False)
+        else:
+            value, ok = QtWidgets.QInputDialog.getText(
+                self, "Write hardware PV", pv + "\\nEnter new numeric value:", text=current)
         if not ok:
             return
         try:
