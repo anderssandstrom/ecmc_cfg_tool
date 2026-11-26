@@ -1,4 +1,4 @@
-"""Read-only compact axis overview, independent of command execution."""
+"""Interactive target staging and limit editing; never commands motion directly."""
 import math
 from qt_compat import QtCore, QtGui, QtWidgets
 
@@ -10,17 +10,48 @@ def number(value):
         return None
 
 class AxisPositionBar(QtWidgets.QWidget):
-    def __init__(self,native):
+    def __init__(self,native,on_target=None,on_limit=None):
         super().__init__()
         self.native = native
+        self.on_target,self.on_limit = on_target,on_limit
+        self.armed = False
+        self.pending = None
         self.values = {}
         self.setMinimumHeight(65)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding,QtWidgets.QSizePolicy.Fixed)
-        self.setToolTip("Read-only position overview; markers cannot command motion.")
+        self.setToolTip("Click track to stage an absolute target. Click a limit number to edit it. Move executes the target.")
 
     def set_values(self,values):
         self.values = values
         self.update()
+
+    def set_armed(self,armed):
+        if self.armed != bool(armed):
+            self.armed = bool(armed)
+            self.setCursor(QtCore.Qt.PointingHandCursor if armed else QtCore.Qt.ArrowCursor)
+            self.update()
+
+    def set_pending(self,value):
+        pending = number(value)
+        if pending != self.pending:
+            self.pending = pending
+            self.update()
+
+    def mouseReleaseEvent(self,event):
+        if event.button() != QtCore.Qt.LeftButton or not self.armed:
+            return super().mouseReleaseEvent(event)
+        left,right = 12.0,max(13.0,self.width()-12.0)
+        px,py = event.pos().x(),event.pos().y()
+        keys = ("-CfgDLLM","-CfgDHLM") if self.native else (".LLM",".HLM")
+        low,high = (number(self.values.get(k)) for k in keys)
+        if 44 <= py <= 64 and self.on_limit:
+            self.on_limit(keys[0 if px < self.width()/2 else 1])
+        elif 18 <= py < 44 and self.on_target and low is not None and high is not None and high > low:
+            fraction = max(0.0,min(1.0,(px-left)/(right-left)))
+            self.on_target(low+fraction*(high-low))
+        else:
+            return super().mouseReleaseEvent(event)
+        event.accept()
 
     def paintEvent(self,event):
         p = QtGui.QPainter(self)
@@ -56,10 +87,16 @@ class AxisPositionBar(QtWidgets.QWidget):
             p.setPen(QtCore.Qt.NoPen)
             p.setBrush(QtGui.QColor("#26804b"))
             p.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(pos,y+5),QtCore.QPointF(pos-5,y+14),QtCore.QPointF(pos+5,y+14)]))
+        if self.pending is not None:
+            pos=x(self.pending)
+            p.setPen(QtGui.QPen(QtGui.QColor("#8661c5"),2,QtCore.Qt.DashLine))
+            p.drawLine(QtCore.QPointF(pos,y-12),QtCore.QPointF(pos,y+12))
         p.setPen(fg)
         p.drawText(QtCore.QRectF(left,44,(right-left)/2,18),QtCore.Qt.AlignLeft,f"{low:.6g}")
         p.drawText(QtCore.QRectF((left+right)/2,44,(right-left)/2,18),QtCore.Qt.AlignRight,f"{high:.6g}")
-        legend = "Blue: actual   Green: target"
+        legend = "Actual (blue) · Target (green)"
+        if self.pending is not None:
+            legend += " · Draft (purple)"
         if native and (le != 1 or he != 1):
             legend += "   • Limit disabled/unknown"
         p.drawText(QtCore.QRectF(0,0,self.width(),17),QtCore.Qt.AlignCenter,legend)

@@ -92,7 +92,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         layout.setSpacing(4)
         native = self.interface.currentData() == "native"
         editable = NATIVE_EDIT if native else MOTOR_EDIT
-        self._overview = AxisPositionBar(native)
+        self._overview = AxisPositionBar(native,self._stage_target,self._edit_graph_limit)
         self._status_icons = []
         self._msta_icons = []
         overview_row = QtWidgets.QHBoxLayout()
@@ -119,6 +119,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.move_target = QtWidgets.QLineEdit()
         self.move_target.setPlaceholderText("Position / distance")
         self.move_target.setMaximumWidth(160)
+        self.move_target.textChanged.connect(self._refresh_draft)
+        self.move_mode.currentIndexChanged.connect(self._refresh_draft)
         self.move_velocity = QtWidgets.QLineEdit()
         self.move_velocity.setPlaceholderText("Velocity")
         self.move_velocity.setMaximumWidth(100)
@@ -261,10 +263,30 @@ class AxisExpertPanel(QtWidgets.QWidget):
         for b in self._action_buttons + self._motion_widgets:
             b.setEnabled(armed)
         self.interface.setEnabled(not self._writes)
+        if self._overview is not None:
+            self._overview.set_armed(armed)
         for pv,w in self._edit_widgets.items():
             available = w.value is not None if isinstance(w,BooleanValue) else w.text() != "—"
             w.set_editable(armed and available)
             w.setCursor(QtCore.Qt.PointingHandCursor if armed else QtCore.Qt.ArrowCursor)
+
+    def _refresh_draft(self,*_):
+        if self._overview is not None and hasattr(self,"move_target"):
+            self._overview.set_pending(self.move_target.text() if self.move_mode.currentData()=="abs" else None)
+
+    def _stage_target(self,value):
+        if not self.arm.isChecked() or self._writes or self._enum_task is not None or not self.isVisible():
+            return
+        self.move_mode.setCurrentIndex(0)
+        self.move_target.setText(format_axis_value(value,self._precision))
+        if not self.move_velocity.text():
+            suffix = "-TgtVelCmd" if self.interface.currentData()=="native" else ".VELO"
+            label = self._labels.get(self.base+suffix)
+            if label is not None and label.text()!="—":
+                self.move_velocity.setText(label.text())
+
+    def _edit_graph_limit(self,suffix):
+        self._edit(self.base+suffix)
 
     def _edit(self,pv):
         if not self.arm.isChecked() or self._writes or not self.isVisible() or pv not in self._edit_widgets or self._labels[pv].text()=="—":
@@ -469,6 +491,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 label.setText("—")
         if self._overview is not None:
             self._overview.set_values({})
+            self._overview.set_armed(False)
+            self._overview.set_pending(None)
         for icon in self._status_icons + self._msta_icons:
             icon.set_values({})
         self.status.setText("Paused")
