@@ -436,24 +436,14 @@ class IocNavigator(QtWidgets.QMainWindow):
         parent.setFont(0, font)
         parent.setData(0, self.DATA_ROLE, {"kind": "ecmc_group"})
         self.tree.addTopLevelItem(parent)
-        for group in groups:
-            group_item = QtWidgets.QTreeWidgetItem([group.get("name", "Info"), "", "", ""])
-            group_item.setData(
-                0,
-                self.DATA_ROLE,
-                {"kind": "ecmc_info_group", "name": group.get("name", "Info"), "items": group.get("items", [])},
-            )
-            parent.addChild(group_item)
-            if group.get("name") == "Thread":
-                self._add_thread_info(group_item, group.get("items", []))
-                continue
-            for info in group.get("items", []):
-                label = info.get("label", "")
-                value = info.get("value", "")
-                pv = info.get("pv", "")
-                item = QtWidgets.QTreeWidgetItem([label, "", value, pv])
-                item.setData(0, self.DATA_ROLE, {"kind": "ecmc_info", **info})
-                group_item.addChild(item)
+        # Keep the tree for navigation; actual configuration values belong
+        # in the IOC dashboard, not in hidden Type/PV columns.
+        thread=next((g for g in groups if g.get("name")=="Thread"),{})
+        for name,caption,items in (("Overview","Overview / configuration",[]),
+                                    ("Thread","RT thread diagnostics",thread.get("items",[]))):
+            item=QtWidgets.QTreeWidgetItem([caption,"","",""])
+            item.setData(0,self.DATA_ROLE,{"kind":"ecmc_info_group","name":name,"items":items})
+            parent.addChild(item)
         parent.setExpanded(True)
 
     def _add_thread_info(self, parent, items):
@@ -633,6 +623,12 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.statusBar().showMessage(f"Updated {updated} status values", 5000)
 
     def _reset_status_errors(self, status_item):
+        if self._demo:
+            self.statusBar().showMessage("DEMO: no reset write",5000)
+            return
+        if self._snapshot.get("prefix")!=self._prefix():
+            self.statusBar().showMessage("Refresh IOC before resetting errors",5000)
+            return
         reset_pv = _join_prefix_pv(self._prefix(), "MCU-ErrRst")
         answer = QtWidgets.QMessageBox.question(
             self,
@@ -683,6 +679,9 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._menu_action(menu, "Open RT Log App", self._open_rtlog)
             menu.addSeparator()
             self._menu_action(menu.addMenu("caQtDM"), "Main panel", self._open_main_panel)
+        elif kind == "ecmc_info_group" and data.get("name") == "Overview":
+            self._menu_action(menu,"Open IOC overview",self._open_ioc_dashboard)
+            self._menu_action(menu,"Reset IOC error",lambda:self._reset_status_errors(None))
         elif kind == "ecmc_info_group" and data.get("name") == "Thread":
             self._menu_action(menu, "Native Thread Diagnostics", lambda: self._open_native_diagnostic("thread"))
             self._menu_action(menu, "Print All Thread PVs", lambda: self._print_thread_pvs(data.get("items", [])))
@@ -793,8 +792,9 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._open_master_diagnostics()
         elif kind == "plc":
             self._open_native_diagnostic("plc",data)
-        elif kind == "ecmc_info_group" and data.get("name")=="Thread":
-            self._open_native_diagnostic("thread")
+        elif kind == "ecmc_info_group":
+            if data.get("name")=="Thread": self._open_native_diagnostic("thread")
+            else: self._open_ioc_dashboard()
         elif kind == "axis_group":
             self._open_axes_for_group(data)
         elif kind == "motion_group":

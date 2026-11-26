@@ -22,24 +22,37 @@ class IocDashboard(QtWidgets.QWidget):
             button.clicked.connect(lambda checked=False,key=key:open_group(key))
             counts.addWidget(button,i//3,i%3)
         layout.addLayout(counts)
-        grid=QtWidgets.QGridLayout()
-        fields=(("Hostname","MCU-Cfg-Hostname"),("Mode","MCU-Cfg-Mode"),("Application mode","MCU-AppMode"),
-                ("EPICS version",f"m{snapshot.get('master','0')}-Epics-Ver"),
-                ("ECMCCFG version",f"m{snapshot.get('master','0')}-Ecmccfg-Ver"),
-                ("Error ID","MCU-ErrId"),("Error message","MCU-ErrMsg"),("RT priority OK","MCU-ThdRTPrioOK"),
-                ("Memory locked","MCU-ThdMemLocked"),("Frequency (Hz)","MCU-ThdFrqAvg"),
-                ("Execution max (ns)","MCU-ThdExeMax"),("Send max (ns)","MCU-ThdSndMax"))
-        for i,(caption,suffix) in enumerate(fields):
-            name=self.prefix+":"+suffix
-            label=QtWidgets.QLabel("—")
-            label.setWordWrap(True)
-            label.setToolTip(name)
-            grid.addWidget(QtWidgets.QLabel(caption),i,0)
-            grid.addWidget(label,i,1)
-            self.labels[name]=label
-            self.names[name]=suffix
-        grid.setColumnStretch(1,1)
-        layout.addLayout(grid)
+        details=QtWidgets.QScrollArea()
+        details.setWidgetResizable(True)
+        content=QtWidgets.QWidget()
+        sections=QtWidgets.QVBoxLayout(content)
+        self.static_values={}
+        groups=snapshot.get("ecmc",[])
+        if not groups:
+            groups=[{"name":"General","items":[]}]
+        for group in groups:
+            box=QtWidgets.QGroupBox(group.get("name","Information"))
+            grid=QtWidgets.QGridLayout(box)
+            rows=list(group.get("items",[]))
+            if group.get("name")=="General":
+                rows=[{"label":"IOC prefix","value":self.prefix}]+[r for r in rows if r.get("label")!="IOC prefix"]
+            for i,info in enumerate(rows):
+                label=QtWidgets.QLabel(str(info.get("value") or "—"))
+                label.setWordWrap(True)
+                label.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+                name=info.get("pv","")
+                if name:
+                    label.setToolTip(name)
+                    self.labels[name]=label
+                    self.names[name]=name[len(self.prefix)+1:] if name.startswith(self.prefix+":") else name
+                    self.static_values[name]=info.get("value")
+                grid.addWidget(QtWidgets.QLabel(info.get("label","")),i,0)
+                grid.addWidget(label,i,1)
+            grid.setColumnStretch(1,1)
+            sections.addWidget(box)
+        sections.addStretch()
+        details.setWidget(content)
+        layout.addWidget(details,1)
         self.graphic=DiagnosticGraphic("thread")
         layout.addWidget(self.graphic)
         row=QtWidgets.QHBoxLayout()
@@ -49,7 +62,6 @@ class IocDashboard(QtWidgets.QWidget):
             button.clicked.connect(lambda checked=False,kill=kill:global_motion(kill))
             row.addWidget(button)
         layout.addLayout(row)
-        layout.addStretch()
         self.timer=QtCore.QTimer(self)
         self.timer.setInterval(500)
         self.timer.timeout.connect(self._tick)
@@ -71,14 +83,14 @@ class IocDashboard(QtWidgets.QWidget):
             if self.demo:
                 value={"MCU-Cfg-Hostname":"demo-host","MCU-Cfg-Mode":"demo","MCU-AppMode":1,
                        "MCU-ErrId":0,"MCU-ErrMsg":"","MCU-ThdRTPrioOK":1,"MCU-ThdMemLocked":1,
-                       "MCU-ThdFrqAvg":1000,"MCU-ThdExeMax":48000,"MCU-ThdSndMax":11000}.get(suffix,"demo")
+                       "MCU-ThdFrqAvg":1000,"MCU-ThdExeMax":48000,"MCU-ThdSndMax":11000}.get(suffix,self.static_values.get(name))
             else:
                 try:
                     pv=self.pvs.get(name)
                     if pv is not None and pv.connected and pv.severity!=3:
-                        value=pv.get(use_monitor=True,timeout=.001,as_string=suffix=="MCU-ErrMsg")
+                        value=pv.get(use_monitor=True,timeout=.001,as_string=not suffix.startswith("MCU-Thd"))
                 except Exception: pass
-            label.setText("—" if value is None else str(value))
+            label.setText("—" if value is None or value=="" else str(value))
             values[suffix.removeprefix("MCU-")]=value
         self.graphic.set_values(values)
     def hideEvent(self,event):
