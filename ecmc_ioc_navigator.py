@@ -152,6 +152,8 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.safety_qt_dir = self.app_dir.parent / "ecmc_plugin_safety" / "qt"
         self.thread_pool = QtCore.QThreadPool.globalInstance()
         self._tasks = set()
+        self._global_motion_pool = QtCore.QThreadPool(self)
+        self._global_motion_pool.setMaxThreadCount(1)
         self._snapshot = {}
         self._demo=demo
         self._health_pvs={}
@@ -209,6 +211,15 @@ class IocNavigator(QtWidgets.QMainWindow):
         action_row.addWidget(self.embed_tools_check, 1)
         action_row.addWidget(self.refresh_btn)
         nav_layout.addLayout(action_row)
+        motion_row = QtWidgets.QHBoxLayout()
+        self.stop_all_btn = QtWidgets.QPushButton("■ Stop all")
+        self.kill_all_btn = QtWidgets.QPushButton("⏻ Kill all")
+        for button,kill in ((self.stop_all_btn,False),(self.kill_all_btn,True)):
+            button.setStyleSheet("font-weight: bold; color: #c43c3c;")
+            button.setToolTip("IOC-wide motion command; not a safety-rated emergency stop")
+            button.clicked.connect(lambda checked=False,kill=kill: self._global_motion(kill))
+            motion_row.addWidget(button)
+        nav_layout.addLayout(motion_row)
 
         host_pv_row = QtWidgets.QHBoxLayout()
         self.host_pv_edit = QtWidgets.QLineEdit(ssh_host_pv)
@@ -787,6 +798,34 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._open_cpp_logic(data)
         elif kind == "safety_plugin":
             self._open_safety_plugin()
+
+    def _global_motion(self,kill):
+        from ecmc_axis_write import AxisWriteTask
+        prefix = self._snapshot.get("prefix","")
+        if not prefix or prefix != self._prefix():
+            QtWidgets.QMessageBox.warning(self,"IOC not selected","Refresh the selected IOC before sending global motion commands.")
+            return
+        # Cancel locally queued native commands for this discovered IOC.
+        bases = {a.get("motor") for a in self._snapshot.get("axes",[])}
+        for index in range(self.tabs.count()):
+            panel = self.tabs.widget(index)
+            if getattr(panel,"base",None) in bases and hasattr(panel,"cancel_pending_motion"):
+                panel.cancel_pending_motion()
+        suffix = "MCU-DisableAll" if kill else "MCU-StopAll"
+        if self._demo:
+            self.statusBar().showMessage(f"DEMO: {prefix}:{suffix}; no CA write",5000)
+            return
+        # These mbbo records use enum index 1 (RVAL 4 / 2).
+        task = AxisWriteTask(prefix+":"+suffix,(1,),timeout=self.timeout)
+        self._tasks.add(task)
+        def done(error):
+            self._tasks.discard(task)
+            if error:
+                QtWidgets.QMessageBox.warning(self,"Global command not confirmed",error)
+            else:
+                self.statusBar().showMessage(f"{prefix}:{suffix} write confirmed; check axis status",5000)
+        task.signals.finished.connect(done)
+        self._global_motion_pool.start(task)
 
     def _prefix(self):
         return self.prefix_edit.text().strip().rstrip(":")

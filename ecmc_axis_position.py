@@ -204,3 +204,25 @@ class MotorStopTask(PositionTask):
             except Exception:
                 pass
         self.signals.finished.emit("; ".join(errors))
+
+class KillTask(PositionTask):
+    """Disable drive and request stop independently; report every failed write."""
+    def __init__(self,base,native):
+        super().__init__(base,native,False,0,1)
+
+    def run(self):
+        errors = []
+        commands = (("-EnaCmd",0),("-StpCmd",1)) if self.native else (
+            (".CNEN",0),(".STOP",1),(".JOGF",0),(".JOGR",0))
+        for suffix,value in commands:
+            try:
+                self._connect(suffix,suffix)
+                self._motor_put(suffix,value)
+            except Exception as ex:
+                errors.append(str(ex))
+        for pv in self.pvs.values():
+            try:
+                pv.disconnect()
+            except Exception:
+                pass
+        self.signals.finished.emit("; ".join(errors))

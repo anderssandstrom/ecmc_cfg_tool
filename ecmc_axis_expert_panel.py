@@ -5,7 +5,7 @@ from qt_compat import QtCore, QtWidgets
 from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value, axis_status_value, decode_msta, MSTA_BITS
 from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
 from ecmc_axis_write import AxisWriteTask
-from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTask
+from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTask, KillTask
 from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
 from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
 
@@ -62,6 +62,12 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.stop_button.setStyleSheet("font-weight: bold; color: #c43c3c;")
         self.stop_button.clicked.connect(self._stop_motion)
         controls.addWidget(self.stop_button)
+        self.kill_button = QtWidgets.QPushButton("KILL")
+        self.kill_button.setToolTip("Disable drive and request stop (not a safety-rated emergency stop)")
+        self.kill_button.setStyleSheet("font-weight: bold; color: #c43c3c;")
+        self.kill_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed,QtWidgets.QSizePolicy.Fixed)
+        self.kill_button.clicked.connect(self._kill_motion)
+        controls.addWidget(self.kill_button)
         layout.addLayout(controls)
         self.scroll = QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -438,6 +444,33 @@ class AxisExpertPanel(QtWidgets.QWidget):
         task.signals.finished.connect(done)
         self._update_controls()
         QtCore.QThreadPool.globalInstance().start(task)
+
+    def cancel_pending_motion(self):
+        if self._position_task is not None:
+            self._position_task.cancelled.set()
+        self.arm.setChecked(False)
+
+    def _kill_motion(self):
+        self.cancel_pending_motion()
+        native = self.interface.currentData()=="native"
+        if self.demo:
+            if native:
+                self._overrides.update({"-EnaCmd":0,"-EnaCmd-RB":0,"-EnaAct":0,"-Moving":0,"-Busy":0})
+            else:
+                self._overrides.update({".CNEN":0,".DMOV":1})
+            self._tick()
+            return
+        task = KillTask(self.base,native)
+        self._writes.add(task)
+        def done(error):
+            self._writes.discard(task)
+            if not self._closed:
+                self._update_controls()
+                if error:
+                    QtWidgets.QMessageBox.warning(self,"Kill not fully confirmed",error)
+        task.signals.finished.connect(done)
+        self._update_controls()
+        self._stop_pool.start(task)
 
     def _stop_motion(self):
         if self._position_task is not None:
