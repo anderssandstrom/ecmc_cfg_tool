@@ -444,6 +444,9 @@ class IocNavigator(QtWidgets.QMainWindow):
             item=QtWidgets.QTreeWidgetItem([caption,"","",""])
             item.setData(0,self.DATA_ROLE,{"kind":"ecmc_info_group","name":name,"items":items})
             parent.addChild(item)
+        event=QtWidgets.QTreeWidgetItem(["Event / alarm history","","",""])
+        event.setData(0,self.DATA_ROLE,{"kind":"event_history"})
+        parent.addChild(event)
         parent.setExpanded(True)
 
     def _add_thread_info(self, parent, items):
@@ -523,6 +526,8 @@ class IocNavigator(QtWidgets.QMainWindow):
 
     def _update_health(self):
         enabled=self.health_check.isChecked()
+        from ecmc_event_history import EventHistory
+        if not hasattr(self,'_event_history'): self._event_history=EventHistory()
         self._health_values={}
         for item,kind,names in self._health_items():
             if not enabled:
@@ -542,6 +547,11 @@ class IocNavigator(QtWidgets.QMainWindow):
             statuses=[parent.child(j).text(4) for j in range(parent.childCount())]
             count=sum(is_problem(v) for v in statuses)
             parent.setText(4,f'{count} problems' if count else '')
+        prefix=self._snapshot.get("prefix","")
+        if enabled and prefix:
+            self._event_history.observe(prefix,{key:row["status"] for key,row in self._health_values.items()})
+        else:
+            self._event_history.reset_scope(prefix)
         self._filter_tree()
 
     def _export_health(self):
@@ -672,7 +682,10 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._menu_action(menu, "Open Remote SDO Browser", lambda: self._open_sdo(data))
             menu.addSeparator()
             self._menu_action(menu, "Open Hardware Panel", lambda: self._open_hardware_panel(data))
+        elif kind == "event_history":
+            self._menu_action(menu,"Open event history",self._open_event_history)
         elif kind == "ecmc_group":
+            self._menu_action(menu,"Event / alarm history",self._open_event_history)
             self._menu_action(menu, "Native IOC Overview", self._open_ioc_dashboard)
             self._menu_action(menu, "Open Command Parser", self._open_command_parser)
             self._menu_action(menu, "Open DAQ / FFT App", self._open_daq)
@@ -786,6 +799,8 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._open_native_axis_expert(data)
         elif kind == "ecmc_group":
             self._open_ioc_dashboard()
+        elif kind == "event_history":
+            self._open_event_history()
         elif kind == "hardware":
             self._open_hardware_panel(data)
         elif kind == "hardware_group":
@@ -866,6 +881,16 @@ class IocNavigator(QtWidgets.QMainWindow):
             self.statusBar().showMessage("Started caQtDM: " + str(panel), 5000)
         except Exception as ex:
             QtWidgets.QMessageBox.critical(self, "Launch failed", str(ex))
+
+    def _open_event_history(self):
+        from ecmc_event_history import EventHistory
+        from ecmc_event_panel import EventPanel
+        if not hasattr(self,"_event_history"): self._event_history=EventHistory()
+        for i in range(self.tabs.count()):
+            if isinstance(self.tabs.widget(i),EventPanel):
+                self.tabs.setCurrentIndex(i)
+                return
+        self._add_tool_tab(EventPanel(self._event_history),"Event history")
 
     def _open_ioc_dashboard(self):
         from ecmc_ioc_dashboard import IocDashboard

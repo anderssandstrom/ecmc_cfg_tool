@@ -235,6 +235,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
             page_layout.setContentsMargins(4,4,4,4)
             pages[title]=page_layout
             self.detail_tabs.addTab(page,title)
+        from ecmc_axis_readiness_panel import AxisReadiness
+        self._readiness=AxisReadiness(self.base,native,None if self.demo else self.on_plot)
+        self.detail_tabs.addTab(self._readiness,"Readiness")
         if native:
             self._encoder_overview=EncoderOverview(self.base,demo=self.demo,on_plot=self.on_plot,on_select=self._select_encoder_mode)
             pages["Encoders"].addWidget(self._encoder_overview)
@@ -799,6 +802,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         for button in getattr(self,"_shortcut_readbacks",{}):
             button.setStyleSheet("QPushButton:pressed { background-color: #26804b; color: white; }")
         if getattr(self,"home_indicators",None) is not None: self.home_indicators.update_samples({})
+        if hasattr(self,'_readiness'): self._readiness.update_samples({})
         self.status.setText("Paused")
         self.status.setStyleSheet("")
 
@@ -875,6 +879,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
             self._encoder_homing.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"))
         if self._encoder_overview is not None:
             self._encoder_overview.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"),samples.get("-EncMode-RB"),self.arm.isChecked() and not self._writes and self._jog_native is None and not self._jog_stops and all(samples.get(k)==0 for k in ("-EnaAct","-EnaCmd-RB","-Busy","-Moving")))
+        self._readiness.update_samples(samples)
         self._overview.set_values(samples)
         samples.update({"msta:"+label: bit for label,bit in decode_msta(samples.get(".MSTA")).items()})
         for icon in self._status_icons + self._msta_icons:
