@@ -1,4 +1,4 @@
-"""Build read-only hardware PV candidates from a local ecmccfg/qt checkout."""
+"""Build hardware PV and control metadata from a local ecmccfg/qt checkout."""
 import argparse
 import json
 from pathlib import Path
@@ -22,9 +22,9 @@ def macros(text, env):
 
 WRITE_WIDGETS = {"caTextEntry", "caToggleButton", "caMenu", "caByteController", "caNumeric", "caSpinbox"}
 
-def extract_catalog(directory, source):
+def extract_catalog(directory, source, source_commit=None):
     roots = {p.name: ET.parse(p).getroot() for p in sorted(Path(directory).glob("*.ui"))}
-    def collect(name, env, trail, out, writable, experts, scope=None, ancestry=()):
+    def collect(name, env, trail, out, writable, experts, commands, scope=None, ancestry=()):
         if name not in roots or name in trail or len(trail) > 15:
             return
         def visit(node, context):
@@ -44,8 +44,16 @@ def extract_catalog(directory, source):
                                 writable[suffix] = node.get('class')
                                 if scope is not None:
                                     scope['writable'][suffix] = node.get('class')
+                            if key == 'channel' and node.get('class') == 'caMessageButton':
+                                press = expand(props.get('pressMessage', ''), local).strip()
+                                release = expand(props.get('releaseMessage', ''), local).strip()
+                                # Only release-only integer commands are supported by the native GUI.
+                                if not press and re.fullmatch(r'[+-]?\d+', release):
+                                    command = {'label': props.get('label', '') or suffix,
+                                               'release': int(release)}
+                                    commands.setdefault(suffix, []).append(command)
             if node.get("class") == "caInclude":
-                collect(Path(expand(props.get("filename", ""), local)).name, local, trail + (name,), out, writable, experts, scope, ancestry)
+                collect(Path(expand(props.get("filename", ""), local)).name, local, trail + (name,), out, writable, experts, commands, scope, ancestry)
             if node.get("class") == "caRelatedDisplay":
                 args = props.get("args", "").split(";")
                 for i, file in enumerate(props.get("files", "").split(";")):
@@ -64,7 +72,7 @@ def extract_catalog(directory, source):
                                   "signals": set(), "writable": {}}
                         experts[scope_key] = expert
                         collect(target, context, trail + (name,), out, writable,
-                                experts, expert, ancestry + (target,))
+                                experts, commands, expert, ancestry + (target,))
             for child in node:
                 if child.tag != "property":
                     visit(child, local)
@@ -73,26 +81,37 @@ def extract_catalog(directory, source):
     writes = {}
     overview = {}
     expert_panels = {}
+    command_panels = {}
     for name in sorted(roots):
         if not HARDWARE.fullmatch(name):
             continue
         out = set()
         writable = {}
         experts = {}
+        commands = {}
         main = {'signals': set(), 'writable': {}}
-        collect(name, BASE, (), out, writable, experts, main)
+        collect(name, BASE, (), out, writable, experts, commands, main)
         key = name.removeprefix("ecmc").removesuffix(".ui")
         panels[key] = sorted(out)
         writes[key] = dict(sorted(writable.items()))
-        overview[key] = sorted(main['signals'])
+        # Conflicting commands on the same PV must not be collapsed to an arbitrary action.
+        command_panels[key] = {pv: entries[0] for pv, entries in sorted(commands.items())
+                               if all(entry == entries[0] for entry in entries)}
+        promoted = set()
+        if key == 'EL7062':
+            promoted = {f'Drv{ch}-{suffix}' for ch in ('01', '02')
+                        for suffix in ('Cmd', 'Stat', 'Spd', 'Cmd-RB', 'TrgDS402Ena', 'TrgDS402Dis')}
+        overview[key] = sorted(main['signals'] | (promoted & out))
         expert_panels[key] = [dict(e, signals=sorted(e['signals'])) for e in experts.values() if e['signals']]
     return {"source": source, "panels": panels, "writable": writes,
-            "overview": overview, "experts": expert_panels}
+            "overview": overview, "experts": expert_panels, "commands": command_panels,
+            "source_commit": source_commit}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path)
     parser.add_argument("--source", required=True)
+    parser.add_argument("--source-commit")
     parser.add_argument("--output", type=Path, default=Path(__file__).with_name("ecmc_hardware_catalog.json"))
     args = parser.parse_args()
-    args.output.write_text(json.dumps(extract_catalog(args.directory, args.source), indent=2) + "\n", encoding="utf-8")
+    args.output.write_text(json.dumps(extract_catalog(args.directory, args.source, args.source_commit), indent=2) + "\n", encoding="utf-8")
