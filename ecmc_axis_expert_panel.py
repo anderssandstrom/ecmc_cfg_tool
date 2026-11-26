@@ -1,8 +1,11 @@
-"""Visibility-scoped, read-only axis expert diagnostics."""
+"""Visibility-scoped axis commissioning controls."""
 import math
 import time
 from qt_compat import QtCore, QtWidgets
-from ecmc_axis_diagnostics import axis_signals
+from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS
+from ecmc_hardware_widgets import SignalValue
+from ecmc_axis_write import AxisWriteTask
+from ecmc_hardware_write import parse_write_value
 
 class AxisExpertPanel(QtWidgets.QWidget):
     def __init__(self, base, axis_id, demo=False, on_plot=None, actions=(), interface="native"):
@@ -12,6 +15,12 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._pvs = {}
         self._labels = {}
         self._started = time.monotonic()
+        self._overrides = {}
+        self._writes = set()
+        self._edit_widgets = {}
+        self._action_buttons = []
+        self._stop_pool = QtCore.QThreadPool(self)
+        self._stop_pool.setMaxThreadCount(1)
         layout = QtWidgets.QVBoxLayout(self)
         title = QtWidgets.QLabel(f"Axis {axis_id} — {base}")
         title.setWordWrap(True)
@@ -23,6 +32,17 @@ class AxisExpertPanel(QtWidgets.QWidget):
         layout.addWidget(self.interface)
         self.status = QtWidgets.QLabel("Paused")
         layout.addWidget(self.status)
+        controls = QtWidgets.QHBoxLayout()
+        self.arm = QtWidgets.QCheckBox("Enable writes")
+        self.arm.setToolTip("Arms motion commands; target writes may initiate motion.")
+        self.arm.toggled.connect(self._update_controls)
+        controls.addWidget(self.arm)
+        controls.addStretch()
+        self.stop_button = QtWidgets.QPushButton("STOP")
+        self.stop_button.setStyleSheet("font-weight: bold; color: #c43c3c;")
+        self.stop_button.clicked.connect(self._stop_motion)
+        controls.addWidget(self.stop_button)
+        layout.addLayout(controls)
         self.scroll = QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
         layout.addWidget(self.scroll,1)
@@ -41,28 +61,132 @@ class AxisExpertPanel(QtWidgets.QWidget):
 
     def _rebuild(self,*_):
         self._stop()
+        self.arm.setChecked(False)
         self._labels = {}
+        self._edit_widgets = {}
+        self._action_buttons = []
         root = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(root)
-        for group,rows in axis_signals(self.base,self.interface.currentData()):
+        layout.setContentsMargins(4,4,4,4)
+        layout.setSpacing(4)
+        native = self.interface.currentData() == "native"
+        editable = NATIVE_EDIT if native else MOTOR_EDIT
+        action_grid = QtWidgets.QGridLayout()
+        for i,(caption,suffix,values) in enumerate(NATIVE_ACTIONS if native else MOTOR_ACTIONS):
+            button = QtWidgets.QPushButton(caption)
+            button.clicked.connect(lambda checked=False,suffix=suffix,values=values: self._write(suffix,values))
+            self._action_buttons.append(button)
+            action_grid.addWidget(button,i//3,i%3)
+        layout.addLayout(action_grid)
+        for index,(group,rows) in enumerate(axis_signals(self.base,self.interface.currentData())):
             box = QtWidgets.QGroupBox(group)
             grid = QtWidgets.QGridLayout(box)
             grid.setSpacing(3)
-            for row,(label,pv) in enumerate(rows):
+            for i,(label,pv) in enumerate(rows):
+                suffix = pv[len(self.base):]
                 name = QtWidgets.QLabel(label)
-                value = QtWidgets.QLabel("—")
-                value.setWordWrap(True)
+                name.setWordWrap(True)
+                value = SignalValue("—",lambda pv=pv: self._edit(pv))
+                value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
                 value.setToolTip(pv)
-                grid.addWidget(name,row,0)
-                grid.addWidget(value,row,1)
+                if suffix in ("-PosAct",".RBV","-TgtPosCmd",".VAL"):
+                    font = value.font()
+                    font.setPointSize(max(14,font.pointSize()+4))
+                    font.setBold(True)
+                    value.setFont(font)
+                if suffix in editable:
+                    self._edit_widgets[pv] = value
+                grid.addWidget(name,i,0)
+                grid.addWidget(value,i,1)
                 value.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
                 value.customContextMenuRequested.connect(lambda pos,v=value,pv=pv: self._menu(v,pos,pv))
                 self._labels[pv] = value
             grid.setColumnStretch(1,1)
-            layout.addWidget(box)
+            if index == 0:
+                layout.addWidget(box)
+            else:
+                toggle = QtWidgets.QToolButton()
+                toggle.setText(group)
+                toggle.setCheckable(True)
+                toggle.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+                toggle.setArrowType(QtCore.Qt.RightArrow)
+                toggle.toggled.connect(box.setVisible)
+                toggle.toggled.connect(lambda on,b=toggle: b.setArrowType(QtCore.Qt.DownArrow if on else QtCore.Qt.RightArrow))
+                layout.addWidget(toggle)
+                layout.addWidget(box)
+                box.hide()
+            if index == 0:
+                pass
         layout.addStretch()
         self.scroll.setWidget(root)
+        self._update_controls()
         self._start()
+
+    def _update_controls(self,*_):
+        armed = self.arm.isChecked() and self.isVisible() and not self._writes and not self._closed
+        for b in self._action_buttons:
+            b.setEnabled(armed)
+        for pv,w in self._edit_widgets.items():
+            w.set_editable(armed and w.text() != "—")
+            w.setCursor(QtCore.Qt.PointingHandCursor if armed else QtCore.Qt.ArrowCursor)
+
+    def _edit(self,pv):
+        if not self.arm.isChecked() or self._writes or not self.isVisible() or pv not in self._edit_widgets or self._labels[pv].text()=="—":
+            return False
+        suffix = pv[len(self.base):]
+        text,ok = QtWidgets.QInputDialog.getText(self,"Edit axis setting",pv,text=self._labels[pv].text())
+        if ok:
+            try:
+                value = parse_write_value(text,"caTextEntry")
+            except ValueError as ex:
+                QtWidgets.QMessageBox.warning(self,"Invalid value",str(ex))
+                return True
+            self._write(suffix,(value,))
+        return True
+
+    def _stop_motion(self):
+        self.arm.setChecked(False)
+        self._write("-StpCmd" if self.interface.currentData()=="native" else ".STOP",(1,),stop=True)
+
+    def _write(self,suffix,values,stop=False):
+        if self._closed or not self.isVisible() or (not stop and (not self.arm.isChecked() or self._writes)):
+            return
+        native = self.interface.currentData()=="native"
+        pv = self.base+suffix
+        if not stop:
+            allowed = NATIVE_EDIT if native else MOTOR_EDIT
+            actions = NATIVE_ACTIONS if native else MOTOR_ACTIONS
+            if suffix not in allowed and not any(suffix==s and tuple(values)==v for _,s,v in actions):
+                return
+            if not self.demo and QtWidgets.QMessageBox.question(self,"Confirm axis write",
+                    f"Write {values} to {pv}? This may start motion.",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+                return
+            if not self.arm.isChecked() or not self.isVisible() or self._writes or native != (self.interface.currentData()=="native"):
+                return
+        if self.demo:
+            self._overrides[suffix] = values[-1]
+            if suffix=="-EnaCmd":
+                self._overrides.update({"-EnaCmd-RB":values[-1],"-EnaAct":values[-1]})
+            if suffix==".VAL":
+                self._overrides[".RBV"]=values[-1]
+            if suffix=="-ExeCmd":
+                target=self._demo_value(self.base+"-TgtPosCmd")
+                self._overrides.update({"-PosAct":target,"-PosSet":target,"-PosErr":0})
+            self._tick()
+            return
+        task = AxisWriteTask(pv,values)
+        self._writes.add(task)
+        def done(error):
+            self._writes.discard(task)
+            if not self._closed:
+                self._update_controls()
+                if error:
+                    QtWidgets.QMessageBox.warning(self,"Axis write not confirmed",error)
+        task.signals.finished.connect(done)
+        self._update_controls()
+        (self._stop_pool if stop else QtCore.QThreadPool.globalInstance()).start(task)
 
     def _menu(self,widget,pos,pv):
         menu = QtWidgets.QMenu(self)
@@ -78,11 +202,13 @@ class AxisExpertPanel(QtWidgets.QWidget):
 
     def _demo_value(self,pv):
         suffix = pv[len(self.base):]
+        if suffix in self._overrides:
+            return self._overrides[suffix]
         t = time.monotonic()-self._started
         actual = 10+0.01*math.sin(t)
         values = {"-PosAct":actual,"-PosSet":10,"-TgtPosCmd":10,"-PosErr":10-actual,
                   "-VelAct":0,"-TgtVelCmd":1,"-AccCmd":2,"-DecCmd":2,
-                  "-TgtPosCmd.EGU":"mm","-EnaCmd-RB":1,"-EnaAct":1,"-Homed":1,
+                  "-TgtPosCmd.EGU":"mm","-EnaCmd":1,"-EnaCmd-RB":1,"-EnaAct":1,"-Homed":1,
                   "-AtTarget":1,"-InRT":1,"-EncCnt":1,"-SetEncIdCmd-RB":1,
                   "-MsgTxt":"","-IlockTxt":"","-Ctrl-Kp":1,"-Ctrl-Ki":0,"-Ctrl-Kd":0,
                   ".RBV":actual+5,".VAL":15,".VELO":1,".EGU":"mm",".DMOV":1,
@@ -140,11 +266,14 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 label.setText(text)
         self.status.setText(f"{'DEMO — ' if self.demo else ''}{count}/{len(self._labels)} signals available")
 
+        self._update_controls()
+
     def showEvent(self,event):
         super().showEvent(event)
         QtCore.QTimer.singleShot(0,self._start)
 
     def hideEvent(self,event):
+        self.arm.setChecked(False)
         self._stop()
         super().hideEvent(event)
 

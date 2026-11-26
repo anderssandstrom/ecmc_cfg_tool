@@ -760,7 +760,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         data = item.data(0, self.DATA_ROLE) or {}
         kind = data.get("kind")
         if kind == "axis":
-            self._open_axis_panel(data, "ecmcAxis.ui")
+            self._open_native_axis_expert(data)
         elif kind == "ecmc_group":
             self._open_main_panel()
         elif kind == "hardware":

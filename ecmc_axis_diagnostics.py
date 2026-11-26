@@ -3,13 +3,13 @@
 Native coordinates and motor record user coordinates are deliberately separate.
 """
 NATIVE = (
-    ("Motion", (("Actual position","-PosAct"), ("Target position","-TgtPosCmd"), ("Trajectory position","-PosSet"), ("Following error","-PosErr"), ("Actual velocity","-VelAct"), ("Target velocity","-TgtVelCmd"), ("Acceleration command","-AccCmd"), ("Deceleration command","-DecCmd"), ("Position units","-TgtPosCmd.EGU"))),
-    ("State", (("Enable command RB","-EnaCmd-RB"), ("Enabled","-EnaAct"), ("Busy","-Busy"), ("Moving","-Moving"), ("Homed","-Homed"), ("At target","-AtTarget"), ("Sequence state","-SeqState"), ("Motion command","-MtnCmd"), ("Blocked","-Blocked"), ("In realtime","-InRT"))),
+    ("Motion", (("Actual position","-PosAct"), ("Target position","-TgtPosCmd"), ("Trajectory position","-PosSet"), ("Following error","-PosErr"), ("Actual velocity","-VelAct"), ("Target velocity","-TgtVelCmd"), ("Acceleration command","-AccCmd"), ("Deceleration command","-DecCmd"), ("Position units","-TgtPosCmd.EGU"), ("Tweak distance","-TwkDstCmd"))),
+    ("State", (("Enable command","-EnaCmd"), ("Enable command RB","-EnaCmd-RB"), ("Auto execute","-AutoExecuteOnTargetPos-RB"), ("Enabled","-EnaAct"), ("Busy","-Busy"), ("Moving","-Moving"), ("Homed","-Homed"), ("At target","-AtTarget"), ("Sequence state","-SeqState"), ("Motion command","-MtnCmd"), ("Blocked","-Blocked"), ("In realtime","-InRT"))),
     ("Interlocks", (("Forward limit","-LimFwd"), ("Backward limit","-LimBwd"), ("Home switch","-HomeSwitch"), ("Forward interlock","-SumIlockFwd"), ("Backward interlock","-SumIlockBwd"), ("Interlock text","-IlockTxt"))),
     ("Controller and diagnostics", (("Error ID","-ErrId"), ("Warning ID","-WrnId"), ("Message","-MsgTxt"), ("Encoder count","-EncCnt"), ("Selected encoder RB","-SetEncIdCmd-RB"), ("Encoder source","-EncSrcTyp-RB"), ("Trajectory source","-TrjSrcTyp-RB"), ("Trajectory type","-TrajType"), ("Drive type","-DrvType"), ("Drive mode","-DrvMode"), ("Kp","-Ctrl-Kp"), ("Ki","-Ctrl-Ki"), ("Kd","-Ctrl-Kd"))),
 )
 MOTOR = (
-    ("Motion (motor record user coordinates)", (("Actual position",".RBV"), ("Requested position",".VAL"), ("Velocity setting",".VELO"), ("Units",".EGU"), ("Tweak distance",".TWV"))),
+    ("Motion (motor record user coordinates)", (("Actual position",".RBV"), ("Requested position",".VAL"), ("Velocity setting",".VELO"), ("Acceleration time",".ACCL"), ("Units",".EGU"), ("Tweak distance",".TWV"))),
     ("State", (("Done moving",".DMOV"), ("Enable command",".CNEN"), ("Motor status word",".MSTA"), ("Limit violation",".LVIO"))),
     ("Limits", (("High limit switch",".HLS"), ("Low limit switch",".LLS"), ("High software limit",".HLM"), ("Low software limit",".LLM"))),
 )
@@ -20,3 +20,12 @@ def axis_signals(base, interface):
         return ()
     return tuple((group, tuple((label,base+suffix) for label,suffix in rows))
                  for group,rows in (NATIVE if interface == "native" else MOTOR))
+
+NATIVE_EDIT = {"-TgtPosCmd","-TgtVelCmd","-AccCmd","-DecCmd","-TwkDstCmd","-Ctrl-Kp","-Ctrl-Ki","-Ctrl-Kd"}
+MOTOR_EDIT = {".VAL",".VELO",".ACCL",".TWV",".HLM",".LLM"}
+NATIVE_ACTIONS = (("Enable","-EnaCmd",(1,)),("Disable","-EnaCmd",(0,)),
+                  ("Execute","-ExeCmd",(0,1)),("Tweak −","-TwkBwdCmd",(1,)),
+                  ("Tweak +","-TwkFwdCmd",(1,)),("Reset error","-ErrRst",(1,0)))
+MOTOR_ACTIONS = (("Enable",".CNEN",(1,)),("Disable",".CNEN",(0,)),
+                 ("Home forward",".HOMF",(1,)),("Home reverse",".HOMR",(1,)),
+                 ("Tweak −",".TWR",(1,)),("Tweak +",".TWF",(1,)))
