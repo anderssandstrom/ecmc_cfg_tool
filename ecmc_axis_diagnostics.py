@@ -66,3 +66,18 @@ def native_soft_bounds(low, high, low_enabled, high_enabled):
     if lower > upper:
         raise ValueError("Native soft limits reversed")
     return lower, upper
+
+# EPICS motorApp/MotorSrc/motor.h, little-endian msta_field.Bits.
+MSTA_BITS = ("Direction", "Done", "Plus limit", "Home switch",
+             "Slip enabled", "Position maintenance", "Slip/stall",
+             "Encoder home", "Encoder present", "Problem", "Moving",
+             "Gain support", "Communication error", "Minus limit", "Homed")
+
+def decode_msta(value):
+    try:
+        word = int(value)
+        if not 0 <= word <= 0xffffffff or float(value) != word:
+            return {}
+    except (TypeError, ValueError, OverflowError):
+        return {}
+    return {label: (word >> bit) & 1 for bit,label in enumerate(MSTA_BITS)}

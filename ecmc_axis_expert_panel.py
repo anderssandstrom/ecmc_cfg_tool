@@ -2,7 +2,7 @@
 import math
 import time
 from qt_compat import QtCore, QtWidgets
-from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value, axis_status_value
+from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value, axis_status_value, decode_msta, MSTA_BITS
 from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
 from ecmc_axis_write import AxisWriteTask
 from ecmc_axis_position import PositionTask
@@ -28,6 +28,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._motion_widgets = []
         self._overview = None
         self._status_icons = []
+        self._msta_icons = []
         self._stop_pool = QtCore.QThreadPool(self)
         self._stop_pool.setMaxThreadCount(1)
         layout = QtWidgets.QVBoxLayout(self)
@@ -93,12 +94,14 @@ class AxisExpertPanel(QtWidgets.QWidget):
         editable = NATIVE_EDIT if native else MOTOR_EDIT
         self._overview = AxisPositionBar(native)
         self._status_icons = []
+        self._msta_icons = []
         overview_row = QtWidgets.QHBoxLayout()
         states = (("Enabled","⏻","-EnaAct",False),("Homed","⌂","-Homed",False),
                   ("Moving","↔","-Moving",False),("At target","◎","-AtTarget",False),
                   ("RT","◷","-InRT",False),("Error","!","-ErrId",True)) if native else (
                   ("Enable cmd","⏻",".CNEN",False),("Done","◎",".DMOV",False),
-                  ("Limit violation","!",".LVIO",True))
+                  ("Homed","⌂","msta:Homed",False),("Moving","↔","msta:Moving",False),
+                  ("Problem","!","msta:Problem",True),("Comm","!","msta:Communication error",True))
         for caption,glyph,key,bad in states:
             icon = AxisStatusIcon(caption,glyph,key,bad)
             self._status_icons.append(icon)
@@ -229,6 +232,25 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 box.hide()
             if index == 0:
                 pass
+        if not native:
+            toggle = QtWidgets.QToolButton()
+            toggle.setText("Motor status bits (MSTA)")
+            toggle.setCheckable(True)
+            toggle.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            toggle.setArrowType(QtCore.Qt.RightArrow)
+            details = QtWidgets.QWidget()
+            bits = QtWidgets.QGridLayout(details)
+            bits.setContentsMargins(4,2,4,2)
+            for i,caption in enumerate(MSTA_BITS):
+                icon = AxisStatusIcon(f"{i}: {caption}","●","msta:"+caption,
+                                      caption in ("Problem","Slip/stall","Communication error","Plus limit","Minus limit"))
+                self._msta_icons.append(icon)
+                bits.addWidget(icon,i//2,i%2)
+            toggle.toggled.connect(details.setVisible)
+            toggle.toggled.connect(lambda on,b=toggle: b.setArrowType(QtCore.Qt.DownArrow if on else QtCore.Qt.RightArrow))
+            layout.addWidget(toggle)
+            layout.addWidget(details)
+            details.hide()
         layout.addStretch()
         self.scroll.setWidget(root)
         self._update_controls()
@@ -412,7 +434,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                   "-AtTarget":1,"-InRT":1,"-EncCnt":1,"-SetEncIdCmd-RB":1,
                   "-MsgTxt":"","-IlockTxt":"","-Ctrl-Kp":1,"-Ctrl-Ki":0,"-Ctrl-Kd":0,
                   ".RBV":actual+5,".VAL":15,".VELO":1,".EGU":"mm",".DMOV":1,
-                  ".CNEN":1,".MSTA":0x22,".HLM":50,".LLM":-50,".TWV":0.1}
+                  ".CNEN":1,".MSTA":0x4102,".HLM":50,".LLM":-50,".TWV":0.1}
         return values.get(suffix,0)
 
     def _start(self):
@@ -447,7 +469,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 label.setText("—")
         if self._overview is not None:
             self._overview.set_values({})
-        for icon in self._status_icons:
+        for icon in self._status_icons + self._msta_icons:
             icon.set_values({})
         self.status.setText("Paused")
         self.status.setStyleSheet("")
@@ -494,7 +516,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 if label.text() != text:
                     label.setText(text)
         self._overview.set_values(samples)
-        for icon in self._status_icons:
+        samples.update({"msta:"+label: bit for label,bit in decode_msta(samples.get(".MSTA")).items()})
+        for icon in self._status_icons + self._msta_icons:
             icon.set_values(samples)
         self.status.setText(f"{'DEMO — ' if self.demo else ''}{count}/{len(self._labels)} signals available")
         status_style = "color: #26804b;" if count == len(self._labels) else "color: #b7791f;" if count else "color: #c43c3c;"
