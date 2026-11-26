@@ -5,6 +5,7 @@ from qt_compat import QtCore, QtWidgets
 from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value
 from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
 from ecmc_axis_write import AxisWriteTask
+from ecmc_axis_position import PositionTask
 from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
 
 class AxisExpertPanel(QtWidgets.QWidget):
@@ -22,6 +23,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._generation = 0
         self._edit_widgets = {}
         self._action_buttons = []
+        self._position_task = None
+        self._motion_widgets = []
         self._stop_pool = QtCore.QThreadPool(self)
         self._stop_pool.setMaxThreadCount(1)
         layout = QtWidgets.QVBoxLayout(self)
@@ -82,8 +85,32 @@ class AxisExpertPanel(QtWidgets.QWidget):
         layout.setSpacing(4)
         native = self.interface.currentData() == "native"
         editable = NATIVE_EDIT if native else MOTOR_EDIT
+        command = QtWidgets.QGroupBox("Move")
+        command_grid = QtWidgets.QGridLayout(command)
+        command_grid.setContentsMargins(5,4,5,4)
+        command_grid.setSpacing(3)
+        self.move_mode = QtWidgets.QComboBox()
+        self.move_mode.addItem("Absolute","abs")
+        self.move_mode.addItem("Relative","rel")
+        self.move_target = QtWidgets.QLineEdit()
+        self.move_target.setPlaceholderText("Position / distance")
+        self.move_velocity = QtWidgets.QLineEdit()
+        self.move_velocity.setPlaceholderText("Velocity")
+        self.move_button = QtWidgets.QPushButton("Move")
+        self.move_button.setStyleSheet("font-weight: bold;")
+        self.move_button.clicked.connect(self._move)
+        command_grid.addWidget(self.move_mode,0,0)
+        command_grid.addWidget(self.move_target,0,1)
+        command_grid.addWidget(self.move_velocity,0,2)
+        command_grid.addWidget(self.move_button,0,3)
+        command_grid.setColumnStretch(1,1)
+        command_grid.setColumnStretch(2,1)
+        self._motion_widgets = [self.move_mode,self.move_target,self.move_velocity,self.move_button]
+        layout.addWidget(command)
         action_grid = QtWidgets.QGridLayout()
         for i,(caption,suffix,values) in enumerate(NATIVE_ACTIONS if native else MOTOR_ACTIONS):
+            if caption in ('Enable','Disable','Execute'):
+                continue
             button = QtWidgets.QPushButton(caption)
             button.clicked.connect(lambda checked=False,suffix=suffix,values=values: self._write(suffix,values))
             self._action_buttons.append(button)
@@ -155,8 +182,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
 
     def _update_controls(self,*_):
         armed = self.arm.isChecked() and self.isVisible() and not self._writes and self._enum_task is None and not self._closed
-        for b in self._action_buttons:
+        for b in self._action_buttons + self._motion_widgets:
             b.setEnabled(armed)
+        self.interface.setEnabled(not self._writes)
         for pv,w in self._edit_widgets.items():
             available = w.value is not None if isinstance(w,BooleanValue) else w.text() != "—"
             w.set_editable(armed and available)
@@ -221,7 +249,45 @@ class AxisExpertPanel(QtWidgets.QWidget):
         QtCore.QThreadPool.globalInstance().start(task)
         return True
 
+    def _move(self):
+        if not self.arm.isChecked() or self._writes or self._enum_task is not None or not self.isVisible():
+            return
+        try:
+            target = float(self.move_target.text())
+            velocity = float(self.move_velocity.text())
+            if not math.isfinite(target) or not math.isfinite(velocity) or velocity <= 0:
+                raise ValueError()
+        except ValueError:
+            QtWidgets.QMessageBox.warning(self,"Invalid move","Enter a finite position and positive velocity.")
+            return
+        native = self.interface.currentData()=="native"
+        relative = self.move_mode.currentData()=="rel"
+        if self.demo:
+            actual = self._demo_value(self.base+("-PosAct" if native else ".RBV"))
+            target = actual+target if relative else target
+            if native:
+                self._overrides.update({"-PosAct":target,"-PosSet":target,"-TgtPosCmd":target,"-TgtVelCmd":velocity,"-PosErr":0})
+            else:
+                self._overrides.update({".RBV":target,".VAL":target,".VELO":velocity})
+            self._tick()
+            return
+        task = PositionTask(self.base,native,relative,target,velocity)
+        self._position_task = task
+        self._writes.add(task)
+        def done(error):
+            self._writes.discard(task)
+            self._position_task = None
+            if not self._closed:
+                self._update_controls()
+                if error:
+                    QtWidgets.QMessageBox.warning(self,"Move not confirmed",error)
+        task.signals.finished.connect(done)
+        self._update_controls()
+        QtCore.QThreadPool.globalInstance().start(task)
+
     def _stop_motion(self):
+        if self._position_task is not None:
+            self._position_task.cancelled.set()
         self.arm.setChecked(False)
         self._write("-StpCmd" if self.interface.currentData()=="native" else ".STOP",(1,),stop=True)
 
@@ -356,12 +422,16 @@ class AxisExpertPanel(QtWidgets.QWidget):
         QtCore.QTimer.singleShot(0,self._start)
 
     def hideEvent(self,event):
+        if self._position_task is not None:
+            self._position_task.cancelled.set()
         self._generation += 1
         self.arm.setChecked(False)
         self._stop()
         super().hideEvent(event)
 
     def closeEvent(self,event):
+        if self._position_task is not None:
+            self._position_task.cancelled.set()
         self._closed = True
         self._stop()
         super().closeEvent(event)
