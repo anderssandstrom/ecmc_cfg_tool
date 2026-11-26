@@ -7,6 +7,7 @@ from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
 from ecmc_axis_write import AxisWriteTask
 from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTask, KillTask
 from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
+from ecmc_encoder_homing_panel import EncoderHomingPanel
 from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
 
 class AxisExpertPanel(QtWidgets.QWidget):
@@ -27,6 +28,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._position_task = None
         self._motion_widgets = []
         self._overview = None
+        self._encoder_homing = None
         self._status_icons = []
         self._msta_icons = []
         self._stop_pool = QtCore.QThreadPool(self)
@@ -90,6 +92,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._stop()
         self.arm.setChecked(False)
         self._labels = {}
+        self._encoder_homing = None
         self._edit_widgets = {}
         self._action_buttons = []
         root = QtWidgets.QWidget()
@@ -233,9 +236,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
             elif compact:
                 grid.setColumnStretch(3,1)
             if group == "Homing":
-                note = QtWidgets.QLabel("Encoder 1 configuration snapshot (read-only). Procedure selection is writable.")
-                note.setWordWrap(True)
-                grid.addWidget(note,grid.rowCount(),0,1,4)
+                self._encoder_homing = EncoderHomingPanel(self.base,demo=self.demo,on_plot=self.on_plot)
+                grid.addWidget(self._encoder_homing,grid.rowCount(),0,1,4)
             if index == 0 or group in ("Limits","ECMC soft limits"):
                 layout.addWidget(box)
             else:
@@ -546,7 +548,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                   "-VelAct":0,"-TgtVelCmd":1,"-AccCmd":2,"-DecCmd":2,
                   "-TgtPosCmd.EGU":"mm","-EnaCmd":1,"-EnaCmd-RB":1,"-EnaAct":1,"-Homed":1,
                   "-CfgDLLM":-50,"-CfgDHLM":50,"-LimFwd":1,"-LimBwd":1,"-SftLimFwdEna":1,"-SftLimBwdEna":1,"-SftLimFwdEna-RB":1,"-SftLimBwdEna-RB":1,
-                  "-Enc01-HmeProc":11,"-Enc01-HmeVelToCam":1,"-Enc01-HmeVelFrmCam":0.2,"-Enc01-HmeAcc":2,"-Enc01-HmeDec":2,"-Enc01-Homed":1,"-movHomCmd":14,"-AtTarget":1,"-InRT":1,"-EncCnt":1,"-SetEncIdCmd-RB":1,
+                  "-Enc01-HmeProc":11,"-Enc01-HmeVelToCam":1,"-Enc01-HmeVelFrmCam":0.2,"-Enc01-HmeAcc":2,"-Enc01-HmeDec":2,"-Enc01-Homed":1,"-movHomCmd":14,"-AtTarget":1,"-InRT":1,"-EncCnt":2,"-SetEncIdCmd-RB":1,
                   "-MsgTxt":"","-IlockTxt":"","-Ctrl-Kp":1,"-Ctrl-Ki":0,"-Ctrl-Kd":0,
                   ".RBV":actual+5,".VAL":15,".VELO":1,".EGU":"mm",".DMOV":1,
                   ".CNEN":1,".MSTA":0x4102,".HLM":50,".LLM":-50,".TWV":0.1}
@@ -632,6 +634,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
                     label.setStyleSheet(style)
                 if label.text() != text:
                     label.setText(text)
+        if self._encoder_homing is not None:
+            self._encoder_homing.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"))
         self._overview.set_values(samples)
         samples.update({"msta:"+label: bit for label,bit in decode_msta(samples.get(".MSTA")).items()})
         for icon in self._status_icons + self._msta_icons:
