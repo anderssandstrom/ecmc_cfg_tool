@@ -745,6 +745,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         elif kind == "safety_plugin":
             self._menu_action(menu, "Open SafetyPlugin Panel", self._open_safety_plugin)
         elif kind == "hardware_group":
+            self._menu_action(menu, "Open EtherCAT Master Diagnostics", self._open_master_diagnostics)
             self._menu_action(menu, "Open Hardware Overview", self._open_hardware_overview)
         if not menu.isEmpty():
             menu.exec_(self.tree.viewport().mapToGlobal(pos)) if hasattr(menu, "exec_") else menu.exec(self.tree.viewport().mapToGlobal(pos))
@@ -763,7 +764,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         elif kind == "hardware":
             self._open_hardware_panel(data)
         elif kind == "hardware_group":
-            self._open_hardware_overview()
+            self._open_master_diagnostics()
         elif kind == "plc":
             self._open_object_panel("ecmcPLCxx.ui", data)
         elif kind == "axis_group":
@@ -1133,6 +1134,21 @@ class IocNavigator(QtWidgets.QMainWindow):
         window.destroyed.connect(lambda *_: self._hardware_trends.remove(window)
                                  if window in self._hardware_trends else None)
         window.show()
+
+    def _open_master_diagnostics(self):
+        from ecmc_master_panel import MasterPanel
+        prefix = self._snapshot.get("prefix") or self._prefix()
+        master = self._snapshot.get("master", "0")
+        key = (prefix, str(master), self._demo)
+        for index in range(self.tabs.count()):
+            if getattr(self.tabs.widget(index), "_master_key", None) == key:
+                self.tabs.setCurrentIndex(index)
+                return
+        panel = MasterPanel(prefix, master, self._snapshot.get("hardware", []),
+                            timeout=self.timeout, demo=self._demo,
+                            on_plot=self._open_hardware_trend, on_slave=self._open_hardware_panel)
+        panel._master_key = key
+        self._add_tool_tab(panel, f"EtherCAT m{master}")
 
     def _open_native_hardware(self, slaves, title):
         panel = HardwarePanel(self._snapshot.get("prefix") or self._prefix(),
