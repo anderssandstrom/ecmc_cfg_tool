@@ -7,6 +7,7 @@ from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_
 from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
 from ecmc_hardware_widgets import HardwareSymbol, SignalValue, WordValue, signal_role
+from ecmc_ds402_widget import DS402Status, DS402Word
 
 
 class ReadSignals(QtCore.QObject):
@@ -371,6 +372,12 @@ class HardwarePanel(QtWidgets.QWidget):
         primary = [r for r in rows if signal_role(kind, r[2]) == "primary"] if kind in ("Drv", "Enc") else []
         status = [r for r in rows if signal_role(kind, r[2]) == "status"] if kind in ("Drv", "Enc") else []
         detail = [r for r in rows if r not in primary and r not in status]
+        ds402 = kind == 'Drv' and self._is_ds402(title)
+        if ds402:
+            dedicated = [r for r in rows if r[2] in ('Stat', 'Cmd', 'Cmd-RB')]
+            if dedicated:
+                outer.addWidget(self._ds402_group(dedicated))
+                detail = [r for r in detail if r not in dedicated]
         if primary:
             hero = QtWidgets.QHBoxLayout()
             hero.addWidget(HardwareSymbol(kind))
@@ -417,6 +424,30 @@ class HardwarePanel(QtWidgets.QWidget):
             form.setColumnStretch(1, 1)
             outer.addLayout(form)
         return card
+
+    def _is_ds402(self, title):
+        # Require explicit DS402 trigger PVs in the catalog, not merely Cmd/Stat.
+        suffixes = {pv.rsplit(':', 1)[-1].split('-', 1)[-1] for pv in self.rows}
+        return title + '-TrgDS402Ena' in suffixes and title + '-TrgDS402Dis' in suffixes
+
+    def _ds402_group(self, rows):
+        group = QtWidgets.QGroupBox("CiA 402")
+        layout = QtWidgets.QVBoxLayout(group)
+        for name, pv, short in rows:
+            if short == 'Stat':
+                state = DS402Status()
+                self._bind(state, pv)
+                self.card_values.setdefault(pv, []).append((name, state))
+                layout.addWidget(state)
+            label = QtWidgets.QLabel({'Cmd': 'Controlword', 'Cmd-RB': 'Controlword RB',
+                                      'Stat': 'Statusword'}[short])
+            self._bind(label, pv)
+            layout.addWidget(label)
+            word = DS402Word(lambda pv=pv: self._click_write(pv))
+            self._bind(word, pv)
+            self.card_values.setdefault(pv, []).append((name, word))
+            layout.addWidget(word)
+        return group
 
     def build_cards(self, pairs):
         root = QtWidgets.QWidget()
@@ -576,6 +607,9 @@ class HardwarePanel(QtWidgets.QWidget):
             return
         for name, label in self.card_values[pv]:
             label.setToolTip(pv + ("\n" + error if error else ""))
+            if isinstance(label, DS402Status):
+                label.set_status(value)
+                continue
             if isinstance(label, WordValue):
                 label.set_word(value)
                 continue
