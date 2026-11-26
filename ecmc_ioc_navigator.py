@@ -683,11 +683,12 @@ class IocNavigator(QtWidgets.QMainWindow):
             menu.addSeparator()
             self._menu_action(menu, "Open Hardware Panel", lambda: self._open_hardware_panel(data))
         elif kind == "ecmc_group":
+            self._menu_action(menu, "Native IOC Overview", self._open_ioc_dashboard)
             self._menu_action(menu, "Open Command Parser", self._open_command_parser)
             self._menu_action(menu, "Open DAQ / FFT App", self._open_daq)
             self._menu_action(menu, "Open RT Log App", self._open_rtlog)
             menu.addSeparator()
-            self._menu_action(menu, "Open Main Panel", self._open_main_panel)
+            self._menu_action(menu.addMenu("caQtDM"), "Main panel", self._open_main_panel)
         elif kind == "ecmc_info_group" and data.get("name") == "Thread":
             self._menu_action(menu, "Native Thread Diagnostics", lambda: self._open_native_diagnostic("thread"))
             self._menu_action(menu, "Print All Thread PVs", lambda: self._print_thread_pvs(data.get("items", [])))
@@ -740,16 +741,22 @@ class IocNavigator(QtWidgets.QMainWindow):
             menu.addSeparator()
             self._menu_action(menu, "Open Axis Group Panel", lambda: self._open_axis_group_panel(data))
         elif kind == "motion_group":
-            self._menu_action(menu, "Open Motion Axes Overview", self._open_motion_overview)
+            self._menu_action(menu, "Native motion overview", lambda:self._open_native_group("axes"))
+            self._menu_action(menu.addMenu("caQtDM"), "Motion axes overview", self._open_motion_overview)
         elif kind == "axis_group_group":
-            self._menu_action(menu, "Open Axis Groups Overview", self._open_axis_groups_overview)
+            self._menu_action(menu, "Native axis groups overview", lambda:self._open_native_group("axis_groups"))
+            self._menu_action(menu.addMenu("caQtDM"), "Axis groups overview", self._open_axis_groups_overview)
         elif kind == "state_machine":
             self._menu_action(menu, "Native State Machine Diagnostics", lambda: self._open_native_diagnostic("state_machine",data))
             self._menu_action(menu, "Open State Machine Axis Overview", lambda: self._open_axes_for_state_machine(data))
             menu.addSeparator()
             self._menu_action(menu, "Open State Machine Panel", lambda: self._open_state_machine_panel(data))
         elif kind == "state_machine_group":
-            self._menu_action(menu, "Open State Machines Overview", self._open_state_machines_overview)
+            self._menu_action(menu, "Native state machines overview", lambda:self._open_native_group("state_machines"))
+            self._menu_action(menu.addMenu("caQtDM"), "State machines overview", self._open_state_machines_overview)
+        elif kind in ("plc_group","plugin_group","data_storage_group","cpp_logic_group"):
+            key={"plc_group":"plcs","plugin_group":"plugins","data_storage_group":"data_storages","cpp_logic_group":"cpp_logic"}[kind]
+            self._menu_action(menu,"Native overview",lambda:self._open_native_group(key))
         elif kind == "plugin":
             self._menu_action(menu, "Native Plugin Diagnostics", lambda: self._open_native_diagnostic("plugin",data))
             self._menu_action(menu, "Open Plugin Panel", lambda: self._open_object_panel("ecmcPLGxx.ui", data))
@@ -759,12 +766,20 @@ class IocNavigator(QtWidgets.QMainWindow):
         elif kind == "cpp_logic":
             self._menu_action(menu, "Open CppLogic Overview", self._open_cpp_logic_overview)
             menu.addSeparator()
-            self._menu_action(menu, "Open CppLogic Panel", lambda: self._open_cpp_logic(data))
+            self._menu_action(menu, "Native CppLogic Diagnostics", lambda: self._open_cpp_logic(data))
+            self._menu_action(menu.addMenu("caQtDM"), "CppLogic panel", lambda:self._caqtdm("ecmcCppLogic.ui",f"IOC={self._prefix()},CPP_ID={int(data['id'])}"))
         elif kind == "safety_plugin":
             self._menu_action(menu, "Open SafetyPlugin Panel", self._open_safety_plugin)
         elif kind == "hardware_group":
             self._menu_action(menu, "Open EtherCAT Master Diagnostics", self._open_master_diagnostics)
             self._menu_action(menu, "Open Hardware Overview", self._open_hardware_overview)
+        pv=data.get("pv") or data.get("motor") or data.get("pv_base")
+        if pv and data.get("pv_base")==pv:
+            pv=_join_prefix_pv(self._snapshot.get("prefix",""),pv)
+        if not pv and kind=="ecmc_group": pv=self._snapshot.get("prefix")
+        if pv:
+            menu.addSeparator()
+            self._menu_action(menu,"Copy PV / prefix",lambda:QtWidgets.QApplication.clipboard().setText(str(pv)))
         if not menu.isEmpty():
             menu.exec_(self.tree.viewport().mapToGlobal(pos)) if hasattr(menu, "exec_") else menu.exec(self.tree.viewport().mapToGlobal(pos))
 
@@ -778,7 +793,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         if kind == "axis":
             self._open_native_axis_expert(data)
         elif kind == "ecmc_group":
-            self._open_main_panel()
+            self._open_ioc_dashboard()
         elif kind == "hardware":
             self._open_hardware_panel(data)
         elif kind == "hardware_group":
@@ -790,13 +805,15 @@ class IocNavigator(QtWidgets.QMainWindow):
         elif kind == "axis_group":
             self._open_axes_for_group(data)
         elif kind == "motion_group":
-            self._open_motion_overview()
+            self._open_native_group("axes")
         elif kind == "axis_group_group":
-            self._open_axis_groups_overview()
+            self._open_native_group("axis_groups")
         elif kind == "state_machine":
             self._open_native_diagnostic("state_machine",data)
         elif kind == "state_machine_group":
-            self._open_state_machines_overview()
+            self._open_native_group("state_machines")
+        elif kind in ("plc_group","plugin_group","data_storage_group","cpp_logic_group"):
+            self._open_native_group({"plc_group":"plcs","plugin_group":"plugins","data_storage_group":"data_storages","cpp_logic_group":"cpp_logic"}[kind])
         elif kind == "plugin":
             self._open_native_diagnostic("plugin",data)
         elif kind == "data_storage":
@@ -856,6 +873,48 @@ class IocNavigator(QtWidgets.QMainWindow):
             self.statusBar().showMessage("Started caQtDM: " + str(panel), 5000)
         except Exception as ex:
             QtWidgets.QMessageBox.critical(self, "Launch failed", str(ex))
+
+    def _open_ioc_dashboard(self):
+        from ecmc_ioc_dashboard import IocDashboard
+        prefix=self._snapshot.get("prefix")
+        if not prefix: return
+        for i in range(self.tabs.count()):
+            if getattr(self.tabs.widget(i),"_dashboard_key",None)==prefix:
+                self.tabs.setCurrentIndex(i)
+                return
+        pane=IocDashboard(self._snapshot,self._open_native_group,
+                          lambda kill:self._global_motion(kill) if self._snapshot.get("prefix")==prefix and self._prefix()==prefix else self.statusBar().showMessage("Select dashboard IOC before issuing commands",5000),
+                          demo=self._demo)
+        pane._dashboard_key=prefix
+        self._add_tool_tab(pane,"IOC Overview")
+
+    def _open_native_group(self,key):
+        from ecmc_ioc_dashboard import ObjectOverview
+        prefix=self._snapshot.get("prefix")
+        if not prefix: return
+        callbacks={"axes":self._open_native_axis_expert,"hardware":self._open_hardware_panel,
+                   "axis_groups":self._open_axes_for_group,"plcs":lambda d:self._open_native_diagnostic("plc",d),
+                   "state_machines":lambda d:self._open_native_diagnostic("state_machine",d),
+                   "plugins":lambda d:self._open_native_diagnostic("plugin",d),
+                   "data_storages":lambda d:self._open_native_diagnostic("data_storage",d),
+                   "cpp_logic":self._open_cpp_logic}
+        if key not in callbacks: return
+        def open_object(obj):
+            if self._snapshot.get("prefix")==prefix and self._prefix()==prefix:
+                callbacks[key](obj)
+            else: self.statusBar().showMessage("Select original IOC before opening objects",5000)
+        def health(obj):
+            if self._snapshot.get("prefix")!=prefix: return ""
+            for i in range(self.tree.topLevelItemCount()):
+                parent=self.tree.topLevelItem(i)
+                for j in range(parent.childCount()):
+                    item=parent.child(j)
+                    data=item.data(0,self.DATA_ROLE) or {}
+                    if data.get("id")==obj.get("id") and data.get("name")==obj.get("name"):
+                        return item.text(4)
+            return ""
+        pane=ObjectOverview(key.replace("_"," ").title(),self._snapshot.get(key,[]),open_object,health)
+        self._add_tool_tab(pane,key.replace("_"," ").title())
 
     def _open_main_panel(self):
         self._caqtdm("ecmcMain.ui", f"IOC={self._prefix()}")

@@ -57,6 +57,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.arm.setToolTip("Arms motion commands; target writes may initiate motion.")
         self.arm.toggled.connect(self._update_controls)
         controls.addWidget(self.arm)
+        self.enable_button=QtWidgets.QPushButton("Enable drive")
+        self.enable_button.clicked.connect(lambda checked=False:self._write("-EnaCmd" if self.interface.currentData()=="native" else ".CNEN",(1,)))
+        controls.addWidget(self.enable_button)
         controls.addStretch()
         precision = QtWidgets.QSpinBox()
         precision.setRange(4,12)
@@ -304,6 +307,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
 
     def _update_controls(self,*_):
         armed = self.arm.isChecked() and self.isVisible() and not self._writes and self._enum_task is None and not self._closed
+        self.enable_button.setEnabled(armed)
         for b in self._action_buttons + self._motion_widgets:
             b.setEnabled(armed)
         self.interface.setEnabled(not self._writes)
