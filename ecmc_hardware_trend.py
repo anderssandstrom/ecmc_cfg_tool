@@ -178,13 +178,13 @@ class HardwareTrendWindow(QtWidgets.QDialog):
             self._providers[name] = demo_value
         else:
             try:
-                import epics
+                from ecmc_pv_subscriptions import shared_subscriptions
                 def callback(pvname=None, value=None, severity=None, **kw):
                     self._enqueue(name, numeric_readback(value, severity), token)
                 def connection(pvname=None, conn=None, **kw):
                     if not conn:
                         self._enqueue(name, None, token)
-                self._subscriptions[name] = epics.PV(name, auto_monitor=True, callback=callback,
+                self._subscriptions[name] = shared_subscriptions.acquire(name, callback=callback,
                                                      connection_callback=connection)
             except Exception as ex:
                 self.status.setText(f"{name}: CA monitor unavailable: {ex}")

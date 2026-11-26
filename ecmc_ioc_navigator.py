@@ -155,6 +155,11 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._tasks = set()
         self._global_motion_pool = QtCore.QThreadPool(self)
         self._global_motion_pool.setMaxThreadCount(1)
+        tools_menu = self.menuBar().addMenu("Engineering tools")
+        for title, kind in (("Custom / multi-IOC dashboard", "dashboard"),
+                            ("Axis parameter comparison", "axis_compare"),
+                            ("Physical EtherCAT port map", "topology")):
+            tools_menu.addAction(title, lambda checked=False, kind=kind: self._open_engineering_tool(kind))
         self._snapshot = {}
         self._demo=demo
         self._health_pvs={}
@@ -1348,6 +1353,18 @@ class IocNavigator(QtWidgets.QMainWindow):
                               on_plot=self._open_hardware_trend)
         self._add_tool_tab(panel, title)
 
+    def _open_engineering_tool(self, kind):
+        if kind == "dashboard":
+            from ecmc_custom_dashboard import CustomDashboard
+            pane = CustomDashboard(on_plot=self._open_hardware_trend, demo=self._demo)
+        elif kind == "axis_compare":
+            from ecmc_axis_compare import AxisCompare
+            pane = AxisCompare(demo=self._demo)
+        else:
+            from ecmc_physical_topology import PhysicalTopology
+            pane = PhysicalTopology()
+        self._add_tool_tab(pane, {"dashboard":"Multi-IOC dashboard", "axis_compare":"Axis comparison", "topology":"Physical port map"}[kind])
+
     def _open_native_diagnostic(self,kind,data=None):
         from ecmc_native_diagnostic_panel import NativeDiagnosticPanel
         prefix=self._snapshot.get("prefix") or self._prefix()
@@ -1359,6 +1376,12 @@ class IocNavigator(QtWidgets.QMainWindow):
                 return
         pane=NativeDiagnosticPanel(prefix,kind,object_id,demo=self._demo,
                                    on_plot=self._open_hardware_trend,timeout=self.timeout)
+        if kind == "plc" and object_id is not None:
+            from ecmc_plc_browser import PlcBrowser
+            diagnostics = pane
+            pane = QtWidgets.QTabWidget()
+            pane.addTab(diagnostics, "Existing PV diagnostics / trends")
+            pane.addTab(PlcBrowser(prefix, object_id, demo=self._demo), "Compiled source / variables")
         pane._native_diagnostic_key=key
         self._add_tool_tab(pane,kind.replace("_"," ").title()+(" "+str(object_id) if object_id is not None else ""))
 

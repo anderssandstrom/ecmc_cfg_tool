@@ -220,6 +220,9 @@ def discover_ioc(client, prefix: str, ssh_host_pv: str = "") -> dict:
     for item_id in range(32):
         rate = text_value(client, join_pv(prefix, f"CPP{item_id:02d}-RateMsAct"))
         if not rate:
+            # Direct ECMC installs use CppLogicN; ECMCCFG uses CPPnn.
+            rate = text_value(client, join_pv(prefix, f"CppLogic{item_id}-RateMsAct"))
+        if not rate:
             break
         snapshot["cpp_logic"].append({"id": str(item_id), "name": f"CppLogic {item_id}", "rate_ms": rate})
 
