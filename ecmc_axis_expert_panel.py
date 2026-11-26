@@ -6,6 +6,7 @@ from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_
 from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
 from ecmc_axis_write import AxisWriteTask
 from ecmc_axis_position import PositionTask
+from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
 from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
 
 class AxisExpertPanel(QtWidgets.QWidget):
@@ -25,6 +26,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._action_buttons = []
         self._position_task = None
         self._motion_widgets = []
+        self._overview = None
+        self._status_icons = []
         self._stop_pool = QtCore.QThreadPool(self)
         self._stop_pool.setMaxThreadCount(1)
         layout = QtWidgets.QVBoxLayout(self)
@@ -88,6 +91,21 @@ class AxisExpertPanel(QtWidgets.QWidget):
         layout.setSpacing(4)
         native = self.interface.currentData() == "native"
         editable = NATIVE_EDIT if native else MOTOR_EDIT
+        self._overview = AxisPositionBar(native)
+        self._status_icons = []
+        overview_row = QtWidgets.QHBoxLayout()
+        states = (("Enabled","⏻","-EnaAct",False),("Homed","⌂","-Homed",False),
+                  ("Moving","↔","-Moving",False),("At target","◎","-AtTarget",False),
+                  ("RT","◷","-InRT",False),("Error","!","-ErrId",True)) if native else (
+                  ("Enable cmd","⏻",".CNEN",False),("Done","◎",".DMOV",False),
+                  ("Limit violation","!",".LVIO",True))
+        for caption,glyph,key,bad in states:
+            icon = AxisStatusIcon(caption,glyph,key,bad)
+            self._status_icons.append(icon)
+            overview_row.addWidget(icon)
+        overview_row.addStretch()
+        layout.addLayout(overview_row)
+        layout.addWidget(self._overview)
         command = QtWidgets.QGroupBox("Move")
         command_grid = QtWidgets.QGridLayout(command)
         command_grid.setContentsMargins(5,4,5,4)
@@ -101,7 +119,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.move_velocity = QtWidgets.QLineEdit()
         self.move_velocity.setPlaceholderText("Velocity")
         self.move_velocity.setMaximumWidth(100)
-        self.move_button = QtWidgets.QPushButton("Move")
+        self.move_button = QtWidgets.QPushButton("▶ Move")
         self.move_button.setStyleSheet("font-weight: bold; color: #26804b;")
         self.move_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed,QtWidgets.QSizePolicy.Fixed)
         self.move_button.clicked.connect(self._move)
@@ -117,10 +135,12 @@ class AxisExpertPanel(QtWidgets.QWidget):
         available = {caption:(suffix,values) for caption,suffix,values in
                      (NATIVE_ACTIONS if native else MOTOR_ACTIONS)}
         # Reserve identical positions even when a command is unavailable.
-        for caption,short in (("Tweak −","− Tweak"),("Tweak +","+ Tweak"),
-                              ("Home reverse","Home −"),("Home forward","Home +"),
-                              ("Reset error","Reset")):
+        for caption,short in (("Tweak −","◀"),("Tweak +","▶"),
+                              ("Home reverse","⌂−"),("Home forward","⌂+"),
+                              ("Reset error","↻")):
             button = QtWidgets.QPushButton(short)
+            button.setFixedWidth(42)
+            button.setAccessibleName(caption)
             button.setSizePolicy(QtWidgets.QSizePolicy.Fixed,QtWidgets.QSizePolicy.Fixed)
             button.setToolTip(caption)
             if caption in available:
@@ -139,7 +159,13 @@ class AxisExpertPanel(QtWidgets.QWidget):
             grid.setContentsMargins(6,5,6,5)
             grid.setHorizontalSpacing(6)
             grid.setVerticalSpacing(2)
-            compact = group in ("State", "Interlocks", "Limits", "ECMC soft limits")
+            compact = True
+            soft = group == "ECMC soft limits"
+            if soft:
+                grid.addWidget(QtWidgets.QLabel("Backward"),0,1)
+                grid.addWidget(QtWidgets.QLabel("Forward"),0,2)
+                for j,caption in enumerate(("Position (dial)","Enabled RB","Interlock","Enable command"),1):
+                    grid.addWidget(QtWidgets.QLabel(caption),j,0)
             position = 0
             for i,(label,pv) in enumerate(rows):
                 suffix = pv[len(self.base):]
@@ -162,7 +188,12 @@ class AxisExpertPanel(QtWidgets.QWidget):
                     value.setFont(font)
                 if suffix in editable or suffix in BOOL_COMMANDS or suffix in MOTION_ENUMS:
                     self._edit_widgets[pv] = value
-                if compact and suffix in BOOL_STATUS:
+                if soft:
+                    locations = {"-CfgDLLM":(1,1),"-CfgDHLM":(1,2),"-SftLimBwdEna-RB":(2,1),"-SftLimFwdEna-RB":(2,2),"-SftLimBwdIlock":(3,1),"-SftLimFwdIlock":(3,2),"-SftLimBwdEna":(4,1),"-SftLimFwdEna":(4,2)}
+                    row,col = locations[suffix]
+                    grid.addWidget(value,row,col)
+                    name.deleteLater()
+                elif compact and suffix not in BOOL_COMMANDS and suffix not in ("-MsgTxt","-IlockTxt"):
                     row, col = position//2, (position%2)*2
                     grid.addWidget(name,row,col)
                     grid.addWidget(value,row,col+1)
@@ -178,12 +209,15 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 value.customContextMenuRequested.connect(lambda pos,v=value,pv=pv: self._menu(v,pos,pv))
                 self._labels[pv] = value
             grid.setColumnStretch(1,1)
-            if compact:
+            if soft:
+                grid.setColumnStretch(2,1)
+            elif compact:
                 grid.setColumnStretch(3,1)
-            if index == 0 or group == "State" or group in ("Interlocks","Limits","ECMC soft limits"):
+            if index == 0 or group in ("Limits","ECMC soft limits"):
                 layout.addWidget(box)
             else:
                 toggle = QtWidgets.QToolButton()
+                box.setTitle("")
                 toggle.setText(group)
                 toggle.setCheckable(True)
                 toggle.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
@@ -411,6 +445,10 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 label.set_value(None)
             else:
                 label.setText("—")
+        if self._overview is not None:
+            self._overview.set_values({})
+        for icon in self._status_icons:
+            icon.set_values({})
         self.status.setText("Paused")
         self.status.setStyleSheet("")
 
@@ -419,6 +457,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
             self._stop()
             return
         count = 0
+        samples = {}
         for name,label in self._labels.items():
             value = None
             if self.demo:
@@ -430,6 +469,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                         value = pv.get(use_monitor=True,timeout=0.001)
                 except Exception:
                     pass
+            samples[name[len(self.base):]] = value
             count += value is not None
             if isinstance(label,(BooleanValue,BooleanStatus)):
                 label.set_value(axis_status_value(name[len(self.base):],value))
@@ -453,6 +493,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
                     label.setStyleSheet(style)
                 if label.text() != text:
                     label.setText(text)
+        self._overview.set_values(samples)
+        for icon in self._status_icons:
+            icon.set_values(samples)
         self.status.setText(f"{'DEMO — ' if self.demo else ''}{count}/{len(self._labels)} signals available")
         status_style = "color: #26804b;" if count == len(self._labels) else "color: #b7791f;" if count else "color: #c43c3c;"
         if self.status.styleSheet() != status_style:
