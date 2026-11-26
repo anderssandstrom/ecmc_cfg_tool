@@ -689,6 +689,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             menu.addSeparator()
             self._menu_action(menu, "Open Main Panel", self._open_main_panel)
         elif kind == "ecmc_info_group" and data.get("name") == "Thread":
+            self._menu_action(menu, "Native Thread Diagnostics", lambda: self._open_native_diagnostic("thread"))
             self._menu_action(menu, "Print All Thread PVs", lambda: self._print_thread_pvs(data.get("items", [])))
             menu.addSeparator()
             self._menu_action(menu, "Graph All Thread Timing", self._open_thread_timing_graph)
@@ -732,7 +733,8 @@ class IocNavigator(QtWidgets.QMainWindow):
                 lambda _checked=False, tree_item=item.parent(): self._reset_status_errors(tree_item),
             )
         elif kind == "plc":
-            self._menu_action(menu, "Open PLC Panel", lambda: self._open_object_panel("ecmcPLCxx.ui", data))
+            self._menu_action(menu, "Native PLC Diagnostics", lambda: self._open_native_diagnostic("plc",data))
+            self._menu_action(menu, "Classic PLC Panel (caQtDM)", lambda: self._open_object_panel("ecmcPLCxx.ui", data))
         elif kind == "axis_group":
             self._menu_action(menu, "Open Axis Group Overview", lambda: self._open_axes_for_group(data))
             menu.addSeparator()
@@ -742,6 +744,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         elif kind == "axis_group_group":
             self._menu_action(menu, "Open Axis Groups Overview", self._open_axis_groups_overview)
         elif kind == "state_machine":
+            self._menu_action(menu, "Native State Machine Diagnostics", lambda: self._open_native_diagnostic("state_machine",data))
             self._menu_action(menu, "Open State Machine Axis Overview", lambda: self._open_axes_for_state_machine(data))
             menu.addSeparator()
             self._menu_action(menu, "Open State Machine Panel", lambda: self._open_state_machine_panel(data))
@@ -779,7 +782,9 @@ class IocNavigator(QtWidgets.QMainWindow):
         elif kind == "hardware_group":
             self._open_master_diagnostics()
         elif kind == "plc":
-            self._open_object_panel("ecmcPLCxx.ui", data)
+            self._open_native_diagnostic("plc",data)
+        elif kind == "ecmc_info_group" and data.get("name")=="Thread":
+            self._open_native_diagnostic("thread")
         elif kind == "axis_group":
             self._open_axes_for_group(data)
         elif kind == "motion_group":
@@ -787,7 +792,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         elif kind == "axis_group_group":
             self._open_axis_groups_overview()
         elif kind == "state_machine":
-            self._open_state_machine_panel(data)
+            self._open_native_diagnostic("state_machine",data)
         elif kind == "state_machine_group":
             self._open_state_machines_overview()
         elif kind == "plugin":
@@ -1219,6 +1224,20 @@ class IocNavigator(QtWidgets.QMainWindow):
                               timeout=self.timeout, demo=self._demo,
                               on_plot=self._open_hardware_trend)
         self._add_tool_tab(panel, title)
+
+    def _open_native_diagnostic(self,kind,data=None):
+        from ecmc_native_diagnostic_panel import NativeDiagnosticPanel
+        prefix=self._snapshot.get("prefix") or self._prefix()
+        object_id=(data or {}).get("id")
+        key=(prefix,kind,object_id)
+        for i in range(self.tabs.count()):
+            if getattr(self.tabs.widget(i),"_native_diagnostic_key",None)==key:
+                self.tabs.setCurrentIndex(i)
+                return
+        pane=NativeDiagnosticPanel(prefix,kind,object_id,demo=self._demo,
+                                   on_plot=self._open_hardware_trend,timeout=self.timeout)
+        pane._native_diagnostic_key=key
+        self._add_tool_tab(pane,kind.replace("_"," ").title()+(" "+str(object_id) if object_id is not None else ""))
 
     def _open_object_panel(self, panel, data):
         item_id = int(data["id"])
