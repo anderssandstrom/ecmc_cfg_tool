@@ -16,6 +16,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from ecmc_tree_health import object_prefix, health_pvs, health_status, is_problem
 from qt_compat import QtCore, QtGui, QtWidgets
 from ecmc_stream_qt import EpicsClient, MainWindow as StreamWindow, _join_prefix_pv
 from ecmc_axis_cfg import AxisYamlConfigWindow
@@ -496,12 +497,9 @@ class IocNavigator(QtWidgets.QMainWindow):
                 item=parent.child(j)
                 data=item.data(0,self.DATA_ROLE) or {}
                 kind=data.get('kind')
-                if kind=='hardware' and data.get('pv_base'):
-                    base=_join_prefix_pv(self._snapshot.get('prefix',''),data['pv_base'])
-                    yield item,kind,(base+'-Online',base+'-Operational')
-                elif kind=='axis' and data.get('motor'):
-                    base=data['motor']
-                    yield item,kind,(base+'-ErrId',base+'-EnaAct')
+                names=health_pvs(self._snapshot.get('prefix',''),data)
+                if names:
+                    yield item,kind,names
 
     def _configure_health(self, *_):
         self._disconnect_health()
@@ -540,22 +538,19 @@ class IocNavigator(QtWidgets.QMainWindow):
             if not enabled:
                 status=''
             elif self._demo:
-                status='OP' if kind=='hardware' else 'Enabled' if item.text(1)=='1' else 'Disabled'
+                status={'hardware':'OP','axis':'Enabled','plc':'Enabled','state_machine':'Enabled','cpp_logic':'Connected','data_storage':'Ready'}.get(kind,'Unknown')
             else:
                 a,b=(self._health_value(p) for p in names)
-                if kind=='hardware':
-                    status='Offline' if a==0 else 'Not OP' if b==0 else 'OP' if a==1 and b==1 else 'Unknown'
-                else:
-                    status=f'Error {int(a)}' if a is not None and a!=0 else 'Enabled' if a==0 and b==1 else 'Disabled' if a==0 and b==0 else 'Unknown'
+                status=health_status(kind,a,b)
             item.setText(4,status)
             item.setToolTip(4, status)
-            problem=status.startswith('Error') or status in ('Offline','Not OP','Unknown')
-            item.setForeground(4,QtGui.QBrush(QtGui.QColor('#b91c1c' if problem else '#16803b' if status in ('OP','Enabled') else '#64748b')))
+            problem=is_problem(status)
+            item.setForeground(4,QtGui.QBrush(QtGui.QColor('#b91c1c' if problem else '#16803b' if status in ('OP','Enabled','Connected','Ready') else '#64748b')))
             self._health_values['|'.join(names)]={'status':status,'pvs':names}
         for i in range(self.tree.topLevelItemCount()):
             parent=self.tree.topLevelItem(i)
             statuses=[parent.child(j).text(4) for j in range(parent.childCount())]
-            count=sum(v.startswith('Error') or v in ('Offline','Not OP','Unknown') for v in statuses)
+            count=sum(is_problem(v) for v in statuses)
             parent.setText(4,f'{count} problems' if count else '')
         self._filter_tree()
 
@@ -591,7 +586,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         own_match = not needle or needle in " ".join(item.text(c).lower() for c in range(5))
         if self.errors_only.isChecked():
             state=item.text(4)
-            own_match=own_match and (state.startswith("Error") or state in ("Offline","Not OP","Unknown"))
+            own_match=own_match and is_problem(state)
         child_match = False
         for i in range(item.childCount()):
             child = item.child(i)
@@ -663,20 +658,19 @@ class IocNavigator(QtWidgets.QMainWindow):
         menu = QtWidgets.QMenu(self)
         kind = data.get("kind")
         if kind == "axis":
-            self._menu_action(menu, "Open Motion App", lambda: self._open_motion(data))
-            self._menu_action(menu, "Open Axis Config App", lambda: self._open_axis_config(data))
-            self._menu_action(menu, "Open Controller App", lambda: self._open_controller(data))
-            self._menu_action(menu, "Open ISO230 App", lambda: self._open_iso230(data))
-            self._menu_action(menu, "Open Axis Diagnostics in DAQ",
-                              lambda: self._open_daq(axis_diagnostic_pvs(data.get("motor"), "controller"),
-                                                     title=f"DAQ Axis {data.get('id', '')}"))
+            self._menu_action(menu,"Native Axis Expert (ECMC)",lambda:self._open_native_axis_expert(data))
+            self._menu_action(menu,"Native Axis Expert (Motor Record)",lambda:self._open_native_axis_expert(data,"motor"))
             menu.addSeparator()
-            self._menu_action(menu, "Open Axis Panel", lambda: self._open_axis_panel(data, "ecmcAxis.ui"))
-            self._menu_action(menu, "Native Axis Expert (ECMC)", lambda: self._open_native_axis_expert(data))
-            self._menu_action(menu, "Native Axis Expert (Motor Record)", lambda: self._open_native_axis_expert(data, "motor"))
-            self._menu_action(menu, "Classic Axis Expert (caQtDM)", lambda: self._open_axis_panel(data, "ecmcAxisExpert.ui"))
-            self._menu_action(menu, "Open Axis Hardware Overview", lambda: self._open_axis_hardware(data))
-            self._menu_action(menu, "Open Motor Record Panel", lambda: self._open_motor_record_panel(data))
+            self._menu_action(menu,"Motion App",lambda:self._open_motion(data))
+            self._menu_action(menu,"Axis Configuration",lambda:self._open_axis_config(data))
+            self._menu_action(menu,"Controller",lambda:self._open_controller(data))
+            self._menu_action(menu,"ISO230",lambda:self._open_iso230(data))
+            self._menu_action(menu,"DAQ / FFT",lambda:self._open_daq(axis_diagnostic_pvs(data.get("motor"),"controller"),title=f"DAQ Axis {data.get('id','')}"))
+            self._menu_action(menu,"Axis Hardware Overview",lambda:self._open_axis_hardware(data))
+            classic=menu.addMenu("caQtDM")
+            self._menu_action(classic,"Axis panel",lambda:self._open_axis_panel(data,"ecmcAxis.ui"))
+            self._menu_action(classic,"Axis expert",lambda:self._open_axis_panel(data,"ecmcAxisExpert.ui"))
+            self._menu_action(classic,"Motor record",lambda:self._open_motor_record_panel(data))
         elif kind == "hardware":
             self._menu_action(menu, "Open EtherCAT Tool", lambda: self._open_ethercat_tool(data))
             self._menu_action(menu, "Open Remote SDO Browser", lambda: self._open_sdo(data))
@@ -735,11 +729,11 @@ class IocNavigator(QtWidgets.QMainWindow):
             )
         elif kind == "plc":
             self._menu_action(menu, "Native PLC Diagnostics", lambda: self._open_native_diagnostic("plc",data))
-            self._menu_action(menu, "Classic PLC Panel (caQtDM)", lambda: self._open_object_panel("ecmcPLCxx.ui", data))
+            self._menu_action(menu.addMenu("caQtDM"), "PLC panel", lambda: self._open_object_panel("ecmcPLCxx.ui", data))
         elif kind == "axis_group":
             self._menu_action(menu, "Open Axis Group Overview", lambda: self._open_axes_for_group(data))
             menu.addSeparator()
-            self._menu_action(menu, "Open Axis Group Panel", lambda: self._open_axis_group_panel(data))
+            self._menu_action(menu.addMenu("caQtDM"), "Axis group panel", lambda: self._open_axis_group_panel(data))
         elif kind == "motion_group":
             self._menu_action(menu, "Native motion overview", lambda:self._open_native_group("axes"))
             self._menu_action(menu.addMenu("caQtDM"), "Motion axes overview", self._open_motion_overview)
@@ -750,7 +744,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._menu_action(menu, "Native State Machine Diagnostics", lambda: self._open_native_diagnostic("state_machine",data))
             self._menu_action(menu, "Open State Machine Axis Overview", lambda: self._open_axes_for_state_machine(data))
             menu.addSeparator()
-            self._menu_action(menu, "Open State Machine Panel", lambda: self._open_state_machine_panel(data))
+            self._menu_action(menu.addMenu("caQtDM"), "State machine panel", lambda: self._open_state_machine_panel(data))
         elif kind == "state_machine_group":
             self._menu_action(menu, "Native state machines overview", lambda:self._open_native_group("state_machines"))
             self._menu_action(menu.addMenu("caQtDM"), "State machines overview", self._open_state_machines_overview)
@@ -759,24 +753,22 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._menu_action(menu,"Native overview",lambda:self._open_native_group(key))
         elif kind == "plugin":
             self._menu_action(menu, "Native Plugin Diagnostics", lambda: self._open_native_diagnostic("plugin",data))
-            self._menu_action(menu, "Open Plugin Panel", lambda: self._open_object_panel("ecmcPLGxx.ui", data))
+            self._menu_action(menu.addMenu("caQtDM"), "Plugin panel", lambda: self._open_object_panel("ecmcPLGxx.ui", data))
         elif kind == "data_storage":
             self._menu_action(menu, "Native Data Storage Diagnostics", lambda: self._open_native_diagnostic("data_storage",data))
-            self._menu_action(menu, "Open Data Storage Panel", lambda: self._open_object_panel("ecmcDSxx.ui", data))
+            self._menu_action(menu.addMenu("caQtDM"), "Data storage panel", lambda: self._open_object_panel("ecmcDSxx.ui", data))
         elif kind == "cpp_logic":
             self._menu_action(menu, "Open CppLogic Overview", self._open_cpp_logic_overview)
             menu.addSeparator()
             self._menu_action(menu, "Native CppLogic Diagnostics", lambda: self._open_cpp_logic(data))
             self._menu_action(menu.addMenu("caQtDM"), "CppLogic panel", lambda:self._caqtdm("ecmcCppLogic.ui",f"IOC={self._prefix()},CPP_ID={int(data['id'])}"))
         elif kind == "safety_plugin":
-            self._menu_action(menu, "Open SafetyPlugin Panel", self._open_safety_plugin)
+            self._menu_action(menu.addMenu("caQtDM"), "Safety plugin panel", self._open_safety_plugin)
         elif kind == "hardware_group":
             self._menu_action(menu, "Open EtherCAT Master Diagnostics", self._open_master_diagnostics)
             self._menu_action(menu, "Open Hardware Overview", self._open_hardware_overview)
-        pv=data.get("pv") or data.get("motor") or data.get("pv_base")
-        if pv and data.get("pv_base")==pv:
-            pv=_join_prefix_pv(self._snapshot.get("prefix",""),pv)
-        if not pv and kind=="ecmc_group": pv=self._snapshot.get("prefix")
+        pv=data.get("pv") or object_prefix(self._snapshot.get("prefix",""),data)
+        if not pv and (kind=="ecmc_group" or kind.endswith("_group")): pv=self._snapshot.get("prefix")
         if pv:
             menu.addSeparator()
             self._menu_action(menu,"Copy PV / prefix",lambda:QtWidgets.QApplication.clipboard().setText(str(pv)))
