@@ -37,6 +37,13 @@ class SignalValue(QtWidgets.QLabel):
     def __init__(self, text, callback, parent=None):
         super().__init__(text, parent)
         self._callback = callback
+        self._editable = False
+
+    def set_editable(self, enabled):
+        self._editable = enabled
+        self.setFrameShape(QtWidgets.QFrame.Box if enabled else QtWidgets.QFrame.NoFrame)
+        self.setFrameShadow(QtWidgets.QFrame.Plain)
+        self.update()
 
     def mouseReleaseEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton and self._callback():
@@ -80,7 +87,12 @@ class WordValue(SignalValue):
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         p.setPen(self.palette().color(QtGui.QPalette.Text))
         text = "—" if self.word is None else f"0x{self.word:04X}"
-        p.drawText(QtCore.QRectF(0, 0, self.width_px(), 18), QtCore.Qt.AlignRight, text)
+        if self._editable:
+            p.drawRect(self.rect().adjusted(0, 0, -1, -1))
+        p.drawText(QtCore.QRectF(0, 0, self.width_px()-3, 18), QtCore.Qt.AlignRight, text)
+        font = p.font()
+        font.setPointSize(max(7, font.pointSize()-3))
+        p.setFont(font)
         cell = self.width_px() / self.bit_width
         for i in range(self.bit_width):
             bit = self.bit_width - 1 - i

@@ -1,5 +1,6 @@
 """Native EtherCAT process signal browser with explicit write controls."""
 import re
+from threading import Lock
 from qt_compat import QtCore, QtWidgets
 from ecmc_epics import EpicsClient
 from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_views
@@ -42,6 +43,14 @@ class HardwarePanel(QtWidgets.QWidget):
         self._write_task = None
         self.writable = {}
         self.rows = {}
+        self._monitor_lock = Lock()
+        self._monitor_generation = 0
+        self._monitors = {}
+        self._monitor_pending = {}
+        self._monitor_connected = {}
+        self._monitor_timer = QtCore.QTimer(self)
+        self._monitor_timer.setInterval(100)
+        self._monitor_timer.timeout.connect(self._monitor_tick)
         self._demo_model = HardwareDemo() if demo else None
         self._demo_timer = QtCore.QTimer(self)
         self._demo_timer.setInterval(100)
@@ -54,6 +63,11 @@ class HardwarePanel(QtWidgets.QWidget):
                 slave)
         self.prefix, self.master = prefix, master
         layout.addWidget(self.selector)
+        self.selector.setVisible(self.selector.count() > 1)
+        self.device_header = QtWidgets.QWidget()
+        self.device_header_layout = QtWidgets.QHBoxLayout(self.device_header)
+        self.device_header_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.device_header)
         self.status = QtWidgets.QLabel("Hardware diagnostics")
         layout.addWidget(self.status)
         self.table = QtWidgets.QTableWidget(0, 4)
@@ -77,7 +91,12 @@ class HardwarePanel(QtWidgets.QWidget):
         buttons = QtWidgets.QHBoxLayout()
         self.refresh_button = QtWidgets.QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh)
+        self.live_check = QtWidgets.QCheckBox('Live')
+        self.live_check.setChecked(True)
+        self.live_check.setEnabled(not demo)
+        self.live_check.toggled.connect(self.refresh)
         buttons.addWidget(self.refresh_button)
+        buttons.addWidget(self.live_check)
         self.write_enable = QtWidgets.QCheckBox("Enable simulated writes" if demo else "Enable writes")
         self.write_enable.setEnabled(True)
         self.write_enable.toggled.connect(self._update_edit_cursors)
@@ -95,6 +114,7 @@ class HardwarePanel(QtWidgets.QWidget):
         slave = self.selector.currentData()
         if not slave:
             return
+        self._stop_monitors()
         candidates = slave.get("panels") or [slave.get("panel"), slave.get("name")]
         pairs = hardware_pvs(self.prefix, slave.get("master", self.master), slave["id"], candidates)
         self.writable = hardware_writable_pvs(self.prefix, slave.get("master", self.master), slave["id"], candidates)
@@ -114,6 +134,8 @@ class HardwarePanel(QtWidgets.QWidget):
             self._demo_timer.start()
             self.status.setText("DEMO — simulated values and writes; no network requests")
             return
+        if self.live_check.isChecked() and self._start_monitors():
+            return
         self.status.setText("Reading PVs…")
         self.selector.setEnabled(False)
         self.refresh_button.setEnabled(False)
@@ -121,6 +143,76 @@ class HardwarePanel(QtWidgets.QWidget):
         self._update_edit_cursors()
         self._task.signals.finished.connect(self._finished)
         QtCore.QThreadPool.globalInstance().start(self._task)
+
+    def _stop_monitors(self):
+        self._monitor_timer.stop()
+        with self._monitor_lock:
+            self._monitor_generation += 1
+            self._monitor_pending.clear()
+            self._monitor_connected.clear()
+        old, self._monitors = self._monitors, {}
+        for pv in old.values():
+            try:
+                pv.clear_callbacks()
+                pv.disconnect()
+            except Exception:
+                pass
+
+    def _start_monitors(self):
+        if self.demo:
+            return False
+        try:
+            import epics
+        except ImportError:
+            return False
+        generation = self._monitor_generation
+        for name in self.rows:
+            def connection(pvname=None, conn=None, key=name, **kwargs):
+                with self._monitor_lock:
+                    if generation != self._monitor_generation:
+                        return
+                    self._monitor_connected[key] = bool(conn)
+                    if not conn:
+                        self._monitor_pending[key] = (None, "Disconnected")
+            def sample(pvname=None, value=None, severity=None, key=name, **kwargs):
+                with self._monitor_lock:
+                    if generation != self._monitor_generation or self._monitor_connected.get(key) is False:
+                        return
+                    self._monitor_pending[key] = (None, "Invalid alarm") if severity == 3 else (value, "")
+            try:
+                self._monitors[name] = epics.PV(name, auto_monitor=True,
+                    callback=sample, connection_callback=connection)
+            except Exception as ex:
+                with self._monitor_lock:
+                    self._monitor_pending[name] = (None, str(ex))
+        if not self._monitors:
+            self._stop_monitors()
+            return False
+        self.status.setText("Live CA monitoring — connecting…")
+        self._monitor_timer.start()
+        self._update_edit_cursors()
+        return True
+
+    def _monitor_tick(self):
+        if self._closed:
+            self._stop_monitors()
+            return
+        with self._monitor_lock:
+            pending, self._monitor_pending = self._monitor_pending, {}
+            connected = sum(self._monitor_connected.values())
+        for pv, (value, error) in pending.items():
+            row = self.rows.get(pv)
+            if row is None:
+                continue
+            self.table.item(row, 1).setText(str(value) if value is not None else "—")
+            item = self.table.item(row, 2)
+            item.setText("Read OK" if value is not None else "Unavailable")
+            item.setToolTip(error)
+            self.update_card(pv, value, error)
+        if self._write_task is None:
+            self.status.setText(f"Live CA monitoring — {connected}/{len(self.rows)} connected")
+        if pending:
+            self._update_edit_cursors()
 
     def _demo_value(self, pv):
         slave = self.selector.currentData() or {}
@@ -173,8 +265,9 @@ class HardwarePanel(QtWidgets.QWidget):
     def _update_edit_cursors(self, *_):
         for pv, widgets in self.card_values.items():
             for _, widget in widgets:
-                widget.setCursor(QtCore.Qt.PointingHandCursor if self._can_write(pv)
-                                 else QtCore.Qt.ArrowCursor)
+                editable = self._can_write(pv)
+                widget.setCursor(QtCore.Qt.PointingHandCursor if editable else QtCore.Qt.ArrowCursor)
+                widget.set_editable(editable)
 
     def _value_widget(self, name, pv, primary=False):
         # EL70x1 original panel defines both words as bits 0..15.
@@ -245,7 +338,11 @@ class HardwarePanel(QtWidgets.QWidget):
         layout.setSpacing(4)
         self.card_values = {}
         self.device_values = {}
-        header = QtWidgets.QHBoxLayout()
+        header = self.device_header_layout
+        while header.count():
+            item = header.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
         channels, other, digital = {}, [], {'BI': [], 'BO': []}
         for name, pv in pairs:
             if name == "PnlTyp":
@@ -267,7 +364,6 @@ class HardwarePanel(QtWidgets.QWidget):
             else:
                 other.append((name, pv, name))
         header.addStretch(1)
-        layout.addLayout(header)
         for kind, signals in digital.items():
             if signals:
                 layout.addWidget(self._digital_group(kind, signals), 0, QtCore.Qt.AlignLeft)
@@ -463,6 +559,7 @@ class HardwarePanel(QtWidgets.QWidget):
         self.selector.setEnabled(False)
         self.refresh_button.setEnabled(False)
         self.write_enable.setEnabled(False)
+        self._update_edit_cursors()
         self.status.setText("Writing " + pv)
         self._write_task = WriteTask(pv, value, self.timeout, self.writable[pv])
         self._write_task.signals.finished.connect(self._write_finished)
@@ -477,7 +574,10 @@ class HardwarePanel(QtWidgets.QWidget):
         self.write_enable.setEnabled(True)
         if error:
             QtWidgets.QMessageBox.warning(self, "Write not confirmed", error)
-        self.refresh()
+        if self._monitor_timer.isActive():
+            self._update_edit_cursors()
+        else:
+            self.refresh()
 
     def plot_selected(self):
         pvs = [self.table.item(i.row(), 3).text()
@@ -489,4 +589,5 @@ class HardwarePanel(QtWidgets.QWidget):
     def closeEvent(self, event):
         self._closed = True
         self._demo_timer.stop()
+        self._stop_monitors()
         super().closeEvent(event)

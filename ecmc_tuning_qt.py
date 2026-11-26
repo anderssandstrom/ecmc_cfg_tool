@@ -34,6 +34,7 @@ class Trend(QtWidgets.QWidget):
         self.fixed_range = None
         self.include_zero = len(series) == 1
         self.axis_precision = 5
+        self.show_legend = True
         self.dual_axis = False
         self.right_keys = set()
         self.right_fixed_range = None
@@ -73,10 +74,11 @@ class Trend(QtWidgets.QWidget):
         values = [v for a in data.values() for _,v in a]
         p.setPen(QtGui.QColor('#465565'))
         x = margin + 2
-        for key,title,color in self.series:
-            p.setPen(QtGui.QColor(color))
-            p.drawText(int(x),16,title)
-            x += 125
+        if self.show_legend:
+            for key,title,color in self.series:
+                p.setPen(QtGui.QColor(color))
+                p.drawText(int(x),16,title)
+                x += max(125, self.fontMetrics().horizontalAdvance(title) + 16)
         if not values:
             p.drawText(r,QtCore.Qt.AlignCenter,'Waiting for PV samples')
             return

@@ -57,6 +57,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.trend.samples = {}
         self.trend.include_zero = False
         self.trend.axis_precision = 12
+        self.trend.show_legend = False
         scale_row = QtWidgets.QHBoxLayout()
         scale_row.addWidget(QtWidgets.QLabel("Y-axis"))
         self.scale_mode = QtWidgets.QComboBox()
@@ -81,10 +82,9 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.independent_check = QtWidgets.QCheckBox("Independent axes")
         self.independent_check.toggled.connect(self._rebuild_plots)
         self.dual_check = QtWidgets.QCheckBox("Dual Y-axis")
-        self.dual_check.toggled.connect(self._dual_changed)
+        self.dual_check.setVisible(False)
         axis_options = QtWidgets.QHBoxLayout()
         axis_options.addWidget(self.independent_check)
-        axis_options.addWidget(self.dual_check)
         axis_options.addStretch(1)
         layout.addLayout(axis_options)
         self.right_controls = QtWidgets.QWidget()
@@ -232,7 +232,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
             axis.addItems(["Left", "Right"])
             axis.setCurrentText(self._axes[name])
             axis.currentTextChanged.connect(lambda side, key=name: self._assign_axis(key, side))
-            axis.setEnabled(self.dual_check.isChecked() and not self.independent_check.isChecked())
+            axis.setEnabled(not self.independent_check.isChecked())
             self.curves.setCellWidget(i, 4, axis)
         self.curves.blockSignals(False)
 
@@ -305,14 +305,14 @@ class HardwareTrendWindow(QtWidgets.QDialog):
             self.dual_check.blockSignals(True)
             self.dual_check.setChecked(False)
             self.dual_check.blockSignals(False)
-        dual = self.dual_check.isChecked() and not separate
+        dual = not separate and any(self._axes.get(key) == 'Right' for key, _, _ in visible)
         self.trend.dual_axis = dual
         self.trend.right_keys = {key for key, side in self._axes.items() if side == "Right"}
         self.right_controls.setVisible(dual)
         for i in range(self.curves.rowCount()):
             axis = self.curves.cellWidget(i, 4)
             if axis is not None:
-                axis.setEnabled(dual)
+                axis.setEnabled(not separate)
         self.trend.setVisible(not separate)
         self.scale_mode.setEnabled(not separate)
         manual = not separate and self.scale_mode.currentIndex() == 2
