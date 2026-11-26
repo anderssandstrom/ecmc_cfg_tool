@@ -1283,7 +1283,9 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._open_overview("ecmc_start_sm_overview.py")
 
     def _open_axes_for_group(self, data):
-        self._open_overview("ecmc_start_axis_overview.py", "--grp_id", str(data["id"]))
+        from ecmc_axis_group_panel import AxisGroupPanel
+        pane=AxisGroupPanel(data,self._snapshot.get("axes",[]),self._open_native_axis_expert,demo=self._demo)
+        self._add_tool_tab(pane,data.get("name","Axis group"))
 
     def _open_axes_for_state_machine(self, data):
         self._open_overview("ecmc_start_axis_overview.py", "--sm_id_mst", str(data["id"]))

@@ -4,7 +4,12 @@ Native coordinates and motor record user coordinates are deliberately separate.
 """
 NATIVE = (
     ("Motion", (("Actual position","-PosAct"), ("Target position","-TgtPosCmd"), ("Trajectory position","-PosSet"), ("Following error","-PosErr"), ("Actual velocity","-VelAct"), ("Target velocity","-TgtVelCmd"), ("Acceleration command","-AccCmd"), ("Deceleration command","-DecCmd"), ("Position units","-TgtPosCmd.EGU"), ("Tweak distance","-TwkDstCmd"))),
-    ("State", (("Enable command","-EnaCmd"), ("Enable command RB","-EnaCmd-RB"), ("Auto execute","-AutoExecuteOnTargetPos-RB"), ("Enabled","-EnaAct"), ("Busy","-Busy"), ("Moving","-Moving"), ("Homed","-Homed"), ("At target","-AtTarget"), ("Sequence state","-SeqState"), ("Motion command","-MtnCmd"), ("Homing procedure","-movHomCmd"), ("Blocked","-Blocked"), ("In realtime","-InRT"))),
+    ("State", (("Enable command","-EnaCmd"), ("Enable command RB","-EnaCmd-RB"), ("Auto execute","-AutoExecuteOnTargetPos-RB"), ("Enabled","-EnaAct"), ("Busy","-Busy"), ("Moving","-Moving"), ("Homed","-Homed"), ("At target","-AtTarget"), ("Sequence state","-SeqState"), ("Motion command","-MtnCmd"), ("Blocked","-Blocked"), ("In realtime","-InRT"))),
+    ("Homing", (("Procedure","-movHomCmd"), ("Encoder 1 configured procedure","-Enc01-HmeProc"),
+                ("Encoder 1 home position","-Enc01-HmePos"), ("Velocity to cam","-Enc01-HmeVelToCam"),
+                ("Velocity from cam","-Enc01-HmeVelFrmCam"), ("Acceleration","-Enc01-HmeAcc"),
+                ("Deceleration","-Enc01-HmeDec"), ("Post move enabled","-Enc01-HmePstMveEna"),
+                ("Post move position","-Enc01-HmePstMvePos"), ("Encoder 1 homed","-Enc01-Homed"))),
     ("Interlocks", (("Forward limit","-LimFwd"), ("Backward limit","-LimBwd"), ("Home switch","-HomeSwitch"), ("Forward interlock","-SumIlockFwd"), ("Backward interlock","-SumIlockBwd"), ("Interlock text","-IlockTxt"))),
     ("ECMC soft limits", (("Lower limit (dial)","-CfgDLLM"), ("Upper limit (dial)","-CfgDHLM"), ("Forward enabled","-SftLimFwdEna-RB"), ("Backward enabled","-SftLimBwdEna-RB"), ("Forward interlock","-SftLimFwdIlock"), ("Backward interlock","-SftLimBwdIlock"), ("Forward enable command","-SftLimFwdEna"), ("Backward enable command","-SftLimBwdEna"))),
     ("Controller and diagnostics", (("Error ID","-ErrId"), ("Warning ID","-WrnId"), ("Message","-MsgTxt"), ("Encoder count","-EncCnt"), ("Selected encoder RB","-SetEncIdCmd-RB"), ("Encoder source","-EncSrcTyp-RB"), ("Trajectory source","-TrjSrcTyp-RB"), ("Trajectory type","-TrajType"), ("Drive type","-DrvType"), ("Drive mode","-DrvMode"), ("Kp","-Ctrl-Kp"), ("Ki","-Ctrl-Ki"), ("Kd","-Ctrl-Kd"))),
@@ -32,7 +37,7 @@ MOTOR_ACTIONS = (("Enable",".CNEN",(1,)),("Disable",".CNEN",(0,)),
                  ("Tweak −",".TWR",(1,)),("Tweak +",".TWF",(1,)))
 
 BOOL_COMMANDS = {"-EnaCmd",".CNEN","-SftLimFwdEna","-SftLimBwdEna"}
-BOOL_STATUS = {"-SftLimFwdEna-RB","-SftLimBwdEna-RB","-SftLimFwdIlock","-SftLimBwdIlock","-EnaCmd-RB","-AutoExecuteOnTargetPos-RB","-EnaAct","-Busy","-Moving",
+BOOL_STATUS = {"-Enc01-Homed","-SftLimFwdEna-RB","-SftLimBwdEna-RB","-SftLimFwdIlock","-SftLimBwdIlock","-EnaCmd-RB","-AutoExecuteOnTargetPos-RB","-EnaAct","-Busy","-Moving",
                "-Homed","-AtTarget","-Blocked","-InRT","-LimFwd","-LimBwd",
                "-HomeSwitch","-SumIlockFwd","-SumIlockBwd",".DMOV",".LVIO",".HLS",".LLS"}
 MOTION_ENUMS = {"-MtnCmd","-movHomCmd"}
