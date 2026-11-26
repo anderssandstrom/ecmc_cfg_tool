@@ -806,7 +806,7 @@ class HardwarePanel(QtWidgets.QWidget):
             return
         if self.demo:
             if self._can_write(pv):
-                self._demo_model.write(pv, value)
+                self._demo_model.write(pv, value, ds402=bool(re.search(r'-Drv\d+-', pv)) and self._is_ds402(re.search(r'-(Drv\d+)-', pv)[1]))
                 self._demo_tick()
             return
         if not direct and QtWidgets.QMessageBox.question(
