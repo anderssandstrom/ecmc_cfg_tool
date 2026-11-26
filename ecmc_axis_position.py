@@ -3,6 +3,7 @@ import math
 from threading import Event
 from qt_compat import QtCore
 from ecmc_hardware_write import WriteSignals
+from ecmc_axis_diagnostics import native_soft_bounds
 from ecmc_native_motion import NativeMotionMixin, NATIVE_PV_SUFFIXES, numeric_readback
 
 class PositionTask(QtCore.QRunnable, NativeMotionMixin):
@@ -56,9 +57,14 @@ class PositionTask(QtCore.QRunnable, NativeMotionMixin):
                 if self._bit(3)!=0 or self._bit(5)!=0:
                     raise RuntimeError("Axis busy")
                 target = self.target + self._value("PosAct") if self.relative else self.target
-                # IOC enforces native configured limits; do not substitute motor user limits.
+                for key,suffix in (("Low","-CfgDLLM"),("High","-CfgDHLM"),
+                                   ("LowEna","-SftLimBwdEna-RB"),("HighEna","-SftLimFwdEna-RB")):
+                    self._connect(key,suffix)
+                bounds = native_soft_bounds(*(self._value(k) for k in ("Low","High","LowEna","HighEna")))
+                if not bounds[0] <= target <= bounds[1]:
+                    raise RuntimeError("Target outside enabled ECMC soft limits")
                 self._put("TgtVelCmd",self.velocity)
-                self.native_move_absolute(target,mode,(-math.inf,math.inf))
+                self.native_move_absolute(target,mode,bounds)
             else:
                 for key in ("RBV","DMOV","CNEN","LLM","HLM","LVIO","VELO","VAL"):
                     self._connect(key,"."+key)

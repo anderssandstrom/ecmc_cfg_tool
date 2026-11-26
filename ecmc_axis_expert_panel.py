@@ -374,7 +374,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         values = {"-PosAct":actual,"-PosSet":10,"-TgtPosCmd":10,"-PosErr":10-actual,
                   "-VelAct":0,"-TgtVelCmd":1,"-AccCmd":2,"-DecCmd":2,
                   "-TgtPosCmd.EGU":"mm","-EnaCmd":1,"-EnaCmd-RB":1,"-EnaAct":1,"-Homed":1,
-                  "-LimFwd":1,"-LimBwd":1,"-SftLimFwdEna":1,"-SftLimBwdEna":1,"-SftLimFwdEna-RB":1,"-SftLimBwdEna-RB":1,
+                  "-CfgDLLM":-50,"-CfgDHLM":50,"-LimFwd":1,"-LimBwd":1,"-SftLimFwdEna":1,"-SftLimBwdEna":1,"-SftLimFwdEna-RB":1,"-SftLimBwdEna-RB":1,
                   "-AtTarget":1,"-InRT":1,"-EncCnt":1,"-SetEncIdCmd-RB":1,
                   "-MsgTxt":"","-IlockTxt":"","-Ctrl-Kp":1,"-Ctrl-Ki":0,"-Ctrl-Kd":0,
                   ".RBV":actual+5,".VAL":15,".VELO":1,".EGU":"mm",".DMOV":1,

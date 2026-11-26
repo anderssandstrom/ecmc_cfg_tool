@@ -6,7 +6,7 @@ NATIVE = (
     ("Motion", (("Actual position","-PosAct"), ("Target position","-TgtPosCmd"), ("Trajectory position","-PosSet"), ("Following error","-PosErr"), ("Actual velocity","-VelAct"), ("Target velocity","-TgtVelCmd"), ("Acceleration command","-AccCmd"), ("Deceleration command","-DecCmd"), ("Position units","-TgtPosCmd.EGU"), ("Tweak distance","-TwkDstCmd"))),
     ("State", (("Enable command","-EnaCmd"), ("Enable command RB","-EnaCmd-RB"), ("Auto execute","-AutoExecuteOnTargetPos-RB"), ("Enabled","-EnaAct"), ("Busy","-Busy"), ("Moving","-Moving"), ("Homed","-Homed"), ("At target","-AtTarget"), ("Sequence state","-SeqState"), ("Motion command","-MtnCmd"), ("Blocked","-Blocked"), ("In realtime","-InRT"))),
     ("Interlocks", (("Forward limit","-LimFwd"), ("Backward limit","-LimBwd"), ("Home switch","-HomeSwitch"), ("Forward interlock","-SumIlockFwd"), ("Backward interlock","-SumIlockBwd"), ("Interlock text","-IlockTxt"))),
-    ("ECMC soft limits", (("Forward enabled","-SftLimFwdEna-RB"), ("Backward enabled","-SftLimBwdEna-RB"), ("Forward interlock","-SftLimFwdIlock"), ("Backward interlock","-SftLimBwdIlock"), ("Forward enable command","-SftLimFwdEna"), ("Backward enable command","-SftLimBwdEna"))),
+    ("ECMC soft limits", (("Lower limit (dial)","-CfgDLLM"), ("Upper limit (dial)","-CfgDHLM"), ("Forward enabled","-SftLimFwdEna-RB"), ("Backward enabled","-SftLimBwdEna-RB"), ("Forward interlock","-SftLimFwdIlock"), ("Backward interlock","-SftLimBwdIlock"), ("Forward enable command","-SftLimFwdEna"), ("Backward enable command","-SftLimBwdEna"))),
     ("Controller and diagnostics", (("Error ID","-ErrId"), ("Warning ID","-WrnId"), ("Message","-MsgTxt"), ("Encoder count","-EncCnt"), ("Selected encoder RB","-SetEncIdCmd-RB"), ("Encoder source","-EncSrcTyp-RB"), ("Trajectory source","-TrjSrcTyp-RB"), ("Trajectory type","-TrajType"), ("Drive type","-DrvType"), ("Drive mode","-DrvMode"), ("Kp","-Ctrl-Kp"), ("Ki","-Ctrl-Ki"), ("Kd","-Ctrl-Kd"))),
 )
 MOTOR = (
@@ -22,7 +22,7 @@ def axis_signals(base, interface):
     return tuple((group, tuple((label,base+suffix) for label,suffix in rows))
                  for group,rows in (NATIVE if interface == "native" else MOTOR))
 
-NATIVE_EDIT = {"-TgtPosCmd","-TgtVelCmd","-AccCmd","-DecCmd","-TwkDstCmd","-Ctrl-Kp","-Ctrl-Ki","-Ctrl-Kd"}
+NATIVE_EDIT = {"-CfgDLLM","-CfgDHLM","-TgtPosCmd","-TgtVelCmd","-AccCmd","-DecCmd","-TwkDstCmd","-Ctrl-Kp","-Ctrl-Ki","-Ctrl-Kd"}
 MOTOR_EDIT = {".VAL",".VELO",".ACCL",".TWV",".HLM",".LLM"}
 NATIVE_ACTIONS = (("Enable","-EnaCmd",(1,)),("Disable","-EnaCmd",(0,)),
                   ("Execute","-ExeCmd",(0,1)),("Tweak −","-TwkBwdCmd",(1,)),
@@ -51,3 +51,18 @@ def axis_status_value(suffix, value):
     if suffix in ACTIVE_LOW_STATUS and value in (0,1):
         return 1-int(value)
     return value
+
+def native_soft_bounds(low, high, low_enabled, high_enabled):
+    """Only enabled limits constrain a target; unknown state fails closed."""
+    import math
+    if low_enabled not in (0,1) or high_enabled not in (0,1):
+        raise ValueError("Native soft-limit enable status unavailable")
+    if low_enabled and (low is None or not math.isfinite(low)):
+        raise ValueError("Native lower soft limit unavailable")
+    if high_enabled and (high is None or not math.isfinite(high)):
+        raise ValueError("Native upper soft limit unavailable")
+    lower = low if low_enabled else -math.inf
+    upper = high if high_enabled else math.inf
+    if lower > upper:
+        raise ValueError("Native soft limits reversed")
+    return lower, upper
