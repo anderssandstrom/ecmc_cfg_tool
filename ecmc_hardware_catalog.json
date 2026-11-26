@@ -109,6 +109,82 @@
       "Enc02-PosAct",
       "Enc02-PosAct02"
     ],
-    "EK1100": []
+    "EK1100": [],
+    "Ex10x4": [
+      "BI01",
+      "BI02",
+      "BI03",
+      "BI04"
+    ],
+    "Ex10x8": [
+      "BI01",
+      "BI02",
+      "BI03",
+      "BI04",
+      "BI05",
+      "BI06",
+      "BI07",
+      "BI08"
+    ],
+    "Ex20x4": [
+      "BO01",
+      "BO01-RB",
+      "BO02",
+      "BO02-RB",
+      "BO03",
+      "BO03-RB",
+      "BO04",
+      "BO04-RB"
+    ],
+    "Ex20x8": [
+      "BO01",
+      "BO01-RB",
+      "BO02",
+      "BO02-RB",
+      "BO03",
+      "BO03-RB",
+      "BO04",
+      "BO04-RB",
+      "BO05",
+      "BO05-RB",
+      "BO06",
+      "BO06-RB",
+      "BO07",
+      "BO07-RB",
+      "BO08",
+      "BO08-RB"
+    ],
+    "Ex3xx4": [
+      "AI01",
+      "AI01-ErrAlrm",
+      "AI01-OvrLimAlrm",
+      "AI01-UndrLimAlrm",
+      "AI01.EGU",
+      "AI02",
+      "AI02-ErrAlrm",
+      "AI02-OvrLimAlrm",
+      "AI02-UndrLimAlrm",
+      "AI02.EGU",
+      "AI03",
+      "AI03-ErrAlrm",
+      "AI03-OvrLimAlrm",
+      "AI03-UndrLimAlrm",
+      "AI03.EGU",
+      "AI04",
+      "AI04-ErrAlrm",
+      "AI04-OvrLimAlrm",
+      "AI04-UndrLimAlrm",
+      "AI04.EGU"
+    ],
+    "Ex4xx4": [
+      "AO01",
+      "AO01-RB",
+      "AO02",
+      "AO02-RB",
+      "AO03",
+      "AO03-RB",
+      "AO04",
+      "AO04-RB"
+    ]
   }
 }
