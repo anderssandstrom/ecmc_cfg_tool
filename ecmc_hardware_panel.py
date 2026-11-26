@@ -4,6 +4,7 @@ from qt_compat import QtCore, QtWidgets
 from ecmc_epics import EpicsClient
 from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_views
 from ecmc_hardware_write import WriteTask
+from ecmc_hardware_demo import HardwareDemo
 from ecmc_hardware_widgets import HardwareSymbol, SignalValue, signal_role
 
 
@@ -41,6 +42,10 @@ class HardwarePanel(QtWidgets.QWidget):
         self._write_task = None
         self.writable = {}
         self.rows = {}
+        self._demo_model = HardwareDemo() if demo else None
+        self._demo_timer = QtCore.QTimer(self)
+        self._demo_timer.setInterval(100)
+        self._demo_timer.timeout.connect(self._demo_tick)
         layout = QtWidgets.QVBoxLayout(self)
         self.selector = QtWidgets.QComboBox()
         for slave in slaves:
@@ -73,8 +78,8 @@ class HardwarePanel(QtWidgets.QWidget):
         self.refresh_button = QtWidgets.QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh)
         buttons.addWidget(self.refresh_button)
-        self.write_enable = QtWidgets.QCheckBox("Enable writes")
-        self.write_enable.setEnabled(not demo)
+        self.write_enable = QtWidgets.QCheckBox("Enable simulated writes" if demo else "Enable writes")
+        self.write_enable.setEnabled(True)
         self.write_enable.toggled.connect(self._update_edit_cursors)
         buttons.addWidget(self.write_enable)
         buttons.addStretch(1)
@@ -104,8 +109,10 @@ class HardwarePanel(QtWidgets.QWidget):
         self.build_cards(overview)
         self.build_experts(experts)
         if self.demo:
+            self._demo_tick()
             self._update_edit_cursors()
-            self.status.setText("Demo mode — no network requests")
+            self._demo_timer.start()
+            self.status.setText("DEMO — simulated values and writes; no network requests")
             return
         self.status.setText("Reading PVs…")
         self.selector.setEnabled(False)
@@ -114,6 +121,20 @@ class HardwarePanel(QtWidgets.QWidget):
         self._update_edit_cursors()
         self._task.signals.finished.connect(self._finished)
         QtCore.QThreadPool.globalInstance().start(self._task)
+
+    def _demo_value(self, pv):
+        slave = self.selector.currentData() or {}
+        return self._demo_model.value(pv, slave.get("name", ""), slave.get("panel", ""))
+
+    def _demo_tick(self):
+        if self._closed or not self.demo:
+            self._demo_timer.stop()
+            return
+        for pv, row in self.rows.items():
+            value = self._demo_value(pv)
+            self.table.item(row, 1).setText(str(value))
+            self.table.item(row, 2).setText("Simulated")
+            self.update_card(pv, value, "")
 
     def _finished(self, results):
         self._task = None
@@ -169,6 +190,7 @@ class HardwarePanel(QtWidgets.QWidget):
 
     def _group(self, title, rows):
         card = QtWidgets.QGroupBox(title)
+        card.setMaximumWidth(540)
         outer = QtWidgets.QVBoxLayout(card)
         outer.setContentsMargins(5, 4, 5, 4)
         outer.setSpacing(3)
@@ -334,9 +356,9 @@ class HardwarePanel(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         trend = menu.addAction("Trend PV")
         row = self.rows.get(pv)
-        trend.setEnabled(not self.demo and self.on_plot is not None and row is not None
-                         and self.table.item(row, 2).text() == "Read OK")
-        trend.triggered.connect(lambda: self.on_plot([pv]))
+        trend.setEnabled((self.demo or self.on_plot is not None) and row is not None
+                         and self.table.item(row, 2).text() in ("Read OK", "Simulated"))
+        trend.triggered.connect(lambda: self._trend_pv(pv))
         if pv in self.writable:
             write = menu.addAction("Write PV…")
             write.setEnabled(self._can_write(pv))
@@ -348,12 +370,24 @@ class HardwarePanel(QtWidgets.QWidget):
         else:
             menu.exec_(global_pos)
 
+    def _trend_pv(self, pv):
+        if self.demo:
+            from ecmc_hardware_trend import HardwareTrendWindow
+            # Capture the selected slave's identity rather than tracking selector changes.
+            slave = self.selector.currentData() or {}
+            model = self._demo_model
+            window = HardwareTrendWindow([pv], parent=self, demo_value=lambda name:
+                model.value(name, slave.get("name", ""), slave.get("panel", "")))
+            window.show()
+        elif self.on_plot:
+            self.on_plot([pv])
+
     def _can_write(self, pv):
         row = self.rows.get(pv)
-        return (not self.demo and not self._closed and self.write_enable.isChecked()
+        return (not self._closed and self.write_enable.isChecked()
                 and self._task is None and self._write_task is None
                 and pv in self.writable and row is not None
-                and self.table.item(row, 2).text() == "Read OK")
+                and self.table.item(row, 2).text() in ("Read OK", "Simulated"))
 
     def _write_pv(self, pv):
         if not self._can_write(pv):
@@ -371,6 +405,11 @@ class HardwarePanel(QtWidgets.QWidget):
             value = parse_write_value(value, self.writable[pv])
         except ValueError as ex:
             QtWidgets.QMessageBox.warning(self, "Invalid value", str(ex))
+            return
+        if self.demo:
+            if self._can_write(pv):
+                self._demo_model.write(pv, value)
+                self._demo_tick()
             return
         if QtWidgets.QMessageBox.question(
                 self, "Confirm hardware write",
@@ -408,4 +447,5 @@ class HardwarePanel(QtWidgets.QWidget):
 
     def closeEvent(self, event):
         self._closed = True
+        self._demo_timer.stop()
         super().closeEvent(event)

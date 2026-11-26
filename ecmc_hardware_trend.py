@@ -9,9 +9,12 @@ from ecmc_native_motion import numeric_readback
 
 
 class HardwareTrendWindow(QtWidgets.QDialog):
-    def __init__(self, pvs, parent=None):
+    def __init__(self, pvs, parent=None, demo_value=None):
         super().__init__(parent)
         self.setWindowTitle("PV trend — " + (pvs[0] if len(pvs) == 1 else "Hardware"))
+        self._demo_value = demo_value
+        if demo_value is not None:
+            self.setWindowTitle(self.windowTitle() + ' [DEMO]')
         self.setModal(False)
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
         self.resize(760, 340)
@@ -52,6 +55,9 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(50)
         self.timer.timeout.connect(self._tick)
+        if self._demo_value is not None:
+            self.timer.start()
+            return
         try:
             import epics
             for name in self._pvs:
@@ -87,6 +93,9 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.trend.clear()
 
     def _tick(self):
+        if self._demo_value is not None:
+            for pv in self._pvs:
+                self._enqueue(pv, numeric_readback(self._demo_value(pv)))
         with self._lock:
             events = self._pending
             self._pending = deque(maxlen=200000)
