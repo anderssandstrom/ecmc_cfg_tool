@@ -1,13 +1,14 @@
 """Modeless, read-only CA trend using the controller tuning plot widget."""
 import time
+from collections import deque
+from threading import Lock
+from ecmc_acquisition import bounded_series
 from qt_compat import QtCore, QtWidgets
 from ecmc_tuning_qt import Trend
 from ecmc_native_motion import numeric_readback
 
 
 class HardwareTrendWindow(QtWidgets.QDialog):
-    sample = QtCore.Signal(str, float, object) if hasattr(QtCore, "Signal") else QtCore.pyqtSignal(str, float, object)
-
     def __init__(self, pvs, parent=None):
         super().__init__(parent)
         self.setWindowTitle("PV trend — " + (pvs[0] if len(pvs) == 1 else "Hardware"))
@@ -17,13 +18,18 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self._subscriptions = []
         self._closed = False
         self._latest = {}
-        self._connected = {}
+        self._lock = Lock()
+        self._pending = deque(maxlen=200000)
+        self._dropped = 0
+        self._counts = {}
+        self._rate_at = time.monotonic()
+        self._rate = {}
         self._pvs = list(dict.fromkeys(pvs))
         layout = QtWidgets.QVBoxLayout(self)
         controls = QtWidgets.QHBoxLayout()
         controls.addWidget(QtWidgets.QLabel("History [s]"))
         history = QtWidgets.QSpinBox()
-        history.setRange(1, 3600)
+        history.setRange(1, 120)
         history.setValue(15)
         controls.addWidget(history)
         freeze = QtWidgets.QCheckBox("Freeze")
@@ -35,25 +41,25 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         colors = ("#287bc0", "#d06d22", "#a64070", "#26804b")
         self.trend = Trend([(pv, pv.rsplit(":", 1)[-1], colors[i % len(colors)])
                             for i, pv in enumerate(self._pvs)])
+        self.trend.samples = bounded_series(self._pvs, 200000)
         layout.addWidget(self.trend, 1)
         self.status = QtWidgets.QLabel("Connecting…")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         history.valueChanged.connect(self._history)
         freeze.toggled.connect(self.trend.freeze)
-        clear.clicked.connect(self.trend.clear)
-        self.sample.connect(self._sample)
+        clear.clicked.connect(self._clear)
         self.timer = QtCore.QTimer(self)
-        self.timer.setInterval(100)
+        self.timer.setInterval(50)
         self.timer.timeout.connect(self._tick)
         try:
             import epics
             for name in self._pvs:
                 def callback(pvname=None, value=None, severity=None, _key=name, **kw):
-                    self.sample.emit(_key, time.monotonic(), numeric_readback(value, severity))
+                    self._enqueue(_key, numeric_readback(value, severity))
                 def connection(pvname=None, conn=None, _key=name, **kw):
                     if not conn:
-                        self.sample.emit(_key, time.monotonic(), None)
+                        self._enqueue(_key, None)
                 pv = epics.PV(name, auto_monitor=True, callback=callback,
                               connection_callback=connection)
                 self._subscriptions.append(pv)
@@ -66,24 +72,44 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.trend.history = value
         self.trend.update()
 
-    def _sample(self, key, stamp, value):
-        if self._closed:
-            return
-        self._latest[key] = value
-        self.trend.append(key, stamp, value)
+    def _enqueue(self, key, value):
+        with self._lock:
+            if self._closed:
+                return
+            if len(self._pending) == self._pending.maxlen:
+                self._dropped += 1
+            self._pending.append((key, time.monotonic(), value))
+
+    def _clear(self):
+        with self._lock:
+            self._pending.clear()
+            self._dropped = 0
+        self.trend.clear()
 
     def _tick(self):
-        # Extend held values to now, as the tuning plot shows recent time.
+        with self._lock:
+            events = self._pending
+            self._pending = deque(maxlen=200000)
+        for key, stamp, value in events:
+            self._latest[key] = value
+            self._counts[key] = self._counts.get(key, 0) + 1
+            self.trend.append(key, stamp, value)
         now = time.monotonic()
-        for key, value in self._latest.items():
-            self.trend.append(key, now, value)
+        elapsed = now - self._rate_at
+        if elapsed >= 1.0:
+            self._rate = {key: self._counts.get(key, 0) / elapsed for key in self._pvs}
+            self._counts.clear()
+            self._rate_at = now
         self.trend.update()
         self.status.setText(" | ".join(
-            f"{key}: {self._latest[key]:.9g}" if self._latest.get(key) is not None
-            else f"{key}: unavailable" for key in self._pvs))
+            f"{key}: {self._latest[key]:.9g} ({self._rate.get(key, 0):.0f} events/s)"
+            if self._latest.get(key) is not None else f"{key}: unavailable"
+            for key in self._pvs) + (f" | Dropped events: {self._dropped}" if self._dropped else ""))
 
     def closeEvent(self, event):
-        self._closed = True
+        with self._lock:
+            self._closed = True
+            self._pending.clear()
         self.timer.stop()
         for pv in self._subscriptions:
             try:
