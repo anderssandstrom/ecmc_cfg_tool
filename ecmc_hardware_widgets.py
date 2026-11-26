@@ -202,3 +202,34 @@ class AnalogValue(SignalValue):
             p.setPen(QtGui.QPen(QtGui.QColor("#287bc0"), 1.3))
             p.drawPolyline(QtGui.QPolygonF(points))
         p.end()
+
+class BooleanStatus(SignalValue):
+    """Read-only circular indicator, deliberately distinct from BooleanValue."""
+    def __init__(self, active_color="#26804b", on_text="On", off_text="Off"):
+        super().__init__("", lambda: False)
+        self.value = None
+        self.active_color = active_color
+        self.on_text, self.off_text = on_text, off_text
+        self.setMinimumSize(68, 18)
+
+    def set_editable(self, enabled):
+        # Status indicators cannot be armed.
+        self.setCursor(QtCore.Qt.ArrowCursor)
+
+    def set_value(self, value):
+        self.value = boolean_value(value)
+        self.update()
+
+    def paintEvent(self, event):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        x = 5
+        color = QtGui.QColor(self.active_color if self.value == 1 else "#89939e")
+        p.setPen(QtGui.QPen(color, 1.3))
+        p.setBrush(color if self.value is not None else QtCore.Qt.NoBrush)
+        p.drawEllipse(QtCore.QRectF(x, (self.height()-10)/2, 10, 10))
+        p.setPen(self.palette().color(QtGui.QPalette.Text))
+        text = self.on_text if self.value == 1 else self.off_text if self.value == 0 else "—"
+        p.drawText(QtCore.QRectF(x+15, 0, max(1,self.width()-x-15), self.height()),
+                   QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, text)
+        p.end()

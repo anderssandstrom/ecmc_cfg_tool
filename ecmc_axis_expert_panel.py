@@ -3,7 +3,7 @@ import math
 import time
 from qt_compat import QtCore, QtWidgets
 from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value
-from ecmc_hardware_widgets import SignalValue, BooleanValue
+from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
 from ecmc_axis_write import AxisWriteTask
 from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
 
@@ -93,6 +93,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
             box = QtWidgets.QGroupBox(group)
             grid = QtWidgets.QGridLayout(box)
             grid.setSpacing(3)
+            compact = group in ("State", "Interlocks", "Limits")
+            position = 0
             for i,(label,pv) in enumerate(rows):
                 suffix = pv[len(self.base):]
                 name = QtWidgets.QLabel(label)
@@ -100,7 +102,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 if suffix in BOOL_COMMANDS:
                     value = BooleanValue(lambda old,new,pv=pv: self._toggle_boolean(pv,old,new))
                 elif suffix in BOOL_STATUS:
-                    value = BooleanValue(lambda old,new: None)
+                    alarm = suffix in ("-Blocked","-SumIlockFwd","-SumIlockBwd",".LVIO")
+                    value = BooleanStatus("#c43c3c" if alarm else "#b7791f" if suffix in ("-LimFwd","-LimBwd",".HLS",".LLS") else "#26804b")
                 else:
                     value = SignalValue("—",lambda pv=pv: self._edit(pv))
                 value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
@@ -112,12 +115,24 @@ class AxisExpertPanel(QtWidgets.QWidget):
                     value.setFont(font)
                 if suffix in editable or suffix in BOOL_COMMANDS or suffix in MOTION_ENUMS:
                     self._edit_widgets[pv] = value
-                grid.addWidget(name,i,0)
-                grid.addWidget(value,i,1)
+                if compact and suffix in BOOL_STATUS:
+                    row, col = position//2, (position%2)*2
+                    grid.addWidget(name,row,col)
+                    grid.addWidget(value,row,col+1)
+                    position += 1
+                else:
+                    if compact and position % 2:
+                        position += 1
+                    row = position//2 if compact else i
+                    grid.addWidget(name,row,0)
+                    grid.addWidget(value,row,1,1,3 if compact else 1)
+                    position += 2 if compact else 1
                 value.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
                 value.customContextMenuRequested.connect(lambda pos,v=value,pv=pv: self._menu(v,pos,pv))
                 self._labels[pv] = value
             grid.setColumnStretch(1,1)
+            if compact:
+                grid.setColumnStretch(3,1)
             if index == 0 or group == "State":
                 layout.addWidget(box)
             else:
@@ -303,7 +318,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 pass
         self._pvs.clear()
         for label in self._labels.values():
-            if isinstance(label,BooleanValue):
+            if isinstance(label,(BooleanValue,BooleanStatus)):
                 label.set_value(None)
             else:
                 label.setText("—")
@@ -326,7 +341,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 except Exception:
                     pass
             count += value is not None
-            if isinstance(label,BooleanValue):
+            if isinstance(label,(BooleanValue,BooleanStatus)):
                 label.set_value(value)
             else:
                 text = format_axis_value(value,self._precision)
