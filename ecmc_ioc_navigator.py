@@ -661,7 +661,9 @@ class IocNavigator(QtWidgets.QMainWindow):
                                                      title=f"DAQ Axis {data.get('id', '')}"))
             menu.addSeparator()
             self._menu_action(menu, "Open Axis Panel", lambda: self._open_axis_panel(data, "ecmcAxis.ui"))
-            self._menu_action(menu, "Open Axis Expert Panel", lambda: self._open_axis_panel(data, "ecmcAxisExpert.ui"))
+            self._menu_action(menu, "Native Axis Expert (ECMC)", lambda: self._open_native_axis_expert(data))
+            self._menu_action(menu, "Native Axis Expert (Motor Record)", lambda: self._open_native_axis_expert(data, "motor"))
+            self._menu_action(menu, "Classic Axis Expert (caQtDM)", lambda: self._open_axis_panel(data, "ecmcAxisExpert.ui"))
             self._menu_action(menu, "Open Axis Hardware Overview", lambda: self._open_axis_hardware(data))
             self._menu_action(menu, "Open Motor Record Panel", lambda: self._open_motor_record_panel(data))
         elif kind == "hardware":
@@ -1022,6 +1024,28 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._open_script_no_object("start_rtlog.sh")
         else:
             self._open_script("start_rtlog.sh", axis_id)
+
+    def _open_native_axis_expert(self, data, interface="native"):
+        from ecmc_axis_expert_panel import AxisExpertPanel
+        base = data.get("motor", "")
+        if not base:
+            self.statusBar().showMessage("No axis PV base discovered.", 5000)
+            return
+        key = (base, self._demo)
+        for index in range(self.tabs.count()):
+            panel = self.tabs.widget(index)
+            if getattr(panel,"_axis_expert_key",None) == key:
+                panel.interface.setCurrentIndex(1 if interface == "motor" else 0)
+                self.tabs.setCurrentIndex(index)
+                return
+        actions = [("Hardware",lambda: self._open_axis_hardware(data))]
+        if not self._demo:
+            actions.extend([("Controller",lambda: self._open_controller(data)),
+                            ("Axis config",lambda: self._open_axis_config(data))])
+        panel = AxisExpertPanel(base,data["id"],demo=self._demo,on_plot=self._open_hardware_trend,
+                                actions=actions,interface=interface)
+        panel._axis_expert_key = key
+        self._add_tool_tab(panel,f"Axis {data['id']} Expert")
 
     def _open_axis_panel(self, data, panel="ecmcAxis.ui"):
         motor = data.get("motor", "")
