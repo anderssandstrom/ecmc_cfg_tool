@@ -20,9 +20,11 @@ def macros(text, env):
             result[key.strip()] = expand(value.strip(), env)
     return result
 
+WRITE_WIDGETS = {"caTextEntry", "caToggleButton", "caMenu", "caByteController", "caNumeric", "caSpinbox"}
+
 def extract_catalog(directory, source):
     roots = {p.name: ET.parse(p).getroot() for p in sorted(Path(directory).glob("*.ui"))}
-    def collect(name, env, trail, out):
+    def collect(name, env, trail, out, writable):
         if name not in roots or name in trail or len(trail) > 15:
             return
         def visit(node, context):
@@ -36,25 +38,31 @@ def extract_catalog(directory, source):
                         suffix = pv[len(PREFIX):]
                         if pv.startswith(PREFIX) and re.fullmatch(r"[A-Za-z0-9_.:-]+", suffix):
                             out.add(suffix)
+                            if key == 'channel' and node.get('class') in WRITE_WIDGETS:
+                                writable[suffix] = node.get('class')
             if node.get("class") == "caInclude":
-                collect(Path(expand(props.get("filename", ""), local)).name, local, trail + (name,), out)
+                collect(Path(expand(props.get("filename", ""), local)).name, local, trail + (name,), out, writable)
             if node.get("class") == "caRelatedDisplay":
                 args = props.get("args", "").split(";")
                 for i, file in enumerate(props.get("files", "").split(";")):
                     target = Path(expand(file, local)).name
-                    collect(target, macros(args[i] if i < len(args) else "", local), trail + (name,), out)
+                    collect(target, macros(args[i] if i < len(args) else "", local), trail + (name,), out, writable)
             for child in node:
                 if child.tag != "property":
                     visit(child, local)
         visit(roots[name], env)
     panels = {}
+    writes = {}
     for name in sorted(roots):
         if not HARDWARE.fullmatch(name):
             continue
         out = set()
-        collect(name, BASE, (), out)
-        panels[name.removeprefix("ecmc").removesuffix(".ui")] = sorted(out)
-    return {"source": source, "panels": panels}
+        writable = {}
+        collect(name, BASE, (), out, writable)
+        key = name.removeprefix("ecmc").removesuffix(".ui")
+        panels[key] = sorted(out)
+        writes[key] = dict(sorted(writable.items()))
+    return {"source": source, "panels": panels, "writable": writes}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)

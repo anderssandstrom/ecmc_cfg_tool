@@ -2,7 +2,8 @@
 import re
 from qt_compat import QtCore, QtWidgets
 from ecmc_epics import EpicsClient
-from ecmc_hardware_catalog import hardware_pvs
+from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs
+from ecmc_hardware_write import WriteTask
 
 
 class ReadSignals(QtCore.QObject):
@@ -36,6 +37,8 @@ class HardwarePanel(QtWidgets.QWidget):
         self.timeout, self.demo, self.on_plot = timeout, demo, on_plot
         self._task = None
         self._closed = False
+        self._write_task = None
+        self.writable = {}
         self.rows = {}
         layout = QtWidgets.QVBoxLayout(self)
         self.selector = QtWidgets.QComboBox()
@@ -45,7 +48,7 @@ class HardwarePanel(QtWidgets.QWidget):
                 slave)
         self.prefix, self.master = prefix, master
         layout.addWidget(self.selector)
-        self.status = QtWidgets.QLabel("Read-only hardware diagnostics")
+        self.status = QtWidgets.QLabel("Hardware diagnostics")
         layout.addWidget(self.status)
         self.table = QtWidgets.QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["Signal", "Value", "Status", "PV"])
@@ -65,20 +68,25 @@ class HardwarePanel(QtWidgets.QWidget):
         self.refresh_button = QtWidgets.QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh)
         buttons.addWidget(self.refresh_button)
+        self.write_enable = QtWidgets.QCheckBox("Enable writes")
+        self.write_enable.setEnabled(not demo)
+        buttons.addWidget(self.write_enable)
         buttons.addStretch(1)
         buttons.addWidget(QtWidgets.QLabel("Right-click a signal to trend or copy PV"))
         layout.addLayout(buttons)
+        self.selector.currentIndexChanged.connect(lambda _: self.write_enable.setChecked(False))
         self.selector.currentIndexChanged.connect(self.refresh)
         self.refresh()
 
     def refresh(self, *_):
-        if self._closed or self._task is not None:
+        if self._closed or self._task is not None or self._write_task is not None:
             return
         slave = self.selector.currentData()
         if not slave:
             return
         candidates = slave.get("panels") or [slave.get("panel"), slave.get("name")]
         pairs = hardware_pvs(self.prefix, slave.get("master", self.master), slave["id"], candidates)
+        self.writable = hardware_writable_pvs(self.prefix, slave.get("master", self.master), slave["id"], candidates)
         self.table.setRowCount(len(pairs))
         self.rows = {}
         for row, (label, pv) in enumerate(pairs):
@@ -235,12 +243,63 @@ class HardwarePanel(QtWidgets.QWidget):
         trend.setEnabled(not self.demo and self.on_plot is not None and row is not None
                          and self.table.item(row, 2).text() == "Read OK")
         trend.triggered.connect(lambda: self.on_plot([pv]))
+        if pv in self.writable:
+            write = menu.addAction("Write PV…")
+            write.setEnabled(self._can_write(pv))
+            write.triggered.connect(lambda: self._write_pv(pv))
         copy = menu.addAction("Copy PV name")
         copy.triggered.connect(lambda: QtWidgets.QApplication.clipboard().setText(pv))
         if hasattr(menu, "exec"):
             menu.exec(global_pos)
         else:
             menu.exec_(global_pos)
+
+    def _can_write(self, pv):
+        row = self.rows.get(pv)
+        return (not self.demo and not self._closed and self.write_enable.isChecked()
+                and self._task is None and self._write_task is None
+                and pv in self.writable and row is not None
+                and self.table.item(row, 2).text() == "Read OK")
+
+    def _write_pv(self, pv):
+        if not self._can_write(pv):
+            return
+        value, ok = QtWidgets.QInputDialog.getText(
+            self, "Write hardware PV", pv + "\nEnter new numeric value:")
+        if not ok:
+            return
+        try:
+            from ecmc_hardware_write import parse_write_value
+            value = parse_write_value(value, self.writable[pv])
+        except ValueError as ex:
+            QtWidgets.QMessageBox.warning(self, "Invalid value", str(ex))
+            return
+        if QtWidgets.QMessageBox.question(
+                self, "Confirm hardware write",
+                f"Write {value} to {pv}?\nThis may directly affect connected hardware.",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            return
+        if not self._can_write(pv):
+            return
+        self.selector.setEnabled(False)
+        self.refresh_button.setEnabled(False)
+        self.write_enable.setEnabled(False)
+        self.status.setText("Writing " + pv)
+        self._write_task = WriteTask(pv, value, self.timeout, self.writable[pv])
+        self._write_task.signals.finished.connect(self._write_finished)
+        QtCore.QThreadPool.globalInstance().start(self._write_task)
+
+    def _write_finished(self, error):
+        self._write_task = None
+        if self._closed:
+            return
+        self.selector.setEnabled(True)
+        self.refresh_button.setEnabled(True)
+        self.write_enable.setEnabled(True)
+        if error:
+            QtWidgets.QMessageBox.warning(self, "Write not confirmed", error)
+        self.refresh()
 
     def plot_selected(self):
         pvs = [self.table.item(i.row(), 3).text()

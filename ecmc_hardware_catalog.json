@@ -186,5 +186,54 @@
       "AO04",
       "AO04-RB"
     ]
+  },
+  "writable": {
+    "EL70x1": {
+      "Drv01-EnaCmd": "caToggleButton",
+      "Drv01-TrqRedCmd": "caToggleButton",
+      "Drv01-Cmd": "caByteController",
+      "Drv01-Spd": "caTextEntry"
+    },
+    "EL5101": {
+      "Enc01-LtchAutRstSp": "caToggleButton",
+      "Enc01-LtchCmd": "caMenu"
+    },
+    "EL5102": {
+      "Enc01-LtchAutRstSp": "caToggleButton",
+      "Enc01-LtchCmd": "caMenu",
+      "Enc01-PosCmd": "caTextEntry",
+      "Enc02-LtchAutRstSp": "caToggleButton",
+      "Enc02-LtchCmd": "caMenu",
+      "Enc02-PosCmd": "caTextEntry"
+    },
+    "EL5021": {
+      "Enc01-LtchCmd": "caMenu",
+      "Enc01-PosCmd": "caTextEntry"
+    },
+    "EL5042": {},
+    "EL7062": {},
+    "EL7062_CSP": {},
+    "Ex20x4": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton"
+    },
+    "Ex20x8": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO08": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton"
+    },
+    "Ex4xx4": {
+      "AO01": "caTextEntry",
+      "AO02": "caTextEntry",
+      "AO03": "caTextEntry",
+      "AO04": "caTextEntry"
+    }
   }
 }
