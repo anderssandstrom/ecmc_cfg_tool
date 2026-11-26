@@ -252,10 +252,13 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.errors_only.toggled.connect(self._filter_tree)
         health_row.addWidget(self.health_check)
         health_row.addWidget(self.errors_only)
-        export=QtWidgets.QPushButton('Snapshot')
+        export=QtWidgets.QPushButton('Capture incident')
         export.clicked.connect(self._export_health)
         health_row.addWidget(export)
         nav_layout.addLayout(health_row)
+        open_incident=QtWidgets.QPushButton('Open incident…')
+        open_incident.clicked.connect(self._open_incident)
+        nav_layout.addWidget(open_incident)
 
         self.tree = QtWidgets.QTreeWidget()
         self.tree.setHeaderLabels(["Object", "ID", "Type", "PV / Motor", "Health"])
@@ -525,19 +528,20 @@ class IocNavigator(QtWidgets.QMainWindow):
                     for name in names:
                         if name not in self._health_pvs:
                             try:
-                                self._health_pvs[name]=ep.PV(name,auto_monitor=True)
+                                from ecmc_pv_subscriptions import shared_subscriptions
+                                self._health_pvs[name]=shared_subscriptions.acquire(name)
                             except Exception:
                                 pass
         self._update_health()
 
     def _health_value(self,name):
         pv=self._health_pvs.get(name)
-        if pv is None or not pv.connected:
+        if pv is None:
             return None
         try:
-            # Never block the UI on an unavailable PV.
-            value=pv.get(use_monitor=True,timeout=0.001)
-            return float(value) if value is not None and pv.severity!=3 else None
+            cached=pv.snapshot()
+            value=cached['value']
+            return float(value) if cached['connected'] and value is not None and cached['severity']!=3 else None
         except Exception:
             return None
 
@@ -572,14 +576,40 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._filter_tree()
 
     def _export_health(self):
-        path,_=QtWidgets.QFileDialog.getSaveFileName(self,'Save diagnostic snapshot','ioc_snapshot.json','JSON (*.json)')
+        from ecmc_incident import build_incident, save_incident
+        if not self._snapshot.get('prefix') or self._snapshot['prefix'] != self._prefix() or not self.refresh_btn.isEnabled():
+            QtWidgets.QMessageBox.warning(self,'Capture incident','Discover the selected IOC first.')
+            return
+        try:
+            now=time.monotonic()
+            trends={}
+            for window in getattr(self,'_hardware_trends',[]):
+                if not window._closed:
+                    for name, samples in window.trend.samples.items():
+                        trends.setdefault(name, list(samples)[-2000:])
+            bundle=build_incident(self._snapshot,self._health_values,
+                {name: lease.snapshot() for name,lease in self._health_pvs.items()},
+                getattr(getattr(self,'_event_history',None),'events',()),
+                trends, demo=self._demo, now=now)
+            path,_=QtWidgets.QFileDialog.getSaveFileName(self,'Save incident','ioc_incident.json','JSON (*.json)')
+            if not path:
+                return
+            save_incident(path,bundle)
+            self.statusBar().showMessage('Incident saved: '+path,5000)
+        except Exception as ex:
+            QtWidgets.QMessageBox.warning(self,'Capture failed',str(ex))
+
+    def _open_incident(self):
+        from ecmc_incident import load_incident
+        from ecmc_incident_panel import IncidentPanel
+        path,_=QtWidgets.QFileDialog.getOpenFileName(self,'Open incident','','JSON (*.json)')
         if not path:
             return
         try:
-            with open(path,'w',encoding='utf-8') as fp:
-                json.dump({'timestamp':time.time(),'demo':self._demo,'discovery':self._snapshot,'health':self._health_values},fp,indent=2)
+            bundle=load_incident(path)
+            self._add_tool_tab(IncidentPanel(bundle),'Incident: '+bundle['discovery'].get('prefix','Unknown'))
         except Exception as ex:
-            QtWidgets.QMessageBox.warning(self,'Snapshot failed',str(ex))
+            QtWidgets.QMessageBox.warning(self,'Open incident failed',str(ex))
 
     def closeEvent(self,event):
         if self._ui_settings is not None:

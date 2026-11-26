@@ -100,3 +100,8 @@ The pre-existing CppLogic discovery failure was fixed by supporting both ECMCCFG
 `CPPnn` and direct ECMC `CppLogicN` record names. The generic expert-separation
 fixture now uses EL7041, since EL7062 intentionally promotes drive controls into
 its overview. These two failures were reproduced on the original branch head.
+
+
+### Incident capture
+
+In IOC Navigator, discover the IOC and click **Capture incident** to save a JSON file. **Open incident** opens a read-only offline tab (including legacy snapshots). The file extends the existing discovery snapshot with health, cached health PV values and monitor ages, IOC-scoped transition history and bounded samples from already-open hardware trends. Discovery includes versions as of last refresh. No additional CA requests, SDO reads or ECMC changes are made during capture. Values are asynchronous, not an RT snapshot. Demo captures are marked. The viewer initially presents read-only JSON sections; graphical replay and automatic triggering are not yet supported. Navigator health monitors now use the shared read-only pool.
