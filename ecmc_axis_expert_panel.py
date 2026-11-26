@@ -196,7 +196,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.detail_tabs=QtWidgets.QTabWidget()
         layout.addWidget(self.detail_tabs,1)
         pages={}
-        for title in (("Motion","Encoders","Homing","Limits","Controller","Diagnostics") if native else ("Motion","Limits","Diagnostics")):
+        for title in (("Motion","Encoders","Homing","Limits","Trajectory","Controller","Diagnostics") if native else ("Motion","Limits","Diagnostics")):
             page=QtWidgets.QWidget()
             page_layout=QtWidgets.QVBoxLayout(page)
             page_layout.setContentsMargins(4,4,4,4)
@@ -284,7 +284,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 grid.addWidget(self._encoder_homing,grid.rowCount(),0,1,4)
             tab=("Motion" if group.startswith("Motion") else "Homing" if group=="Homing" else
                  "Limits" if group in ("Limits","ECMC soft limits","Interlocks") else
-                 "Controller" if group=="Controller" else "Diagnostics")
+                 group if group in ("Controller","Trajectory") else "Diagnostics")
             pages[tab].addWidget(box)
         if not native:
             toggle = QtWidgets.QToolButton()
