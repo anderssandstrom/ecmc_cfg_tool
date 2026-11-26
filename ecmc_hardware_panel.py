@@ -5,7 +5,7 @@ from ecmc_epics import EpicsClient
 from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_views
 from ecmc_hardware_write import WriteTask
 from ecmc_hardware_demo import HardwareDemo
-from ecmc_hardware_widgets import HardwareSymbol, SignalValue, signal_role
+from ecmc_hardware_widgets import HardwareSymbol, SignalValue, WordValue, signal_role
 
 
 class ReadSignals(QtCore.QObject):
@@ -177,7 +177,12 @@ class HardwarePanel(QtWidgets.QWidget):
                                  else QtCore.Qt.ArrowCursor)
 
     def _value_widget(self, name, pv, primary=False):
-        value = SignalValue("—", lambda pv=pv: self._click_write(pv))
+        # EL70x1 original panel defines both words as bits 0..15.
+        slave = self.selector.currentData() or {}
+        panel = str(slave.get('panel') or '')
+        candidates = slave.get('panels') or [panel, slave.get('name', '')]
+        known_word = any(str(c).removeprefix('ecmc').removesuffix('.ui') == 'EL70x1' for c in candidates) and name in ('Drv01-Cmd', 'Drv01-Stat')
+        value = WordValue(lambda pv=pv: self._click_write(pv)) if known_word else SignalValue("—", lambda pv=pv: self._click_write(pv))
         value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
         if primary:
             font = value.font()
@@ -241,7 +246,7 @@ class HardwarePanel(QtWidgets.QWidget):
         self.card_values = {}
         self.device_values = {}
         header = QtWidgets.QHBoxLayout()
-        channels, other = {}, []
+        channels, other, digital = {}, [], {'BI': [], 'BO': []}
         for name, pv in pairs:
             if name == "PnlTyp":
                 continue
@@ -251,6 +256,10 @@ class HardwarePanel(QtWidgets.QWidget):
                 header.addWidget(label)
                 self.device_values[pv] = (name, label)
                 continue
+            io = re.fullmatch(r"(BI|BO)(\d+)(-RB)?", name)
+            if io:
+                digital[io[1]].append((name, pv, int(io[2]), bool(io[3])))
+                continue
             m = re.fullmatch(r"(Drv|Enc|Tp|AI|AO|BI|BO)(\d+)(?:-?(.*))", name)
             if m:
                 kind, number, suffix = m.groups()
@@ -259,6 +268,9 @@ class HardwarePanel(QtWidgets.QWidget):
                 other.append((name, pv, name))
         header.addStretch(1)
         layout.addLayout(header)
+        for kind, signals in digital.items():
+            if signals:
+                layout.addWidget(self._digital_group(kind, signals), 0, QtCore.Qt.AlignLeft)
         grid = QtWidgets.QGridLayout()
         for i, (ch, groups) in enumerate(sorted(channels.items())):
             col = QtWidgets.QWidget()
@@ -279,6 +291,28 @@ class HardwarePanel(QtWidgets.QWidget):
             layout.addWidget(self._group("Other signals", other))
         layout.addStretch(1)
         self.cards.setWidget(root)
+
+    def _digital_group(self, kind, signals):
+        card = QtWidgets.QGroupBox("Digital inputs" if kind == "BI" else "Digital outputs")
+        grid = QtWidgets.QGridLayout(card)
+        grid.setSpacing(4)
+        channels = sorted({ch for _, _, ch, _ in signals})
+        for index, ch in enumerate(channels):
+            column = index % 8 + 1
+            row = index // 8 * 4
+            title = QtWidgets.QLabel(f"{ch:02d}")
+            title.setAlignment(QtCore.Qt.AlignCenter)
+            grid.addWidget(title, row, column)
+            for name, pv, number, rb in signals:
+                if number != ch:
+                    continue
+                value = self._value_widget(name, pv)
+                value.setAlignment(QtCore.Qt.AlignCenter)
+                value.setMinimumWidth(35)
+                grid.addWidget(value, row + (2 if rb else 1), column)
+                label = QtWidgets.QLabel("RB" if rb else ("IN" if kind == "BI" else "CMD"))
+                grid.addWidget(label, row + (2 if rb else 1), 0) if column == 1 else label.deleteLater()
+        return card
 
     def build_experts(self, experts):
         root = QtWidgets.QWidget()
@@ -330,6 +364,9 @@ class HardwarePanel(QtWidgets.QWidget):
             return
         for name, label in self.card_values[pv]:
             label.setToolTip(pv + ("\n" + error if error else ""))
+            if isinstance(label, WordValue):
+                label.set_word(value)
+                continue
             if value is None:
                 label.setText("—")
                 label.setStyleSheet("color: #888;")

@@ -54,3 +54,44 @@ def signal_role(kind, suffix):
     if suffix.endswith("Alrm") or suffix in ("Rdy", "RdyStat", "RdyToEna", "ExtLtchOK", "CLtchOK"):
         return "status"
     return "detail"
+
+class WordValue(SignalValue):
+    """Raw word visualization; no assumed bit semantics or writable bit toggles."""
+    def __init__(self, callback, width=16):
+        super().__init__("—", callback)
+        self.bit_width = width
+        self.word = None
+        self.setMinimumHeight(48)
+        self.setMinimumWidth(240)
+
+    def set_word(self, value):
+        try:
+            raw = str(value).strip()
+            number = int(raw, 16) if raw.lower().startswith("0x") else int(raw)
+            if not 0 <= number < (1 << self.bit_width):
+                raise ValueError("Outside displayed word range")
+            self.word = number
+        except (ValueError, TypeError, OverflowError):
+            self.word = None
+        self.update()
+
+    def paintEvent(self, event):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        p.setPen(self.palette().color(QtGui.QPalette.Text))
+        text = "—" if self.word is None else f"0x{self.word:04X}"
+        p.drawText(QtCore.QRectF(0, 0, self.width_px(), 18), QtCore.Qt.AlignRight, text)
+        cell = self.width_px() / self.bit_width
+        for i in range(self.bit_width):
+            bit = self.bit_width - 1 - i
+            x = i * cell
+            p.setPen(self.palette().color(QtGui.QPalette.Text))
+            p.drawText(QtCore.QRectF(x, 17, cell, 13), QtCore.Qt.AlignCenter, str(bit))
+            color = "#87919b" if self.word is None else "#287bc0" if self.word & (1 << bit) else "#c2c8cd"
+            p.setPen(QtCore.Qt.NoPen)
+            p.setBrush(QtGui.QColor(color))
+            p.drawRoundedRect(QtCore.QRectF(x + 2, 32, max(2, cell - 4), 12), 2, 2)
+        p.end()
+
+    def width_px(self):
+        return self.rect().width()
