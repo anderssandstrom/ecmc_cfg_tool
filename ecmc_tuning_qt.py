@@ -32,6 +32,8 @@ class Trend(QtWidgets.QWidget):
         self.history = 15
         self.frozen = None
         self.fixed_range = None
+        self.include_zero = len(series) == 1
+        self.axis_precision = 5
         self.limit = None
         self.setMinimumHeight(145)
 
@@ -53,7 +55,8 @@ class Trend(QtWidgets.QWidget):
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         p.fillRect(self.rect(),QtGui.QColor('#f7f9fb'))
-        r = QtCore.QRectF(76,24,self.width()-90,self.height()-49)
+        margin = max(76, self.fontMetrics().horizontalAdvance('−0.' + '0' * self.axis_precision + 'e+00') + 8) if self.axis_precision > 5 else 76
+        r = QtCore.QRectF(margin,24,self.width()-margin-14,self.height()-49)
         if r.width() < 10 or r.height() < 10:
             return
         now, source = self.frozen if self.frozen is not None else (time.monotonic(),self.samples)
@@ -64,7 +67,7 @@ class Trend(QtWidgets.QWidget):
             data[key] = [(t,v) for t,v in q if start<=t<=now and v is not None]
         values = [v for a in data.values() for _,v in a]
         p.setPen(QtGui.QColor('#465565'))
-        x = 78
+        x = margin + 2
         for key,title,color in self.series:
             p.setPen(QtGui.QColor(color))
             p.drawText(int(x),16,title)
@@ -73,7 +76,7 @@ class Trend(QtWidgets.QWidget):
             p.drawText(r,QtCore.Qt.AlignCenter,'Waiting for PV samples')
             return
         lo,hi = min(values),max(values)
-        if len(self.series)==1:
+        if self.include_zero:
             lo,hi = min(0,lo),max(0,hi)
         pad = (hi-lo)*.05 or max(abs(hi)*1e-6,1e-9)
         lo,hi = lo-pad,hi+pad
@@ -86,7 +89,7 @@ class Trend(QtWidgets.QWidget):
             p.drawLine(QtCore.QPointF(r.left(),y),QtCore.QPointF(r.right(),y))
             p.drawLine(QtCore.QPointF(x,r.top()),QtCore.QPointF(x,r.bottom()))
             p.setPen(QtGui.QColor('#465565'))
-            p.drawText(QtCore.QRectF(0,y-9,70,18),QtCore.Qt.AlignRight|QtCore.Qt.AlignVCenter,f'{hi-(hi-lo)*i/4:.5g}')
+            p.drawText(QtCore.QRectF(0,y-9,margin-6,18),QtCore.Qt.AlignRight|QtCore.Qt.AlignVCenter,f'{hi-(hi-lo)*i/4:.{self.axis_precision}g}')
             p.drawText(QtCore.QRectF(x-28,r.bottom()+3,56,18),QtCore.Qt.AlignCenter,f'{-self.history*(1-i/4):g}s')
         p.save()
         p.setClipRect(r)

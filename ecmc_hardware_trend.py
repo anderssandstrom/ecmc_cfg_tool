@@ -1,5 +1,6 @@
 """Modeless, read-only CA trend using the controller tuning plot widget."""
 import time
+import math
 from collections import deque
 from threading import Lock
 from ecmc_acquisition import bounded_series
@@ -45,6 +46,29 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.trend = Trend([(pv, pv.rsplit(":", 1)[-1], colors[i % len(colors)])
                             for i, pv in enumerate(self._pvs)])
         self.trend.samples = bounded_series(self._pvs, 200000)
+        self.trend.include_zero = False
+        self.trend.axis_precision = 12
+        scale_row = QtWidgets.QHBoxLayout()
+        scale_row.addWidget(QtWidgets.QLabel("Y-axis"))
+        self.scale_mode = QtWidgets.QComboBox()
+        self.scale_mode.addItems(["Auto", "Include zero", "Manual"])
+        scale_row.addWidget(self.scale_mode)
+        self.y_min = QtWidgets.QLineEdit("0")
+        self.y_max = QtWidgets.QLineEdit("1")
+        for label, edit in (("Min", self.y_min), ("Max", self.y_max)):
+            scale_row.addWidget(QtWidgets.QLabel(label))
+            edit.setMaximumWidth(130)
+            edit.setEnabled(False)
+            scale_row.addWidget(edit)
+        self.apply_scale = QtWidgets.QPushButton("Apply")
+        self.apply_scale.setEnabled(False)
+        scale_row.addWidget(self.apply_scale)
+        scale_row.addStretch(1)
+        layout.addLayout(scale_row)
+        self.scale_mode.currentIndexChanged.connect(self._scale_changed)
+        self.apply_scale.clicked.connect(self._apply_manual)
+        self.y_min.returnPressed.connect(self._apply_manual)
+        self.y_max.returnPressed.connect(self._apply_manual)
         layout.addWidget(self.trend, 1)
         self.status = QtWidgets.QLabel("Connecting…")
         self.status.setWordWrap(True)
@@ -73,6 +97,39 @@ class HardwareTrendWindow(QtWidgets.QDialog):
             self.status.setText("CA monitor unavailable: " + str(ex))
             return
         self.timer.start()
+
+    def _scale_changed(self, index):
+        manual = index == 2
+        self.y_min.setEnabled(manual)
+        self.y_max.setEnabled(manual)
+        self.apply_scale.setEnabled(manual)
+        if manual:
+            now, source = self.trend.frozen if self.trend.frozen is not None else (time.monotonic(), self.trend.samples)
+            values = [v for q in source.values() for t, v in q
+                      if now - self.trend.history <= t <= now and v is not None]
+            if values:
+                lo, hi = min(values), max(values)
+                pad = (hi - lo) * .05 or max(abs(hi) * 1e-6, 1e-9)
+                self.y_min.setText(format(lo - pad, ".15g"))
+                self.y_max.setText(format(hi + pad, ".15g"))
+            self._apply_manual()
+        else:
+            self.trend.fixed_range = None
+            self.trend.include_zero = index == 1
+            self.trend.update()
+
+    def _apply_manual(self):
+        if self.scale_mode.currentIndex() != 2:
+            return
+        try:
+            lo, hi = float(self.y_min.text()), float(self.y_max.text())
+            if not math.isfinite(lo) or not math.isfinite(hi) or not math.isfinite(hi-lo) or lo >= hi:
+                raise ValueError()
+        except ValueError:
+            QtWidgets.QMessageBox.warning(self, "Invalid Y-axis range", "Enter finite values with Min < Max.")
+            return
+        self.trend.fixed_range = (lo, hi)
+        self.trend.update()
 
     def _history(self, value):
         self.trend.history = value
