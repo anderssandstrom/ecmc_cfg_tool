@@ -447,6 +447,9 @@ class IocNavigator(QtWidgets.QMainWindow):
         event=QtWidgets.QTreeWidgetItem(["Event / alarm history","","",""])
         event.setData(0,self.DATA_ROLE,{"kind":"event_history"})
         parent.addChild(event)
+        compare=QtWidgets.QTreeWidgetItem(["Compare snapshots","","",""])
+        compare.setData(0,self.DATA_ROLE,{"kind":"snapshot_compare"})
+        parent.addChild(compare)
         parent.setExpanded(True)
 
     def _add_thread_info(self, parent, items):
@@ -682,6 +685,8 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._menu_action(menu, "Open Remote SDO Browser", lambda: self._open_sdo(data))
             menu.addSeparator()
             self._menu_action(menu, "Open Hardware Panel", lambda: self._open_hardware_panel(data))
+        elif kind == "snapshot_compare":
+            self._menu_action(menu,"Compare snapshots",self._open_snapshot_compare)
         elif kind == "event_history":
             self._menu_action(menu,"Open event history",self._open_event_history)
         elif kind == "ecmc_group":
@@ -780,6 +785,8 @@ class IocNavigator(QtWidgets.QMainWindow):
         elif kind == "hardware_group":
             self._menu_action(menu, "Open EtherCAT Master Diagnostics", self._open_master_diagnostics)
             self._menu_action(menu, "Open Hardware Overview", self._open_hardware_overview)
+            self._menu_action(menu,"Domain working counters",self._open_domain_monitor)
+            self._menu_action(menu,"Slave order view",self._open_slave_order)
         pv=data.get("pv") or object_prefix(self._snapshot.get("prefix",""),data)
         if not pv and (kind=="ecmc_group" or kind.endswith("_group")): pv=self._snapshot.get("prefix")
         if pv:
@@ -801,6 +808,8 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._open_ioc_dashboard()
         elif kind == "event_history":
             self._open_event_history()
+        elif kind == "snapshot_compare":
+            self._open_snapshot_compare()
         elif kind == "hardware":
             self._open_hardware_panel(data)
         elif kind == "hardware_group":
@@ -1281,6 +1290,32 @@ class IocNavigator(QtWidgets.QMainWindow):
         window.destroyed.connect(lambda *_: self._hardware_trends.remove(window)
                                  if window in self._hardware_trends else None)
         window.show()
+
+    def _open_snapshot_compare(self):
+        from ecmc_snapshot_compare_panel import SnapshotCompare
+        self._add_tool_tab(SnapshotCompare(lambda:self._snapshot),"Snapshot comparison")
+
+    def _open_domain_monitor(self):
+        from ecmc_domain_monitor import DomainMonitor
+        prefix=self._snapshot.get("prefix")
+        if not prefix:return
+        count=next((item.get("value") for group in self._snapshot.get("ecmc",[]) for item in group.get("items",[]) if item.get("label")=="EtherCAT domains"),None)
+        if count is None:
+            self.statusBar().showMessage("Domain count unavailable in discovery",5000)
+            return
+        self._add_tool_tab(DomainMonitor(prefix,self._snapshot.get("master",0),count,demo=self._demo,on_plot=self._open_hardware_trend),"Domain working counters")
+
+    def _open_slave_order(self):
+        from ecmc_slave_order import SlaveOrderPanel
+        prefix=self._snapshot.get("prefix")
+        if not prefix:return
+        def health(obj):
+            if self._snapshot.get("prefix")!=prefix:return "Unknown"
+            base=_join_prefix_pv(prefix,obj.get("pv_base",""))
+            return self._health_values.get(base+"-Online|"+base+"-Operational",{}).get("status","Unknown")
+        def open_slave(obj):
+            if self._snapshot.get("prefix")==prefix and self._prefix()==prefix:self._open_hardware_panel(obj)
+        self._add_tool_tab(SlaveOrderPanel(self._snapshot.get("hardware",[]),health,open_slave),"Slave order")
 
     def _open_master_diagnostics(self):
         from ecmc_master_panel import MasterPanel
