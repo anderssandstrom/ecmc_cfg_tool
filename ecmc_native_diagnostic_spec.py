@@ -25,6 +25,12 @@ THREAD = (
     ("Send maximum","ThdSndMax","ns"),
 )
 
+STORAGE = (("Description","Desc","text"),("Write index","DataIdAct","number"),
+           ("Buffer type","Type","number"),("Full","Full","bool"),
+           ("Status word","Stat","hex"),("Capacity","DataAct.NELM","number"),
+           ("Elements reported","DataAct.NORD","number"))
+PLUGIN = (("Previous object","PrvObjId","number"),("Next object","NxtObjId","number"))
+
 def diagnostic_rows(prefix,kind,object_id=None):
     prefix = str(prefix).strip().rstrip(":")
     if not prefix:
@@ -37,6 +43,14 @@ def diagnostic_rows(prefix,kind,object_id=None):
             raise ValueError("Invalid object ID")
         base = prefix+(":PLC" if kind=="plc" else ":SM")+f"{index:02d}-"
         rows = PLC if kind=="plc" else SM
+    elif kind in ("data_storage","plugin"):
+        index=int(object_id)
+        if index<0:
+            raise ValueError("Invalid object ID")
+        if kind=="data_storage":
+            base,rows=prefix+f":DS{index:02d}-",STORAGE
+        else:
+            base,rows=prefix+f":MCU-Cfg-PLG{index}-",PLUGIN
     else:
         raise ValueError("Unknown diagnostic kind")
     return tuple((label,base+suffix,mode) for label,suffix,mode in rows)

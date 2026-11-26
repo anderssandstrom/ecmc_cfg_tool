@@ -751,8 +751,10 @@ class IocNavigator(QtWidgets.QMainWindow):
         elif kind == "state_machine_group":
             self._menu_action(menu, "Open State Machines Overview", self._open_state_machines_overview)
         elif kind == "plugin":
+            self._menu_action(menu, "Native Plugin Diagnostics", lambda: self._open_native_diagnostic("plugin",data))
             self._menu_action(menu, "Open Plugin Panel", lambda: self._open_object_panel("ecmcPLGxx.ui", data))
         elif kind == "data_storage":
+            self._menu_action(menu, "Native Data Storage Diagnostics", lambda: self._open_native_diagnostic("data_storage",data))
             self._menu_action(menu, "Open Data Storage Panel", lambda: self._open_object_panel("ecmcDSxx.ui", data))
         elif kind == "cpp_logic":
             self._menu_action(menu, "Open CppLogic Overview", self._open_cpp_logic_overview)
@@ -796,9 +798,9 @@ class IocNavigator(QtWidgets.QMainWindow):
         elif kind == "state_machine_group":
             self._open_state_machines_overview()
         elif kind == "plugin":
-            self._open_object_panel("ecmcPLGxx.ui", data)
+            self._open_native_diagnostic("plugin",data)
         elif kind == "data_storage":
-            self._open_object_panel("ecmcDSxx.ui", data)
+            self._open_native_diagnostic("data_storage",data)
         elif kind == "cpp_logic":
             self._open_cpp_logic(data)
         elif kind == "safety_plugin":

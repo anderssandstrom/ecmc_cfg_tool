@@ -28,7 +28,7 @@ class NativeDiagnosticPanel(QtWidgets.QWidget):
         top.addWidget(self.status)
         top.addStretch()
         self.arm=QtWidgets.QCheckBox("Enable writes")
-        self.arm.setVisible(kind!="thread")
+        self.arm.setVisible(any(mode in ("switch","enum") for _,_,mode in self.rows))
         self.arm.toggled.connect(self._controls)
         top.addWidget(self.arm)
         if on_plot and kind=="thread":
@@ -37,6 +37,10 @@ class NativeDiagnosticPanel(QtWidgets.QWidget):
                                                   demo_value=self._demo_value if demo else None))
             top.addWidget(trend)
         layout.addLayout(top)
+        if kind=="plugin":
+            note=QtWidgets.QLabel("Generic plugin discovery records only; runtime signals depend on the plugin.")
+            note.setWordWrap(True)
+            layout.addWidget(note)
         grid=QtWidgets.QGridLayout()
         grid.setSpacing(4)
         for i,(label,pv,mode) in enumerate(self.rows):
@@ -75,6 +79,7 @@ class NativeDiagnosticPanel(QtWidgets.QWidget):
         suffix=pv.rsplit("-",1)[-1]
         return {"Desc":"Main PLC","Nam":"Master/slave","SlvGrpNam":"Slaves","MstGrpNam":"Masters",
                 "StatTxt":"IDLE","StatPrvStateTxt":"IDLE","StatTrRsnTxt":"NONE",
+                "DataIdAct":128,"Type":0,"Full":0,"DataAct.NELM":1024,"DataAct.NORD":1024,"PrvObjId":-1,"NxtObjId":-1,
                 "ScanTime":.001,"EnaCmd":1,"ThdRTPrioOK":1,"ThdMemLocked":1,
                 "ThdFrqAvg":1000,"ThdPrdMin":994000,"ThdPrdMax":1006000,
                 "ThdLatMin":-3000,"ThdLatMax":6000,"ThdExeMin":25000,"ThdExeMax":48000,
