@@ -34,6 +34,11 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._source_widgets = {}
         self._action_buttons = []
         self._position_task = None
+        self._jog_task = None
+        self._jog_button = None
+        self._jog_native = None
+        self._jog_stops = set()
+        self._jog_buttons = []
         self._motion_widgets = []
         self._overview = None
         self._encoder_homing = None
@@ -59,6 +64,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.arm = QtWidgets.QCheckBox("Enable writes")
         self.arm.setToolTip("Arms motion commands; target writes may initiate motion.")
         self.arm.toggled.connect(self._update_controls)
+        self.arm.toggled.connect(lambda on: None if on else self._release_jog())
         controls.addWidget(self.arm)
         controls.addStretch()
         precision = QtWidgets.QSpinBox()
@@ -95,8 +101,10 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.timer.timeout.connect(self._tick)
         self.interface.currentIndexChanged.connect(self._rebuild)
         self._rebuild()
+        QtWidgets.QApplication.instance().applicationStateChanged.connect(self._jog_app_state)
 
     def _rebuild(self,*_):
+        self._release_jog()
         self._generation += 1
         self._stop()
         self.arm.setChecked(False)
@@ -107,6 +115,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.home_status = None
         self.home_indicators = None
         self._edit_widgets = {}
+        self._source_widgets = {}
         self._action_buttons = []
         root = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(root)
@@ -197,6 +206,26 @@ class AxisExpertPanel(QtWidgets.QWidget):
             action_row.addWidget(button)
         action_row.addStretch()
         layout.addLayout(action_row)
+        jog_row=QtWidgets.QHBoxLayout()
+        self.jog_speed=QtWidgets.QLineEdit()
+        self.jog_speed.setPlaceholderText("Jog speed")
+        self.jog_speed.setMaximumWidth(110)
+        jog_row.addWidget(QtWidgets.QLabel("Hold to jog"))
+        jog_row.addWidget(self.jog_speed)
+        self._jog_buttons=[]
+        for direction,title in ((-1,"◀ Jog"),(1,"Jog ▶")):
+            button=QtWidgets.QPushButton(title)
+            button.setAutoRepeat(False)
+            button.setFocusPolicy(QtCore.Qt.NoFocus)
+            button.setStyleSheet("QPushButton:pressed { background-color: #26804b; color: white; }")
+            button.setToolTip("Hold to move; release to request stop. Not a safety-rated dead-man control.")
+            button.pressed.connect(lambda d=direction,b=button:self._press_jog(d,b))
+            button.released.connect(self._release_jog)
+            button.installEventFilter(self)
+            self._jog_buttons.append(button)
+            jog_row.addWidget(button)
+        jog_row.addStretch()
+        layout.addLayout(jog_row)
         self.detail_tabs=QtWidgets.QTabWidget()
         layout.addWidget(self.detail_tabs,1)
         pages={}
@@ -321,12 +350,15 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._start()
 
     def _update_controls(self,*_):
-        armed = self.arm.isChecked() and self.isVisible() and not self._writes and self._enum_task is None and not self._closed
+        armed = self.arm.isChecked() and self.isVisible() and not self._writes and self._enum_task is None and not self._closed and self._jog_native is None and not self._jog_stops
         if hasattr(self,"enable_button"):
             self.enable_button.set_editable(armed and self.enable_button.value is not None)
         for b in self._action_buttons + self._motion_widgets:
             b.setEnabled(armed)
-        self.interface.setEnabled(not self._writes)
+        self.interface.setEnabled(not self._writes and self._jog_native is None and not self._jog_stops)
+        for button in self._jog_buttons:
+            button.setEnabled(armed or button is self._jog_button)
+        if hasattr(self,"jog_speed"): self.jog_speed.setEnabled(armed)
         if self._overview is not None:
             self._overview.set_armed(armed)
         for w in self._source_widgets.values():
@@ -529,6 +561,79 @@ class AxisExpertPanel(QtWidgets.QWidget):
             return
         self._launch_position_task(VelocityTask(self.base,native,speed))
 
+    def _jog_app_state(self,state):
+        if state!=QtCore.Qt.ApplicationActive:
+            self._release_jog()
+
+    def eventFilter(self,obj,event):
+        if obj is self._jog_button and event.type() in (QtCore.QEvent.UngrabMouse,QtCore.QEvent.Hide,QtCore.QEvent.WindowDeactivate):
+            self._release_jog()
+        return super().eventFilter(obj,event)
+
+    def _press_jog(self,direction,button):
+        if self._jog_native is not None or self._jog_stops or self._writes or self._enum_task is not None or not self.arm.isChecked() or not self.isVisible() or self._closed:
+            return
+        try:
+            speed=float(self.jog_speed.text())
+            if not math.isfinite(speed) or speed<=0: raise ValueError()
+        except ValueError:
+            self.status.setText("Enter a positive jog speed")
+            return
+        native=self.interface.currentData()=="native"
+        self._jog_native=native
+        self._jog_button=button
+        if self.demo:
+            if self._demo_value(self.base+("-EnaAct" if native else ".CNEN"))!=1:
+                self._release_jog()
+                return
+            model=self._demo_motion[native]
+            model.start(model.position,direction*speed,continuous=True)
+            self._update_controls()
+            return
+        task=VelocityTask(self.base,native,direction*speed)
+        self._jog_task=task
+        self._writes.add(task)
+        def done(error):
+            self._writes.discard(task)
+            self._jog_task=None
+            if task.cancelled.is_set() or error:
+                # A stop sent before the final start write completed may have
+                # raced with it. Always send another stop after completion.
+                self._release_jog()
+                self._queue_jog_stop(native)
+            if error and not task.cancelled.is_set() and not self._closed:
+                self.status.setText("Jog start not confirmed: "+error)
+            if not self._closed: self._update_controls()
+        task.signals.finished.connect(done)
+        self._update_controls()
+        QtCore.QThreadPool.globalInstance().start(task)
+
+    def _queue_jog_stop(self,native):
+        task=AxisWriteTask(self.base+"-StpCmd",(1,)) if native else MotorStopTask(self.base)
+        self._jog_stops.add(task)
+        def done(error):
+            self._jog_stops.discard(task)
+            if not self._closed:
+                self._update_controls()
+                if error:
+                    self.arm.setChecked(False)
+                    QtWidgets.QMessageBox.warning(self,"Jog stop not confirmed",error+"; verify axis motion immediately.")
+        task.signals.finished.connect(done)
+        self._stop_pool.start(task)
+
+    def _release_jog(self):
+        native=self._jog_native
+        if native is None: return
+        self._jog_native=None
+        self._jog_button=None
+        if self._jog_task is not None:
+            self._jog_task.cancelled.set()
+        if self.demo:
+            self._demo_motion[native].stop()
+        else:
+            self._queue_jog_stop(native)
+        if not self._closed: self._update_controls()
+
     def _launch_position_task(self,task):
         self._position_task = task
         self._writes.add(task)
@@ -544,6 +649,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         QtCore.QThreadPool.globalInstance().start(task)
 
     def cancel_pending_motion(self):
+        self._release_jog()
         for model in self._demo_motion.values(): model.stop()
         if self._position_task is not None:
             self._position_task.cancelled.set()
@@ -572,6 +678,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._stop_pool.start(task)
 
     def _stop_motion(self):
+        self._release_jog()
         for model in self._demo_motion.values(): model.stop()
         if self._position_task is not None:
             self._position_task.cancelled.set()
@@ -579,7 +686,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._write("-StpCmd" if self.interface.currentData()=="native" else ".STOP",(1,),stop=True)
 
     def _write(self,suffix,values,stop=False,enum=False):
-        if self._closed or not self.isVisible() or (not stop and (not self.arm.isChecked() or self._writes or self._enum_task is not None)):
+        if self._closed or not self.isVisible() or (not stop and (not self.arm.isChecked() or self._writes or self._enum_task is not None or self._jog_native is not None or self._jog_stops)):
             return
         native = self.interface.currentData()=="native"
         pv = self.base+suffix
@@ -781,6 +888,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         QtCore.QTimer.singleShot(0,self._start)
 
     def hideEvent(self,event):
+        self._release_jog()
         for model in self._demo_motion.values(): model.stop()
         if self._position_task is not None:
             self._position_task.cancelled.set()
@@ -790,6 +898,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         super().hideEvent(event)
 
     def closeEvent(self,event):
+        self._release_jog()
         if self._position_task is not None:
             self._position_task.cancelled.set()
         self._closed = True
