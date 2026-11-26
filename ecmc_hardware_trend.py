@@ -3,8 +3,8 @@ import time
 import math
 from collections import deque
 from threading import Lock
-from ecmc_acquisition import bounded_series
-from qt_compat import QtCore, QtWidgets
+from ecmc_acquisition import bounded_series, export_event_csv
+from qt_compat import QtCore, QtGui, QtWidgets
 from ecmc_tuning_qt import Trend
 from ecmc_native_motion import numeric_readback
 
@@ -19,7 +19,14 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.setModal(False)
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
         self.resize(760, 340)
-        self._subscriptions = []
+        self._subscriptions = {}
+        self._tokens = {}
+        self._providers = {}
+        self._colors = {}
+        self._visible = {}
+        self._color_index = 0
+        self._independent = {}
+        self._initial_pvs = list(dict.fromkeys(pvs))
         self._closed = False
         self._latest = {}
         self._lock = Lock()
@@ -28,7 +35,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self._counts = {}
         self._rate_at = time.monotonic()
         self._rate = {}
-        self._pvs = list(dict.fromkeys(pvs))
+        self._pvs = []
         layout = QtWidgets.QVBoxLayout(self)
         controls = QtWidgets.QHBoxLayout()
         controls.addWidget(QtWidgets.QLabel("History [s]"))
@@ -40,12 +47,13 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         controls.addWidget(freeze)
         clear = QtWidgets.QPushButton("Clear")
         controls.addWidget(clear)
+        export = QtWidgets.QPushButton("Export CSV")
+        export.clicked.connect(self._export)
+        controls.addWidget(export)
         controls.addStretch(1)
         layout.addLayout(controls)
-        colors = ("#287bc0", "#d06d22", "#a64070", "#26804b")
-        self.trend = Trend([(pv, pv.rsplit(":", 1)[-1], colors[i % len(colors)])
-                            for i, pv in enumerate(self._pvs)])
-        self.trend.samples = bounded_series(self._pvs, 200000)
+        self.trend = Trend([])
+        self.trend.samples = {}
         self.trend.include_zero = False
         self.trend.axis_precision = 12
         scale_row = QtWidgets.QHBoxLayout()
@@ -69,34 +77,188 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.apply_scale.clicked.connect(self._apply_manual)
         self.y_min.returnPressed.connect(self._apply_manual)
         self.y_max.returnPressed.connect(self._apply_manual)
-        layout.addWidget(self.trend, 1)
+        self.independent_check = QtWidgets.QCheckBox("Independent axes")
+        self.independent_check.toggled.connect(self._rebuild_plots)
+        layout.addWidget(self.independent_check)
+        self.plot_area = QtWidgets.QScrollArea()
+        self.plot_area.setWidgetResizable(True)
+        self.plot_root = QtWidgets.QWidget()
+        self.plot_layout = QtWidgets.QVBoxLayout(self.plot_root)
+        self.plot_layout.addWidget(self.trend, 1)
+        self.plot_area.setWidget(self.plot_root)
+        layout.addWidget(self.plot_area, 1)
+        self.curves = QtWidgets.QTableWidget(0, 4)
+        self.curves.setHorizontalHeaderLabels(["Show / PV", "Color", "Value", "Events/s"])
+        self.curves.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.curves.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.curves.horizontalHeader().setStretchLastSection(False)
+        self.curves.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        self.curves.setMaximumHeight(145)
+        self.curves.itemChanged.connect(self._visibility_changed)
+        self.curves.cellDoubleClicked.connect(self._color_clicked)
+        layout.addWidget(self.curves)
+        manage = QtWidgets.QHBoxLayout()
+        add = QtWidgets.QPushButton("Add PV")
+        add.clicked.connect(self._add_dialog)
+        remove = QtWidgets.QPushButton("Remove selected")
+        remove.clicked.connect(self._remove_selected)
+        manage.addWidget(add)
+        manage.addWidget(remove)
+        manage.addStretch(1)
+        layout.addLayout(manage)
         self.status = QtWidgets.QLabel("Connecting…")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         history.valueChanged.connect(self._history)
-        freeze.toggled.connect(self.trend.freeze)
+        freeze.toggled.connect(self._freeze)
         clear.clicked.connect(self._clear)
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(50)
         self.timer.timeout.connect(self._tick)
-        if self._demo_value is not None:
-            self.timer.start()
-            return
-        try:
-            import epics
-            for name in self._pvs:
-                def callback(pvname=None, value=None, severity=None, _key=name, **kw):
-                    self._enqueue(_key, numeric_readback(value, severity))
-                def connection(pvname=None, conn=None, _key=name, **kw):
-                    if not conn:
-                        self._enqueue(_key, None)
-                pv = epics.PV(name, auto_monitor=True, callback=callback,
-                              connection_callback=connection)
-                self._subscriptions.append(pv)
-        except Exception as ex:
-            self.status.setText("CA monitor unavailable: " + str(ex))
-            return
+        self.resize(850, 550)
+        for name in self._initial_pvs:
+            self.add_pv(name, demo_value)
         self.timer.start()
+
+    def add_pv(self, name, demo_value=None):
+        name = str(name).strip()
+        if not name or name in self._pvs or self._closed:
+            return False
+        if self._demo_value is not None and demo_value is None:
+            demo_value = self._demo_value
+        if self._demo_value is None and demo_value is not None:
+            return False
+        token = object()
+        with self._lock:
+            self._tokens[name] = token
+        self._pvs.append(name)
+        self.trend.samples[name] = deque(maxlen=200000)
+        if self.trend.frozen is not None:
+            self.trend.frozen[1][name] = []
+        palette = ("#287bc0", "#d06d22", "#a64070", "#26804b", "#7258bb", "#95732b")
+        self._colors[name] = palette[self._color_index % len(palette)]
+        self._color_index += 1
+        self._visible[name] = True
+        if demo_value is not None:
+            self._providers[name] = demo_value
+        else:
+            try:
+                import epics
+                def callback(pvname=None, value=None, severity=None, **kw):
+                    self._enqueue(name, numeric_readback(value, severity), token)
+                def connection(pvname=None, conn=None, **kw):
+                    if not conn:
+                        self._enqueue(name, None, token)
+                self._subscriptions[name] = epics.PV(name, auto_monitor=True, callback=callback,
+                                                     connection_callback=connection)
+            except Exception as ex:
+                self.status.setText(f"{name}: CA monitor unavailable: {ex}")
+        self._refresh_table()
+        self._rebuild_plots()
+        return True
+
+    def _add_dialog(self):
+        name, ok = QtWidgets.QInputDialog.getText(self, "Add PV", "Full PV name:")
+        if ok and name.strip():
+            self.add_pv(name.strip())
+
+    def _remove_selected(self):
+        names = [self._pvs[i.row()] for i in self.curves.selectionModel().selectedRows()]
+        for name in names:
+            with self._lock:
+                self._tokens.pop(name, None)
+            pv = self._subscriptions.pop(name, None)
+            if pv is not None:
+                try:
+                    pv.clear_callbacks()
+                    pv.disconnect()
+                except Exception:
+                    pass
+            self._pvs.remove(name)
+            self.trend.samples.pop(name, None)
+            if self.trend.frozen is not None:
+                self.trend.frozen[1].pop(name, None)
+            for mapping in (self._providers, self._colors, self._visible, self._latest, self._counts, self._rate):
+                mapping.pop(name, None)
+        self._refresh_table()
+        self._rebuild_plots()
+
+    def _refresh_table(self):
+        self.curves.blockSignals(True)
+        self.curves.setRowCount(len(self._pvs))
+        for i, name in enumerate(self._pvs):
+            item = QtWidgets.QTableWidgetItem(name)
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Checked if self._visible[name] else QtCore.Qt.Unchecked)
+            self.curves.setItem(i, 0, item)
+            color = QtWidgets.QTableWidgetItem(self._colors[name])
+            color.setForeground(QtGui.QColor(self._colors[name]))
+            self.curves.setItem(i, 1, color)
+            self.curves.setItem(i, 2, QtWidgets.QTableWidgetItem("—"))
+            self.curves.setItem(i, 3, QtWidgets.QTableWidgetItem("—"))
+        self.curves.blockSignals(False)
+
+    def _visibility_changed(self, item):
+        if item.column() == 0 and item.row() < len(self._pvs):
+            self._visible[self._pvs[item.row()]] = item.checkState() == QtCore.Qt.Checked
+            self._rebuild_plots()
+
+    def _color_clicked(self, row, column):
+        if column != 1 or row >= len(self._pvs):
+            return
+        name = self._pvs[row]
+        color = QtWidgets.QColorDialog.getColor(QtGui.QColor(self._colors[name]), self)
+        if color.isValid():
+            self._colors[name] = color.name()
+            self._refresh_table()
+            self._rebuild_plots()
+
+    def _rebuild_plots(self, *_):
+        for plot in self._independent.values():
+            self.plot_layout.removeWidget(plot)
+            plot.deleteLater()
+        self._independent.clear()
+        visible = [(name, name.rsplit(":", 1)[-1], self._colors[name])
+                   for name in self._pvs if self._visible[name]]
+        self.trend.series = visible
+        separate = self.independent_check.isChecked()
+        self.trend.setVisible(not separate)
+        self.scale_mode.setEnabled(not separate)
+        manual = not separate and self.scale_mode.currentIndex() == 2
+        for widget in (self.y_min, self.y_max, self.apply_scale):
+            widget.setEnabled(manual)
+        if separate:
+            for entry in visible:
+                name = entry[0]
+                plot = Trend([entry])
+                plot.include_zero = False
+                plot.axis_precision = 12
+                plot.history = self.trend.history
+                plot.samples = {name: self.trend.samples[name]}
+                self._independent[name] = plot
+                self.plot_layout.addWidget(plot)
+        self._sync_plots()
+
+    def _sync_plots(self):
+        self.trend.update()
+        for name, plot in self._independent.items():
+            plot.history = self.trend.history
+            plot.frozen = None if self.trend.frozen is None else (
+                self.trend.frozen[0], {name: self.trend.frozen[1].get(name, [])})
+            plot.update()
+
+    def _freeze(self, checked):
+        self.trend.freeze(checked)
+        self._sync_plots()
+
+    def _export(self):
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export acquired samples",
+                                                       "hardware_trend.csv", "CSV (*.csv)")
+        if path:
+            try:
+                export_event_csv(path, self.trend.samples)
+            except Exception as ex:
+                QtWidgets.QMessageBox.warning(self, "Export failed", str(ex))
 
     def _scale_changed(self, index):
         manual = index == 2
@@ -105,7 +267,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.apply_scale.setEnabled(manual)
         if manual:
             now, source = self.trend.frozen if self.trend.frozen is not None else (time.monotonic(), self.trend.samples)
-            values = [v for q in source.values() for t, v in q
+            values = [v for key, q in source.items() if self._visible.get(key) for t, v in q
                       if now - self.trend.history <= t <= now and v is not None]
             if values:
                 lo, hi = min(values), max(values)
@@ -133,30 +295,32 @@ class HardwareTrendWindow(QtWidgets.QDialog):
 
     def _history(self, value):
         self.trend.history = value
-        self.trend.update()
+        self._sync_plots()
 
-    def _enqueue(self, key, value):
+    def _enqueue(self, key, value, token):
         with self._lock:
-            if self._closed:
+            if self._closed or self._tokens.get(key) is not token:
                 return
             if len(self._pending) == self._pending.maxlen:
                 self._dropped += 1
-            self._pending.append((key, time.monotonic(), value))
+            self._pending.append((key, token, time.monotonic(), value))
 
     def _clear(self):
         with self._lock:
             self._pending.clear()
             self._dropped = 0
         self.trend.clear()
+        self._sync_plots()
 
     def _tick(self):
-        if self._demo_value is not None:
-            for pv in self._pvs:
-                self._enqueue(pv, numeric_readback(self._demo_value(pv)))
+        for pv, provider in self._providers.items():
+            self._enqueue(pv, numeric_readback(provider(pv)), self._tokens[pv])
         with self._lock:
             events = self._pending
             self._pending = deque(maxlen=200000)
-        for key, stamp, value in events:
+        for key, token, stamp, value in events:
+            if self._tokens.get(key) is not token:
+                continue
             self._latest[key] = value
             self._counts[key] = self._counts.get(key, 0) + 1
             self.trend.append(key, stamp, value)
@@ -166,18 +330,22 @@ class HardwareTrendWindow(QtWidgets.QDialog):
             self._rate = {key: self._counts.get(key, 0) / elapsed for key in self._pvs}
             self._counts.clear()
             self._rate_at = now
-        self.trend.update()
-        self.status.setText(" | ".join(
-            f"{key}: {self._latest[key]:.9g} ({self._rate.get(key, 0):.0f} events/s)"
-            if self._latest.get(key) is not None else f"{key}: unavailable"
-            for key in self._pvs) + (f" | Dropped events: {self._dropped}" if self._dropped else ""))
+        self._sync_plots()
+        self.curves.blockSignals(True)
+        for i, key in enumerate(self._pvs):
+            value = self._latest.get(key)
+            self.curves.item(i, 2).setText("—" if value is None else f"{value:.12g}")
+            self.curves.item(i, 3).setText(f"{self._rate.get(key, 0):.0f}")
+        self.curves.blockSignals(False)
+        self.status.setText(f"{len(self._pvs)} PV(s)" +
+            (f" | Dropped events: {self._dropped}" if self._dropped else ""))
 
     def closeEvent(self, event):
         with self._lock:
             self._closed = True
             self._pending.clear()
         self.timer.stop()
-        for pv in self._subscriptions:
+        for pv in self._subscriptions.values():
             try:
                 pv.clear_callbacks()
                 pv.disconnect()

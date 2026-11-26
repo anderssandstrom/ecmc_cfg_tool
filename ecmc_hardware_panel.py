@@ -396,6 +396,9 @@ class HardwarePanel(QtWidgets.QWidget):
         trend.setEnabled((self.demo or self.on_plot is not None) and row is not None
                          and self.table.item(row, 2).text() in ("Read OK", "Simulated"))
         trend.triggered.connect(lambda: self._trend_pv(pv))
+        add = menu.addAction("Add to existing trend…")
+        add.setEnabled(trend.isEnabled() and self.on_plot is not None)
+        add.triggered.connect(lambda: self._trend_pv(pv, add=True))
         if pv in self.writable:
             write = menu.addAction("Write PV…")
             write.setEnabled(self._can_write(pv))
@@ -407,17 +410,18 @@ class HardwarePanel(QtWidgets.QWidget):
         else:
             menu.exec_(global_pos)
 
-    def _trend_pv(self, pv):
+    def _trend_pv(self, pv, add=False):
+        provider = None
         if self.demo:
-            from ecmc_hardware_trend import HardwareTrendWindow
-            # Capture the selected slave's identity rather than tracking selector changes.
             slave = self.selector.currentData() or {}
             model = self._demo_model
-            window = HardwareTrendWindow([pv], parent=self, demo_value=lambda name:
-                model.value(name, slave.get("name", ""), slave.get("panel", "")))
+            provider = lambda name: model.value(name, slave.get("name", ""), slave.get("panel", ""))
+        if self.on_plot:
+            self.on_plot([pv], add=add, demo_value=provider)
+        elif self.demo:
+            from ecmc_hardware_trend import HardwareTrendWindow
+            window = HardwareTrendWindow([pv], parent=self, demo_value=provider)
             window.show()
-        elif self.on_plot:
-            self.on_plot([pv])
 
     def _can_write(self, pv):
         row = self.rows.get(pv)

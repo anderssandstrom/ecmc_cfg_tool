@@ -1071,10 +1071,29 @@ class IocNavigator(QtWidgets.QMainWindow):
         name = data.get("name") or data.get("panel") or ""
         self._open_native_hardware([data], f"m{master} s{slave:03d} {name}".strip())
 
-    def _open_hardware_trend(self, pvs):
-        if self._demo or not pvs:
+    def _open_hardware_trend(self, pvs, add=False, demo_value=None):
+        if not pvs or (self._demo and demo_value is None):
             return
-        window = HardwareTrendWindow(pvs, parent=self)
+        windows = getattr(self, "_hardware_trends", [])
+        windows = [w for w in windows if not w._closed]
+        self._hardware_trends = windows
+        if add and windows:
+            labels = [f"{i+1}: {', '.join(w._pvs) or 'Empty trend'}" for i,w in enumerate(windows)]
+            choice, ok = QtWidgets.QInputDialog.getItem(self, "Add to trend",
+                "Select trend window:", labels, len(labels)-1, False)
+            if not ok:
+                return
+            window = windows[labels.index(choice)]
+            for pv in pvs:
+                window.add_pv(pv, demo_value)
+            window.show()
+            window.raise_()
+            window.activateWindow()
+            return
+        window = HardwareTrendWindow(pvs, parent=self, demo_value=demo_value)
+        windows.append(window)
+        window.destroyed.connect(lambda *_: self._hardware_trends.remove(window)
+                                 if window in self._hardware_trends else None)
         window.show()
 
     def _open_native_hardware(self, slaves, title):

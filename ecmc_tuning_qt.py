@@ -62,7 +62,8 @@ class Trend(QtWidgets.QWidget):
         now, source = self.frozen if self.frozen is not None else (time.monotonic(),self.samples)
         start = now-self.history
         data = {}
-        for key,q in source.items():
+        for key, _, _ in self.series:
+            q = source.get(key, ())
             # Preserve the last sample before the visible window for held values.
             data[key] = [(t,v) for t,v in q if start<=t<=now and v is not None]
         values = [v for a in data.values() for _,v in a]
@@ -102,7 +103,7 @@ class Trend(QtWidgets.QWidget):
         for key,_,color in self.series:
             path = QtGui.QPainterPath()
             started = False
-            for stamp,v in source[key]:
+            for stamp,v in source.get(key, ()):
                 if v is None:
                     started=False
                     continue
