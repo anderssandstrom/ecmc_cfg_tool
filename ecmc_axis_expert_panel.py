@@ -57,9 +57,6 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.arm.setToolTip("Arms motion commands; target writes may initiate motion.")
         self.arm.toggled.connect(self._update_controls)
         controls.addWidget(self.arm)
-        self.enable_button=QtWidgets.QPushButton("Enable drive")
-        self.enable_button.clicked.connect(lambda checked=False:self._write("-EnaCmd" if self.interface.currentData()=="native" else ".CNEN",(1,)))
-        controls.addWidget(self.enable_button)
         controls.addStretch()
         precision = QtWidgets.QSpinBox()
         precision.setRange(4,12)
@@ -160,6 +157,12 @@ class AxisExpertPanel(QtWidgets.QWidget):
         layout.addWidget(command)
         action_row = QtWidgets.QHBoxLayout()
         action_row.setSpacing(4)
+        self.enable_button=BooleanValue(lambda old,new:self._write("-EnaCmd" if native else ".CNEN",(new,)))
+        self.enable_button.setFixedWidth(76)
+        self.enable_button.setToolTip(self.base+("-EnaCmd-RB" if native else ".CNEN"))
+        action_row.addWidget(QtWidgets.QLabel("Drive enable"))
+        action_row.addWidget(self.enable_button)
+        self._shortcut_readbacks={}
         available = {caption:(suffix,values) for caption,suffix,values in
                      (NATIVE_ACTIONS if native else MOTOR_ACTIONS)}
         for caption,short in (("Tweak −","◀ Tweak"),("Tweak +","Tweak ▶"),
@@ -168,6 +171,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
             if caption not in available and not (native and caption=="Home reverse"):
                 continue
             button = QtWidgets.QPushButton(short)
+            button.setStyleSheet("QPushButton:pressed { background-color: #26804b; color: white; }")
             button.setAccessibleName(caption)
             button.setSizePolicy(QtWidgets.QSizePolicy.Fixed,QtWidgets.QSizePolicy.Fixed)
             button.setToolTip(caption)
@@ -181,6 +185,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 suffix,values = available[caption]
                 button.clicked.connect(lambda checked=False,suffix=suffix,values=values: self._write(suffix,values))
                 self._action_buttons.append(button)
+                if suffix in ("-TwkBwdCmd","-TwkFwdCmd"):
+                    self._shortcut_readbacks[button]=suffix
             else:
                 button.setEnabled(False)
                 button.setToolTip(caption+" unavailable in this interface")
@@ -307,7 +313,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
 
     def _update_controls(self,*_):
         armed = self.arm.isChecked() and self.isVisible() and not self._writes and self._enum_task is None and not self._closed
-        self.enable_button.setEnabled(armed)
+        if hasattr(self,"enable_button"):
+            self.enable_button.set_editable(armed and self.enable_button.value is not None)
         for b in self._action_buttons + self._motion_widgets:
             b.setEnabled(armed)
         self.interface.setEnabled(not self._writes)
@@ -596,7 +603,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         if not self.demo:
             try:
                 import epics
-                for pv in self._labels:
+                for pv in set(self._labels) | {self.base+s for s in self._shortcut_readbacks.values()}:
                     try:
                         self._pvs[pv] = epics.PV(pv,auto_monitor=True)
                     except Exception:
@@ -626,6 +633,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
             self._overview.set_pending(None)
         for icon in self._status_icons + self._msta_icons:
             icon.set_values({})
+        if hasattr(self,"enable_button"): self.enable_button.set_value(None)
+        for button in getattr(self,"_shortcut_readbacks",{}):
+            button.setStyleSheet("QPushButton:pressed { background-color: #26804b; color: white; }")
         self.status.setText("Paused")
         self.status.setStyleSheet("")
 
@@ -682,6 +692,18 @@ class AxisExpertPanel(QtWidgets.QWidget):
                     label.setStyleSheet(style)
                 if label.text() != text:
                     label.setText(text)
+        self.enable_button.set_value(samples.get("-EnaCmd-RB" if self.interface.currentData()=="native" else ".CNEN"))
+        for button,suffix in self._shortcut_readbacks.items():
+            value=None
+            if not self.demo:
+                try:
+                    pv=self._pvs.get(self.base+suffix)
+                    if pv is not None and pv.connected and pv.severity!=3:
+                        value=pv.get(use_monitor=True,timeout=.001)
+                except Exception: pass
+            style="QPushButton:pressed { background-color: #26804b; color: white; }"
+            if value==1: style+=" QPushButton { background-color: #26804b; color: white; }"
+            if button.styleSheet()!=style: button.setStyleSheet(style)
         if self.home_status is not None:
             proc=samples.get("-movHomCmd")
             self.home_status.setText(f"IOC procedure: {home_procedure_label(proc)} · Homed: {samples.get('-Homed')} · Busy: {samples.get('-Busy')} · Sequence state: {samples.get('-SeqState')}")
