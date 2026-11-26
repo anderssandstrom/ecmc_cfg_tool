@@ -18,8 +18,9 @@ class DS402Status(SignalValue):
 
 
 class DS402Word(WordValue):
-    def __init__(self, callback, status=False):
-        super().__init__(callback)
+    def __init__(self, callback, status=False, bit_callback=None):
+        super().__init__(callback, bit_callback=bit_callback, allowed_bits=CONTROL_BITS if not status else ())
+        self.bit_hit_y = (13, 28)
         self.status_word = status
         self.setMinimumHeight(32)
         self.setMinimumWidth(190)

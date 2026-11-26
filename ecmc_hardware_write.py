@@ -25,9 +25,10 @@ class WriteSignals(QtCore.QObject):
 
 
 class WriteTask(QtCore.QRunnable):
-    def __init__(self, name, value, timeout, kind):
+    def __init__(self, name, value, timeout, kind, expected=None):
         super().__init__()
         self.name, self.value, self.timeout, self.kind = name, value, timeout, kind
+        self.expected = expected
         self.signals = WriteSignals()
 
     def run(self):
@@ -47,6 +48,10 @@ class WriteTask(QtCore.QRunnable):
                 choices = pv.enum_strs
                 if not choices or not 0 <= self.value < len(choices):
                     raise RuntimeError("Invalid enum index.")
+            if self.expected is not None:
+                current = pv.get(use_monitor=False, timeout=self.timeout)
+                if current is None or current != self.expected:
+                    raise RuntimeError("PV changed since the displayed value. No write issued; try again after refresh.")
             result = pv.put(self.value, wait=True, timeout=self.timeout)
             if result is None or result <= 0:
                 raise RuntimeError("CA put did not confirm completion; check the IOC before retrying.")

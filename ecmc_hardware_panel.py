@@ -6,7 +6,7 @@ from ecmc_epics import EpicsClient
 from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_views, hardware_commands
 from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
-from ecmc_hardware_widgets import HardwareSymbol, SignalValue, WordValue, signal_role
+from ecmc_hardware_widgets import HardwareSymbol, SignalValue, WordValue, BooleanValue, boolean_value, signal_role
 from ecmc_ds402_widget import DS402Status, DS402Word, DS402StateMap, controlword_dialog
 from ecmc_ds402 import word_number
 
@@ -116,7 +116,7 @@ class HardwarePanel(QtWidgets.QWidget):
         self.write_enable.toggled.connect(self._update_edit_cursors)
         buttons.addWidget(self.write_enable)
         buttons.addStretch(1)
-        self.write_enable.setToolTip("Click writable values to edit; right-click any monitored signal to trend.")
+        self.write_enable.setToolTip("Arms direct single-click Boolean and controlword bit writes, which may enable motion. Numeric edits still require confirmation.")
         layout.addLayout(buttons)
         self.selector.currentIndexChanged.connect(lambda _: self.write_enable.setChecked(False))
         self.selector.currentIndexChanged.connect(self.refresh)
@@ -342,7 +342,7 @@ class HardwarePanel(QtWidgets.QWidget):
                 button.setEnabled(self._can_write(pv))
         for pv, widgets in self.card_values.items():
             for _, widget in widgets:
-                editable = self._can_write(pv)
+                editable = self._can_write(pv) and not (isinstance(widget, WordValue) and (getattr(widget, 'status_word', False) or pv.endswith('-RB')))
                 widget.setCursor(QtCore.Qt.PointingHandCursor if editable else QtCore.Qt.ArrowCursor)
                 widget.set_editable(editable)
 
@@ -352,7 +352,14 @@ class HardwarePanel(QtWidgets.QWidget):
         panel = str(slave.get('panel') or '')
         candidates = slave.get('panels') or [panel, slave.get('name', '')]
         known_word = any(str(c).removeprefix('ecmc').removesuffix('.ui') == 'EL70x1' for c in candidates) and name in ('Drv01-Cmd', 'Drv01-Stat')
-        value = WordValue(lambda pv=pv: self._click_write(pv)) if known_word else SignalValue("—", lambda pv=pv: self._click_write(pv))
+        kind = self.writable.get(pv)
+        if kind == 'caToggleButton':
+            value = BooleanValue(lambda old, new, pv=pv: self._direct_boolean(pv, old, new))
+        elif known_word:
+            value = WordValue(lambda pv=pv: self._click_write(pv),
+                              bit_callback=(lambda old, bit, pv=pv: self._direct_bit(pv, old, bit)) if kind == 'caByteController' and name.endswith('-Cmd') else None)
+        else:
+            value = SignalValue("—", lambda pv=pv: self._click_write(pv))
         value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
         if primary:
             font = value.font()
@@ -452,7 +459,8 @@ class HardwarePanel(QtWidgets.QWidget):
             label = QtWidgets.QLabel({'Cmd': 'CW', 'Cmd-RB': 'CW RB', 'Stat': 'SW'}[short])
             self._bind(label, pv)
             layout.addWidget(label, row, 0)
-            word = DS402Word(lambda pv=pv: self._click_write(pv), status=short == 'Stat')
+            word = DS402Word(lambda pv=pv: self._click_write(pv), status=short == 'Stat',
+                             bit_callback=(lambda old, bit, pv=pv: self._direct_bit(pv, old, bit)) if short == 'Cmd' and self.writable.get(pv) == 'caByteController' else None)
             self._bind(word, pv)
             self.card_values.setdefault(pv, []).append((name, word))
             layout.addWidget(word, row, 1)
@@ -638,6 +646,9 @@ class HardwarePanel(QtWidgets.QWidget):
             return
         for name, label in self.card_values[pv]:
             label.setToolTip(pv + ("\n" + error if error else ""))
+            if isinstance(label, BooleanValue):
+                label.set_value(value)
+                continue
             if isinstance(label, (DS402Status, DS402StateMap)):
                 label.set_status(value)
                 continue
@@ -776,7 +787,21 @@ class HardwarePanel(QtWidgets.QWidget):
         if ok:
             self._submit_write(pv, labels.index(selected))
 
-    def _submit_write(self, pv, value):
+    def _direct_boolean(self, pv, old, new):
+        if self.writable.get(pv) != 'caToggleButton' or not self._can_write(pv):
+            return
+        if boolean_value(self.table.item(self.rows[pv], 1).text()) != old:
+            return
+        self._submit_write(pv, new, direct=True, expected=old)
+
+    def _direct_bit(self, pv, old, bit):
+        if self.writable.get(pv) != 'caByteController' or not pv.endswith('-Cmd') or not self._can_write(pv):
+            return
+        if not 0 <= bit < 16 or word_number(self.table.item(self.rows[pv], 1).text()) != old:
+            return
+        self._submit_write(pv, old ^ (1 << bit), direct=True, expected=old)
+
+    def _submit_write(self, pv, value, direct=False, expected=None):
         if not self._can_write(pv):
             return
         if self.demo:
@@ -784,7 +809,7 @@ class HardwarePanel(QtWidgets.QWidget):
                 self._demo_model.write(pv, value)
                 self._demo_tick()
             return
-        if QtWidgets.QMessageBox.question(
+        if not direct and QtWidgets.QMessageBox.question(
                 self, "Confirm hardware write",
                 f"Write {value} to {pv}?\nThis may directly affect connected hardware.",
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
@@ -796,7 +821,7 @@ class HardwarePanel(QtWidgets.QWidget):
         self.refresh_button.setEnabled(False)
         self.write_enable.setEnabled(False)
         self.status.setText("Writing " + pv)
-        self._write_task = WriteTask(pv, value, self.timeout, self.writable[pv])
+        self._write_task = WriteTask(pv, value, self.timeout, self.writable[pv], expected=expected)
         self._update_edit_cursors()
         self._write_task.signals.finished.connect(self._write_finished)
         QtCore.QThreadPool.globalInstance().start(self._write_task)
