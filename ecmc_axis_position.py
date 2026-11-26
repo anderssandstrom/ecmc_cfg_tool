@@ -267,3 +267,32 @@ class EncoderModeTask(PositionTask):
                 try: pv.disconnect()
                 except Exception: pass
             self.signals.finished.emit(error)
+
+class SourceModeTask(PositionTask):
+    """Change the source only with the drive disabled and stationary."""
+    def __init__(self,base,readback,mode):
+        super().__init__(base,True,False,0,1)
+        self.readback,self.mode=readback,mode
+    def run(self):
+        from ecmc_source_mode import SOURCE_COMMANDS
+        error=""
+        try:
+            if self.readback not in SOURCE_COMMANDS or self.mode not in (0,1):
+                raise RuntimeError("Invalid source selection")
+            for key,suffix in (("Enabled","-EnaAct"),("EnableCmd","-EnaCmd-RB"),
+                               ("Busy","-Busy"),("Moving","-Moving"),("ModeRB",self.readback),
+                               ("Mode",SOURCE_COMMANDS[self.readback])):
+                self._connect(key,suffix)
+            if self._value("ModeRB") not in (0,1):
+                raise RuntimeError("Source readback unavailable")
+            if any(self._value(k)!=0 for k in ("Enabled","EnableCmd","Busy","Moving")):
+                raise RuntimeError("Disable the drive and wait for standstill before switching sources")
+            self._motor_put("Mode",self.mode)
+            if self._value("ModeRB")!=self.mode:
+                raise RuntimeError("Write sent; source readback not yet confirmed. Verify before enabling.")
+        except Exception as ex: error=str(ex)
+        finally:
+            for pv in self.pvs.values():
+                try: pv.disconnect()
+                except Exception: pass
+            self.signals.finished.emit(error)

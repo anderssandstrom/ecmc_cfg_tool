@@ -5,11 +5,12 @@ from qt_compat import QtCore, QtWidgets
 from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value, axis_status_value, decode_msta, MSTA_BITS
 from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
 from ecmc_axis_write import AxisWriteTask
-from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTask, KillTask, EncoderModeTask
+from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTask, KillTask, EncoderModeTask, SourceModeTask
 from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
 from ecmc_encoder_homing_panel import EncoderHomingPanel
 from ecmc_encoder_overview import EncoderOverview
 from ecmc_demo_model import DemoMotion
+from ecmc_source_mode import SOURCE_COMMANDS, source_label
 from ecmc_homing_spec import HOME_PROCEDURES, home_procedure_label
 from ecmc_homing_indicators import HomingIndicators
 from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
@@ -30,6 +31,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._precision = 8
         self._generation = 0
         self._edit_widgets = {}
+        self._source_widgets = {}
         self._action_buttons = []
         self._position_task = None
         self._motion_widgets = []
@@ -225,7 +227,10 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 suffix = pv[len(self.base):]
                 name = QtWidgets.QLabel(label)
                 name.setWordWrap(True)
-                if suffix in BOOL_COMMANDS:
+                if suffix in SOURCE_COMMANDS:
+                    value = SignalValue('—',lambda suffix=suffix:self._select_source(suffix))
+                    self._source_widgets[suffix]=value
+                elif suffix in BOOL_COMMANDS:
                     value = BooleanValue(lambda old,new,pv=pv: self._toggle_boolean(pv,old,new))
                 elif suffix in BOOL_STATUS:
                     alarm = suffix in ("-Blocked","-SumIlockFwd","-SumIlockBwd",".LVIO","-SftLimFwdIlock","-SftLimBwdIlock")
@@ -288,7 +293,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 grid.addWidget(self._encoder_homing,grid.rowCount(),0,1,4)
             tab=("Motion" if group.startswith("Motion") else "Homing" if group=="Homing" else
                  "Limits" if group in ("Limits","ECMC soft limits","Interlocks") else
-                 group if group in ("Controller","Trajectory") else "Diagnostics")
+                 "Encoders" if group=="Encoder source" else group if group in ("Controller","Trajectory") else "Diagnostics")
             pages[tab].addWidget(box)
         if not native:
             toggle = QtWidgets.QToolButton()
@@ -324,10 +329,37 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.interface.setEnabled(not self._writes)
         if self._overview is not None:
             self._overview.set_armed(armed)
+        for w in self._source_widgets.values():
+            w.set_editable(armed and w.text() in ("Internal","PLC"))
         for pv,w in self._edit_widgets.items():
             available = w.value is not None if isinstance(w,BooleanValue) else w.text() != "—"
             w.set_editable(armed and available)
             w.setCursor(QtCore.Qt.PointingHandCursor if armed else QtCore.Qt.ArrowCursor)
+
+    def _select_source(self,suffix):
+        if not self.arm.isChecked() or self._writes or self._enum_task is not None or not self.isVisible() or self.interface.currentData()!="native":
+            return False
+        widget=self._source_widgets.get(suffix)
+        if widget is None or widget.text() not in ("Internal","PLC"):
+            return False
+        choice,ok=QtWidgets.QInputDialog.getItem(self,"Select source",self.base+SOURCE_COMMANDS[suffix],
+                ["Internal","PLC"],int(widget.text()=="PLC"),False)
+        if not ok: return True
+        mode=int(choice=="PLC")
+        if not self.arm.isChecked() or self._writes or not self.isVisible() or self.interface.currentData()!="native":
+            return True
+        if self.demo:
+            if any(self._demo_value(self.base+k)!=0 for k in ("-EnaAct","-EnaCmd-RB","-Busy","-Moving")):
+                QtWidgets.QMessageBox.warning(self,"Source selection","Disable drive before changing source")
+            else:
+                self._overrides[suffix]=mode
+                self._tick()
+            return True
+        if QtWidgets.QMessageBox.question(self,"Confirm source change",f"Select {choice}? Verify the external feedback/setpoint before enabling.",
+                QtWidgets.QMessageBox.Yes|QtWidgets.QMessageBox.No,QtWidgets.QMessageBox.No)==QtWidgets.QMessageBox.Yes:
+            if self.arm.isChecked() and not self._writes and self.isVisible() and self.interface.currentData()=="native":
+                self._launch_position_task(SourceModeTask(self.base,suffix,mode))
+        return True
 
     def _refresh_draft(self,*_):
         if self._overview is not None and hasattr(self,"move_target"):
@@ -695,7 +727,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 label.set_value(axis_status_value(name[len(self.base):],value))
             else:
                 suffix = name[len(self.base):]
-                text = format_axis_value(value,self._precision)
+                text = source_label(value) if suffix in SOURCE_COMMANDS else format_axis_value(value,self._precision)
                 color = ""
                 if suffix in ("-ErrId","-WrnId"):
                     try:

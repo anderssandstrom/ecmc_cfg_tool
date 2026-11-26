@@ -8,9 +8,10 @@ NATIVE = (
     ("Homing", (("Procedure","-movHomCmd"),)),
     ("Interlocks", (("Forward limit","-LimFwd"), ("Backward limit","-LimBwd"), ("Home switch","-HomeSwitch"), ("Forward interlock","-SumIlockFwd"), ("Backward interlock","-SumIlockBwd"), ("Interlock text","-IlockTxt"))),
     ("ECMC soft limits", (("Lower limit (dial)","-CfgDLLM"), ("Upper limit (dial)","-CfgDHLM"), ("Forward enabled","-SftLimFwdEna-RB"), ("Backward enabled","-SftLimBwdEna-RB"), ("Forward interlock","-SftLimFwdIlock"), ("Backward interlock","-SftLimBwdIlock"), ("Forward enable command","-SftLimFwdEna"), ("Backward enable command","-SftLimBwdEna"))),
+    ("Encoder source", (("Encoder source","-EncSrcTyp-RB"),)),
     ("Trajectory", (("Trajectory type","-TrajType"), ("Trajectory source","-TrjSrcTyp-RB"), ("Actual setpoint","-PosSet"), ("Acceleration command","-AccCmd"), ("Deceleration command","-DecCmd"))),
     ("Controller", (("Kp","-Ctrl-Kp"), ("Ki","-Ctrl-Ki"), ("Kd","-Ctrl-Kd"))),
-    ("Diagnostics", (("Error ID","-ErrId"), ("Warning ID","-WrnId"), ("Message","-MsgTxt"), ("Encoder count","-EncCnt"), ("Selected encoder RB","-SetEncIdCmd-RB"), ("Encoder selection mode","-EncMode-RB"), ("Encoder source","-EncSrcTyp-RB"), ("Drive type","-DrvType"), ("Drive mode","-DrvMode"), ("Safety group","-SS1-GrpNam"), ("Safety active","-SS1-EnaAct"), ("Safety velocity maximum","-SS1-VelMaxLim"), ("Safety velocity restriction","-SS1-VelRestLim"))),
+    ("Diagnostics", (("Error ID","-ErrId"), ("Warning ID","-WrnId"), ("Message","-MsgTxt"), ("Encoder count","-EncCnt"), ("Selected encoder RB","-SetEncIdCmd-RB"), ("Encoder selection mode","-EncMode-RB"), ("Drive type","-DrvType"), ("Drive mode","-DrvMode"), ("Safety group","-SS1-GrpNam"), ("Safety active","-SS1-EnaAct"), ("Safety velocity maximum","-SS1-VelMaxLim"), ("Safety velocity restriction","-SS1-VelRestLim"))),
 )
 MOTOR = (
     ("Motion (motor record user coordinates)", (("Actual position",".RBV"), ("Requested position",".VAL"), ("Velocity setting",".VELO"), ("Acceleration time",".ACCL"), ("Units",".EGU"), ("Tweak distance",".TWV"))),
