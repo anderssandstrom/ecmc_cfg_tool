@@ -6,6 +6,7 @@ import re
 import math
 import shutil
 import subprocess
+from numbers import Integral
 
 FLOAT_DISPLAY_COMMA_RE = re.compile(r'^[+-]?(?:(?:\d+,\d*)|(?:,\d+)|(?:\d+(?:,\d*)?[eE][+-]?\d+)|(?:,\d+[eE][+-]?\d+))$')
 
@@ -179,6 +180,53 @@ class EpicsClient:
         )
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f'caput failed for {pv}')
+
+    def get_char_waveform(self, pv, *, with_timestamp=False):
+        """Read a NUL-terminated EPICS CHAR waveform without losing line breaks."""
+        pv = self._validate_pv(pv)
+        timestamp = None
+        try:
+            if self.backend == 'epicsPV':
+                channel = self._epicspv(pv)
+                if with_timestamp:
+                    sample = channel.getw(req_type=18)  # DBR_TIME_CHAR
+                    values = sample['pv_value']
+                    timestamp = sample['pv_seconds'], sample['pv_nseconds']
+                else:
+                    values = channel.getw()
+            elif self.backend == 'pyepics':
+                if with_timestamp:
+                    channel = self._epics.get_pv(pv, timeout=self.timeout)
+                    sample = channel.get_with_metadata(form='time', timeout=self.timeout, use_monitor=False)
+                    values = sample['value']
+                    timestamp = sample['timestamp']
+                else:
+                    values = self._epics.caget(pv, as_string=False, timeout=self.timeout)
+            else:
+                caget = str(self._caget_bin)
+                wait = ['-w', str(self.timeout)]
+                for flags in (['-noname', '-nostat', '-nounit', '-num', '-nord'], ['-t', '-n']):
+                    proc = subprocess.run(
+                        [caget, *wait, *flags, pv], capture_output=True, text=True,
+                        timeout=self.timeout + 2.0,
+                    )
+                    if proc.returncode == 0:
+                        break
+                if proc.returncode != 0:
+                    raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f'caget failed for {pv}')
+                count, *values = proc.stdout.split()
+                if int(count) != len(values):
+                    raise RuntimeError(f'Invalid CHAR waveform length for {pv}')
+        except Exception as ex:
+            if self._fallback_if_backend_unavailable(ex):
+                return self.get_char_waveform(pv, with_timestamp=with_timestamp)
+            raise
+        if values is None:
+            raise RuntimeError(f'caget failed for {pv}')
+        if isinstance(values, Integral):
+            values = (values,)
+        output = bytes(int(value) & 255 for value in values).split(b'\0', 1)[0].decode('utf-8', errors='replace')
+        return (output, timestamp) if with_timestamp else output
 
     def get(self, pv, as_string=True):
         pv = self._validate_pv(pv)

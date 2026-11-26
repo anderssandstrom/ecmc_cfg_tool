@@ -39,12 +39,23 @@ axis tools, including `ecmcAxis.ui` and `ecmcAxisExpert.ui`. The `ecmc / IOC`
 node summarizes the main-panel PVs, including version, thread, object count,
 and status information, and can open `ecmcMain.ui` or the command parser from
 its right-click menu.
-Hardware actions open the configured caQtDM slave panel or the remote SDO
-browser. PLC and plugin actions open their caQtDM panels.
-The Hardware group opens the generated EtherCAT hardware overview through
-`start_ecmc_overview.py`, matching `EC_OVERVIEW` in `ecmcOpenObject.sh`.
+Right-click a motion axis and choose **Open Axis Hardware Overview** to see its
+encoder, drive, limit, and home-switch EtherCAT panels together in caQtDM.
+Slaves shared by several signals appear once, with all linked roles shown.
+Right-click a slave under Hardware and choose **Open EtherCAT Tool** to open
+the Python panel with that slave selected. It uses the IOC's master-level
+`EcTool` PVs for master information, slave listing, hardware diagnostics,
+state changes, and EL7062 tuning. Status, progress, and output come from
+the IOC. Opening the tool runs hardware diagnostics for the selected slave
+as soon as the IOC tool is ready. The output area shows the request status
+while waiting for a fresh result. The same menu also opens the configured caQtDM slave panel or the
+remote SDO browser. PLC and plugin actions open their caQtDM panels.
+The Motion group opens a compact caQtDM grid of all discovered axes. The
+Hardware group opens a caQtDM overview of all discovered EtherCAT slaves,
+using the IOC's configured row count. The Navigator generates both displays
+locally from its discovery results.
 With `Open Python tools in tabs` checked, the navigator stays visible on the
-left and the command parser, SDO browser, motion, controller, ISO230, DAQ/FFT,
+left and the EtherCAT tool, command parser, SDO browser, motion, controller, ISO230, DAQ/FFT,
 and RT log apps open in a tabbed workspace on the right. Uncheck it to launch
 those Python tools as separate windows instead. caQtDM panels still open as
 external windows.

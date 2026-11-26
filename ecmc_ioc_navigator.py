@@ -10,12 +10,16 @@ from ecmc_diagnostic_presets import axis_diagnostic_pvs
 from ecmc_settings import UiSettings
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 from qt_compat import QtCore, QtGui, QtWidgets
 from ecmc_stream_qt import EpicsClient, MainWindow as StreamWindow, _join_prefix_pv
 from ecmc_axis_cfg import AxisYamlConfigWindow
+from ecmc_axis_hardware import (
+    axis_hardware, write_axis_hardware_display, write_hardware_overview, write_motion_overview,
+)
 from ecmc_mtn_qt import MotionWindow
 from ecmc_cntrl_qt import CntrlWindow
 from ecmc_iso230_qt import Iso230Window
@@ -25,6 +29,7 @@ from ecmc_acquisition import bounded_series, append_sample
 from ecmc_rtlog_qt import RtLogWindow
 from ecmc_ioc_tree import demo_ioc, discover_ioc
 from ecmc_sdo_qt import SdoBrowserWindow
+from ecmc_ethercat_qt import EthercatToolWindow
 
 INSTALLED_QT_DIR = Path("/ioc/modules/qt")
 
@@ -47,6 +52,23 @@ class DiscoveryTask(QtCore.QRunnable):
             self.signals.finished.emit(discover_ioc(client, self.prefix, self.ssh_host_pv), "")
         except Exception as ex:
             self.signals.finished.emit({}, str(ex))
+
+
+class AxisHardwareTask(QtCore.QRunnable):
+    def __init__(self, prefix, motor, master, timeout):
+        super().__init__()
+        self.signals = DiscoverySignals()
+        self.prefix = prefix
+        self.motor = motor
+        self.master = master
+        self.timeout = timeout
+
+    def run(self):
+        try:
+            client = EpicsClient(timeout=self.timeout)
+            self.signals.finished.emit(axis_hardware(client, self.prefix, self.motor, self.master), "")
+        except Exception as ex:
+            self.signals.finished.emit([], str(ex))
 
 
 class ThreadTrendWindow(QtWidgets.QMainWindow):
@@ -611,8 +633,10 @@ class IocNavigator(QtWidgets.QMainWindow):
             menu.addSeparator()
             self._menu_action(menu, "Open Axis Panel", lambda: self._open_axis_panel(data, "ecmcAxis.ui"))
             self._menu_action(menu, "Open Axis Expert Panel", lambda: self._open_axis_panel(data, "ecmcAxisExpert.ui"))
+            self._menu_action(menu, "Open Axis Hardware Overview", lambda: self._open_axis_hardware(data))
             self._menu_action(menu, "Open Motor Record Panel", lambda: self._open_motor_record_panel(data))
         elif kind == "hardware":
+            self._menu_action(menu, "Open EtherCAT Tool", lambda: self._open_ethercat_tool(data))
             self._menu_action(menu, "Open Remote SDO Browser", lambda: self._open_sdo(data))
             menu.addSeparator()
             self._menu_action(menu, "Open Hardware Panel", lambda: self._open_hardware_panel(data))
@@ -758,11 +782,18 @@ class IocNavigator(QtWidgets.QMainWindow):
     def _open_main_panel(self):
         self._caqtdm("ecmcMain.ui", f"IOC={self._prefix()}")
 
-    def _open_object_command(self):
-        return "/ioc/modules/qt/ecmcOpenObject.sh"
-
     def _open_hardware_overview(self):
-        self._spawn(["bash", self._open_object_command(), "EC_OVERVIEW", self._prefix()], self.app_dir)
+        prefix = self._snapshot.get("prefix") or self._prefix()
+        master = int(self._snapshot.get("master", "0"))
+        hardware = [
+            {"master": master, "id": int(slave["id"]), "panels": [slave["panel"], slave["name"]]}
+            for slave in self._snapshot.get("hardware", [])
+        ]
+        if not hardware:
+            self.statusBar().showMessage(f"No EtherCAT slaves found for {prefix}.", 5000)
+            return
+        rows = int(self._snapshot.get("ec_rows", "1"))
+        self._launch_generated_overview(write_hardware_overview, "EtherCATOverview", prefix, hardware, rows)
 
     def _open_command_parser(self, separate=False):
         if self.embed_tools_check.isChecked() and not separate:
@@ -977,6 +1008,61 @@ class IocNavigator(QtWidgets.QMainWindow):
             for directory in panel_directories(self.caqtdm_override)) else "motorx_all.ui"
         self._caqtdm(panel, macro)
 
+    def _open_axis_hardware(self, data):
+        prefix = self._snapshot.get("prefix") or self._prefix()
+        motor = data.get("motor")
+        if not motor:
+            self.statusBar().showMessage("This axis has no motor PV prefix.", 5000)
+            return
+        if self._demo:
+            self._show_axis_hardware(prefix, motor, data.get("hardware_links", []))
+            return
+        task = AxisHardwareTask(prefix, motor, self._snapshot.get("master", "0"), self.timeout)
+        self._tasks.add(task)
+        self.statusBar().showMessage(f"Reading hardware links for {motor}…")
+
+        def done(hardware, error):
+            self._tasks.discard(task)
+            if error:
+                self.statusBar().showMessage(f"Could not read hardware links for {motor}.", 5000)
+                QtWidgets.QMessageBox.warning(self, "Axis hardware lookup failed", error)
+                return
+            self._show_axis_hardware(prefix, motor, hardware)
+
+        task.signals.finished.connect(done)
+        self.thread_pool.start(task)
+
+    def _show_axis_hardware(self, prefix, motor, hardware):
+        if not hardware:
+            self.statusBar().showMessage(f"No EtherCAT hardware links found for {motor}.", 5000)
+            return
+        self._launch_generated_overview(write_axis_hardware_display, "AxisHardware", prefix, motor, hardware)
+
+    def _launch_generated_overview(self, write_display, name, *args):
+        directory = tempfile.TemporaryDirectory(prefix="ecmc_overview_")
+        display = Path(directory.name) / f"{name}.ui"
+        try:
+            panel_dir = self.caqtdm_override or INSTALLED_QT_DIR
+            write_display(display, *args, panel_dir=panel_dir)
+            # The PSI caqtdm wrapper backgrounds caQtDM. Track the viewer itself
+            # so the temporary display stays available while it is open.
+            process = launch_caqtdm(display, "", panel_dir, prefer_binary=True)
+        except Exception as ex:
+            directory.cleanup()
+            QtWidgets.QMessageBox.critical(self, "Launch failed", str(ex))
+            return
+        self.statusBar().showMessage("Opened caQtDM overview.", 5000)
+        timer = QtCore.QTimer(QtWidgets.QApplication.instance())
+
+        def cleanup():
+            if process.poll() is not None:
+                timer.stop()
+                directory.cleanup()
+                timer.deleteLater()
+
+        timer.timeout.connect(cleanup)
+        timer.start(1000)
+
     def _open_hardware_panel(self, data):
         slave = f"{int(data['id']):03d}"
         macro = (
@@ -1016,7 +1102,12 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._open_overview("ecmc_start_axesgroup_overview.py")
 
     def _open_motion_overview(self):
-        self._open_overview("ecmc_start_axis_overview.py")
+        prefix = self._snapshot.get("prefix") or self._prefix()
+        axes = [axis for axis in self._snapshot.get("axes", []) if axis.get("motor")]
+        if not axes:
+            self.statusBar().showMessage(f"No motion axes found for {prefix}.", 5000)
+            return
+        self._launch_generated_overview(write_motion_overview, "MotionAxesOverview", prefix, axes)
 
     def _open_state_machines_overview(self):
         self._open_overview("ecmc_start_sm_overview.py")
@@ -1036,6 +1127,18 @@ class IocNavigator(QtWidgets.QMainWindow):
     def _open_safety_plugin(self):
         panel_dir = self.safety_qt_dir if self.safety_qt_dir.exists() else self.caqtdm_dir
         self._caqtdm("ecmc_plugin_safety_main.ui", f"IOC={self._prefix()}", panel_dir)
+
+    def _open_ethercat_tool(self, data):
+        prefix = self._snapshot.get("prefix") or self._prefix()
+        master = self._snapshot.get("master", "0")
+        slave = data["id"]
+        window = EthercatToolWindow(prefix, master, slave, timeout=self.timeout, demo=self._demo)
+        window.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+        if self.embed_tools_check.isChecked():
+            self._add_tool_tab(window, f"EtherCAT m{master} · Slave {slave}")
+        else:
+            window.setParent(self, QtCore.Qt.Window)
+            window.show()
 
     def _open_sdo(self, data, separate=False):
         default_host = self._ssh_host or self._snapshot.get("ssh_host", "")

@@ -9,7 +9,7 @@ import sys
 REPOSITORY_PANELS = Path(__file__).resolve().parent.parent / "ecmccfg" / "qt"
 
 
-def caqtdm_executable():
+def caqtdm_executable(*, prefer_binary=False):
     override = os.environ.get("CAQTDM_EXECUTABLE")
     if override:
         candidate = str(Path(override).expanduser())
@@ -17,7 +17,8 @@ def caqtdm_executable():
         if resolved:
             return resolved
         raise FileNotFoundError(f"CAQTDM_EXECUTABLE is not executable: {candidate}")
-    for name in ("caqtdm", "caQtDM"):
+    names = ("caQtDM", "caqtdm") if prefer_binary else ("caqtdm", "caQtDM")
+    for name in names:
         executable = shutil.which(name)
         if executable:
             return executable
@@ -42,8 +43,8 @@ def panel_directories(panel_dir=None):
     return directories
 
 
-def launch_caqtdm(panel, macro, panel_dir=None):
-    executable = caqtdm_executable()
+def launch_caqtdm(panel, macro, panel_dir=None, *, prefer_binary=False):
+    executable = caqtdm_executable(prefer_binary=prefer_binary)
     directories = panel_directories(panel_dir)
     panel = Path(panel).expanduser()
     candidates = [panel] if panel.is_absolute() else [directory / panel for directory in directories]

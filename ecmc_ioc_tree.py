@@ -284,7 +284,9 @@ def demo_ioc(prefix="DEMO:ECMC") -> dict:
             {"id": "1", "name": "EL7041", "pv_base": "m0s001", "panel": "EL70x1"},
         ],
         "axes": [
-            {"id": "1", "name": "Axis1", "motor": "DEMO:Axis1", "axis_type": "REAL"},
+            {"id": "1", "name": "Axis1", "motor": "DEMO:Axis1", "axis_type": "REAL",
+             "hardware_links": [{"master": 0, "id": 1, "name": "EL7041", "panels": ["EL70x1"],
+                                 "roles": ["Encoder 1", "Drive", "Forward limit", "Backward limit"]}]},
             {"id": "2", "name": "VirtualAxis", "motor": "DEMO:VirtualAxis", "axis_type": "VIRTUAL"},
         ],
         "axis_groups": [{"id": "0", "name": "Demo group", "axes": "1,2"}],
