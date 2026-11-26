@@ -9,6 +9,7 @@ from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTa
 from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
 from ecmc_encoder_homing_panel import EncoderHomingPanel
 from ecmc_encoder_overview import EncoderOverview
+from ecmc_homing_spec import HOME_PROCEDURES, home_procedure_label
 from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
 
 class AxisExpertPanel(QtWidgets.QWidget):
@@ -96,6 +97,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._labels = {}
         self._encoder_homing = None
         self._encoder_overview = None
+        self.home_selector = None
+        self.home_status = None
         self._edit_widgets = {}
         self._action_buttons = []
         root = QtWidgets.QWidget()
@@ -251,6 +254,20 @@ class AxisExpertPanel(QtWidgets.QWidget):
             elif compact:
                 grid.setColumnStretch(3,1)
             if group == "Homing":
+                home_row=QtWidgets.QHBoxLayout()
+                self.home_selector=QtWidgets.QComboBox()
+                self.home_selector.addItem("Use current IOC procedure",None)
+                for number,caption in HOME_PROCEDURES:
+                    self.home_selector.addItem(f"{number}: {caption}",number)
+                home_row.addWidget(self.home_selector,1)
+                home=QtWidgets.QPushButton("Home axis")
+                home.clicked.connect(lambda checked=False:self._home(self.home_selector.currentData()))
+                self._action_buttons.append(home)
+                home_row.addWidget(home)
+                grid.addLayout(home_row,grid.rowCount(),0,1,4)
+                self.home_status=QtWidgets.QLabel("Homing status unavailable")
+                self.home_status.setWordWrap(True)
+                grid.addWidget(self.home_status,grid.rowCount(),0,1,4)
                 self._encoder_homing = EncoderHomingPanel(self.base,demo=self.demo,on_plot=self.on_plot)
                 grid.addWidget(self._encoder_homing,grid.rowCount(),0,1,4)
             tab=("Motion" if group.startswith("Motion") else "Homing" if group=="Homing" else
@@ -371,21 +388,23 @@ class AxisExpertPanel(QtWidgets.QWidget):
         QtCore.QThreadPool.globalInstance().start(task)
         return True
 
-    def _home(self):
+    def _home(self,procedure=None):
+        if isinstance(procedure,bool): procedure=None
         if self.interface.currentData()!="native" or not self.arm.isChecked() or self._writes or self._enum_task is not None or not self.isVisible():
             return
         if self.demo:
+            if procedure is not None: self._overrides["-movHomCmd"]=procedure
             self._overrides["-Homed"]=1
             self._tick()
             return
         if QtWidgets.QMessageBox.question(self,"Home axis",
-                "Execute configured ECMC homing procedure?",
+                ("Execute current IOC homing procedure?" if procedure is None else f"Select and execute procedure {procedure}: {home_procedure_label(procedure)}?"),
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
             return
         if not self.arm.isChecked() or self._writes or not self.isVisible() or self.interface.currentData()!="native":
             return
-        self._launch_position_task(HomeTask(self.base))
+        self._launch_position_task(HomeTask(self.base,procedure))
 
     def _mode_changed(self,*_):
         velocity_mode = self.move_mode.currentData()=="vel"
@@ -638,6 +657,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
                     label.setStyleSheet(style)
                 if label.text() != text:
                     label.setText(text)
+        if self.home_status is not None:
+            proc=samples.get("-movHomCmd")
+            self.home_status.setText(f"IOC procedure: {home_procedure_label(proc)} · Homed: {samples.get('-Homed')} · Busy: {samples.get('-Busy')} · Sequence state: {samples.get('-SeqState')}")
         if self._encoder_homing is not None:
             self._encoder_homing.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"))
         if self._encoder_overview is not None:

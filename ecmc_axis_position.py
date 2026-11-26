@@ -92,8 +92,9 @@ class PositionTask(QtCore.QRunnable, NativeMotionMixin):
 
 class HomeTask(PositionTask):
     """Use configured homing procedure, never substitute a position move."""
-    def __init__(self,base):
+    def __init__(self,base,procedure=None):
         super().__init__(base,True,False,0,1)
+        self.procedure=procedure
 
     def run(self):
         error = ""
@@ -101,7 +102,7 @@ class HomeTask(PositionTask):
             for key in ("Stat","Auto","ErrId","Enabled","EnableCmd","Command","CmdData","Execute"):
                 self._connect(key,"-"+NATIVE_PV_SUFFIXES[key])
             self._connect("HomeProcedure","-movHomCmd")
-            proc = self._value("HomeProcedure")
+            proc = self._value("HomeProcedure") if self.procedure is None else self.procedure
             if proc not in range(1,15):
                 raise RuntimeError("Homing procedure unavailable, disabled or manual position setting")
             if self._value("ErrId") != 0 or self._value("Enabled") != 1 or self._value("EnableCmd") != 1:
@@ -115,6 +116,10 @@ class HomeTask(PositionTask):
             labels = list(pv.enum_strs or [])
             if "HOME" not in labels:
                 raise RuntimeError("IOC does not expose HOME command")
+            if self.procedure is not None:
+                self._motor_put("HomeProcedure",int(proc))
+                if self._value("HomeProcedure") != proc:
+                    raise RuntimeError("Homing procedure write not verified")
             self._put("MtnCmd",labels.index("HOME"))
             self._put("MtnCmdData",int(proc))
             if self._value("HomeProcedure") != proc:
