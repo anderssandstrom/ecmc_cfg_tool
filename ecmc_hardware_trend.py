@@ -38,6 +38,8 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self._rate = {}
         self._pvs = []
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(5)
         controls = QtWidgets.QHBoxLayout()
         controls.addWidget(QtWidgets.QLabel("History [s]"))
         history = QtWidgets.QSpinBox()
@@ -81,12 +83,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.y_max.returnPressed.connect(self._apply_manual)
         self.independent_check = QtWidgets.QCheckBox("Independent axes")
         self.independent_check.toggled.connect(self._rebuild_plots)
-        self.dual_check = QtWidgets.QCheckBox("Dual Y-axis")
-        self.dual_check.setVisible(False)
-        axis_options = QtWidgets.QHBoxLayout()
-        axis_options.addWidget(self.independent_check)
-        axis_options.addStretch(1)
-        layout.addLayout(axis_options)
+        controls.insertWidget(controls.count()-1, self.independent_check)
         self.right_controls = QtWidgets.QWidget()
         right_row = QtWidgets.QHBoxLayout(self.right_controls)
         right_row.setContentsMargins(0, 0, 0, 0)
@@ -115,6 +112,11 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.plot_area.setWidgetResizable(True)
         self.plot_root = QtWidgets.QWidget()
         self.plot_layout = QtWidgets.QVBoxLayout(self.plot_root)
+        self.plot_layout.setContentsMargins(0, 0, 0, 0)
+        self.plot_layout.setSpacing(4)
+        self.trend.setMinimumHeight(230)
+        self.plot_area.setMinimumHeight(250)
+        self.plot_area.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         self.plot_layout.addWidget(self.trend, 1)
         self.plot_area.setWidget(self.plot_root)
         layout.addWidget(self.plot_area, 1)
@@ -124,7 +126,8 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.curves.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.curves.horizontalHeader().setStretchLastSection(False)
         self.curves.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
-        self.curves.setMaximumHeight(145)
+        self.curves.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+        self.curves.verticalHeader().setDefaultSectionSize(max(25, self.fontMetrics().height()+9))
         self.curves.itemChanged.connect(self._visibility_changed)
         self.curves.cellDoubleClicked.connect(self._color_clicked)
         layout.addWidget(self.curves)
@@ -146,7 +149,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(50)
         self.timer.timeout.connect(self._tick)
-        self.resize(850, 550)
+        self.resize(900, 660)
         for name in self._initial_pvs:
             self.add_pv(name, demo_value)
         self.timer.start()
@@ -235,6 +238,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
             axis.setEnabled(not self.independent_check.isChecked())
             self.curves.setCellWidget(i, 4, axis)
         self.curves.blockSignals(False)
+        self.curves.setFixedHeight(self.curves.horizontalHeader().height() + sum(self.curves.rowHeight(i) for i in range(min(5, self.curves.rowCount()))) + self.curves.frameWidth()*2 + 4)
 
     def _visibility_changed(self, item):
         if item.column() == 0 and item.row() < len(self._pvs):
@@ -253,11 +257,6 @@ class HardwareTrendWindow(QtWidgets.QDialog):
 
     def _assign_axis(self, key, side):
         self._axes[key] = side
-        self._rebuild_plots()
-
-    def _dual_changed(self, checked):
-        if checked:
-            self.independent_check.setChecked(False)
         self._rebuild_plots()
 
     def _right_scale(self, index):
@@ -301,10 +300,6 @@ class HardwareTrendWindow(QtWidgets.QDialog):
                    for name in self._pvs if self._visible[name]]
         self.trend.series = visible
         separate = self.independent_check.isChecked()
-        if separate and self.dual_check.isChecked():
-            self.dual_check.blockSignals(True)
-            self.dual_check.setChecked(False)
-            self.dual_check.blockSignals(False)
         dual = not separate and any(self._axes.get(key) == 'Right' for key, _, _ in visible)
         self.trend.dual_axis = dual
         self.trend.right_keys = {key for key, side in self._axes.items() if side == "Right"}
