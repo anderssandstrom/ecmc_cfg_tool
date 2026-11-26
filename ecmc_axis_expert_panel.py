@@ -5,7 +5,7 @@ from qt_compat import QtCore, QtWidgets
 from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value, axis_status_value, decode_msta, MSTA_BITS
 from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
 from ecmc_axis_write import AxisWriteTask
-from ecmc_axis_position import PositionTask, HomeTask
+from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTask
 from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
 from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
 
@@ -116,11 +116,13 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.move_mode = QtWidgets.QComboBox()
         self.move_mode.addItem("Absolute","abs")
         self.move_mode.addItem("Relative","rel")
+        self.move_mode.addItem("Velocity","vel")
         self.move_target = QtWidgets.QLineEdit()
         self.move_target.setPlaceholderText("Position / distance")
         self.move_target.setMaximumWidth(160)
         self.move_target.textChanged.connect(self._refresh_draft)
         self.move_mode.currentIndexChanged.connect(self._refresh_draft)
+        self.move_mode.currentIndexChanged.connect(self._mode_changed)
         self.move_velocity = QtWidgets.QLineEdit()
         self.move_velocity.setPlaceholderText("Velocity")
         self.move_velocity.setMaximumWidth(100)
@@ -369,8 +371,17 @@ class AxisExpertPanel(QtWidgets.QWidget):
             return
         self._launch_position_task(HomeTask(self.base))
 
+    def _mode_changed(self,*_):
+        velocity_mode = self.move_mode.currentData()=="vel"
+        self.move_target.setVisible(not velocity_mode)
+        self.move_velocity.setPlaceholderText("Signed velocity" if velocity_mode else "Velocity")
+        self.move_button.setText("▶ Start" if velocity_mode else "▶ Move")
+
     def _move(self):
         if not self.arm.isChecked() or self._writes or self._enum_task is not None or not self.isVisible():
+            return
+        if self.move_mode.currentData()=="vel":
+            self._start_velocity()
             return
         try:
             target = float(self.move_target.text())
@@ -392,6 +403,27 @@ class AxisExpertPanel(QtWidgets.QWidget):
             self._tick()
             return
         self._launch_position_task(PositionTask(self.base,native,relative,target,velocity))
+
+    def _start_velocity(self):
+        try:
+            speed = float(self.move_velocity.text())
+            if not math.isfinite(speed) or speed == 0:
+                raise ValueError()
+        except ValueError:
+            QtWidgets.QMessageBox.warning(self,"Invalid velocity","Enter a nonzero signed velocity.")
+            return
+        native = self.interface.currentData()=="native"
+        if self.demo:
+            QtWidgets.QMessageBox.information(self,"Demo","Continuous velocity simulation is not yet available.")
+            return
+        if QtWidgets.QMessageBox.question(self,"Continuous motion",
+                "Start continuous motion? Use STOP to end it.",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            return
+        if not self.arm.isChecked() or self._writes or not self.isVisible() or native != (self.interface.currentData()=="native"):
+            return
+        self._launch_position_task(VelocityTask(self.base,native,speed))
 
     def _launch_position_task(self,task):
         self._position_task = task
@@ -443,7 +475,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 self._overrides.update({"-PosAct":target,"-PosSet":target,"-PosErr":0})
             self._tick()
             return
-        task = WriteTask(pv,values[0],1.0,"caMenu") if enum else AxisWriteTask(pv,values)
+        task = MotorStopTask(self.base) if stop and not native else WriteTask(pv,values[0],1.0,"caMenu") if enum else AxisWriteTask(pv,values)
         self._writes.add(task)
         def done(error):
             self._writes.discard(task)

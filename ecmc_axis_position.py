@@ -130,3 +130,77 @@ class HomeTask(PositionTask):
                 except Exception:
                     pass
             self.signals.finished.emit(error)
+
+class VelocityTask(PositionTask):
+    """Signed velocity command with directional limit checks."""
+    def __init__(self,base,native,velocity):
+        super().__init__(base,native,False,0,velocity)
+
+    def run(self):
+        error = ""
+        try:
+            speed = self.velocity
+            if not math.isfinite(speed) or speed == 0:
+                raise ValueError("Nonzero finite signed velocity required")
+            if self.native:
+                for key in ("Stat","Auto","ErrId","Enabled","EnableCmd","PosAct","Command","CmdData","Execute","VELO"):
+                    self._connect(key,"-"+NATIVE_PV_SUFFIXES[key])
+                self._ready()
+                if self._bit(3)!=0 or self._bit(5)!=0:
+                    raise RuntimeError("Axis busy")
+                suffix = "-CfgDHLM" if speed>0 else "-CfgDLLM"
+                enable = "-SftLimFwdEna-RB" if speed>0 else "-SftLimBwdEna-RB"
+                self._connect("Limit",suffix)
+                self._connect("LimitEnabled",enable)
+                limit,actual = self._value("Limit"),self._value("PosAct")
+                if self._value("LimitEnabled") != 1 or limit is None or actual is None or (speed>0 and actual>=limit) or (speed<0 and actual<=limit):
+                    raise RuntimeError("Directional soft limit unavailable, disabled or reached")
+                pv = self.pvs["Command"]
+                pv.get_ctrlvars(timeout=.7)
+                choices = list(pv.enum_strs or [])
+                if "VEL" not in choices:
+                    raise RuntimeError("IOC does not expose VEL command")
+                self._put("MtnCmd",choices.index("VEL"))
+                self._put("MtnCmdData",0)
+                self._put("TgtVelCmd",speed)
+                self._put("ExeCmd",0)
+                self._put("ExeCmd",1)
+            else:
+                direction = "JOGF" if speed>0 else "JOGR"
+                opposite = "JOGR" if speed>0 else "JOGF"
+                for key in ("DMOV","CNEN","RBV","LLM","HLM","JVEL",direction,opposite):
+                    self._connect(key,"."+key)
+                actual,limit = self._value("RBV"),self._value("HLM" if speed>0 else "LLM")
+                if self._value("DMOV")!=1 or self._value("CNEN")!=1 or actual is None or limit is None or (speed>0 and actual>=limit) or (speed<0 and actual<=limit):
+                    raise RuntimeError("Motor not ready or directional limit reached")
+                self._motor_put(opposite,0)
+                self._motor_put("JVEL",abs(speed))
+                self._motor_put(direction,1)
+        except Exception as ex:
+            error = str(ex)
+        finally:
+            for pv in self.pvs.values():
+                try:
+                    pv.disconnect()
+                except Exception:
+                    pass
+            self.signals.finished.emit(error)
+
+class MotorStopTask(PositionTask):
+    def __init__(self,base):
+        super().__init__(base,False,False,0,1)
+
+    def run(self):
+        errors = []
+        for key,value in (("STOP",1),("JOGF",0),("JOGR",0),("STOP",1)):
+            try:
+                self._connect(key,"."+key)
+                self._motor_put(key,value)
+            except Exception as ex:
+                errors.append(str(ex))
+        for pv in self.pvs.values():
+            try:
+                pv.disconnect()
+            except Exception:
+                pass
+        self.signals.finished.emit("; ".join(errors))
