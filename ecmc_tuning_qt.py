@@ -254,10 +254,17 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
         export.clicked.connect(self.export_csv)
         row.addWidget(export)
         layout.addLayout(row)
-        row=QtWidgets.QHBoxLayout()
-        self.readout=QtWidgets.QLabel('Waiting for PVs')
-        row.addWidget(self.readout,1)
-        layout.addLayout(row)
+        readouts=QtWidgets.QGridLayout()
+        self.readouts={}
+        for column,(key,title) in enumerate((
+                ('PosAct','Actual position'), ('Target','Target command'),
+                ('PosSet','Trajectory setpoint'), ('PosErr','Position error'),
+                ('Enabled','Drive state'), ('EnableCmd','Enable request'))):
+            readouts.addWidget(QtWidgets.QLabel(title),0,column)
+            label=QtWidgets.QLabel('—')
+            readouts.addWidget(label,1,column)
+            self.readouts[key]=label
+        layout.addLayout(readouts)
         self.timer=QtCore.QTimer(self)
         self.timer.setInterval(50)
         self.timer.timeout.connect(self._tick)
@@ -333,8 +340,9 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
         if self.demo:
             busy=int(abs(self.sim_target-self.sim_pos)>1e-9)
             stat=(self.sim_enabled<<1)|(busy<<3)|(int(not busy)<<4)|(1<<6)|(1<<7)|(1<<10)|(self.sim_auto<<24)
-            return {'Stat':stat,'Auto':self.sim_auto,'PosAct':self.sim_pos,
-                    'PosSet':self.sim_pos,'Enabled':self.sim_enabled,'EnableCmd':self.sim_enabled,
+            return {'Stat':stat,'Auto':self.sim_auto,'PosAct':self.latest.get('PosAct',self.sim_pos),
+                    'PosSet':self.sim_pos,'PosErr':self.latest.get('PosErr'),
+                    'Enabled':self.sim_enabled,'EnableCmd':self.sim_enabled,
                     'ErrId':0,'Command':3,'CmdData':0,'Target':self.sim_target}.get(key)
         pv=self.pvs.get(key)
         if pv is None or not pv.connected:
@@ -389,6 +397,9 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
                     pv=self.pvs.get(key)
                     if pv is not None and pv.connected:
                         self.latest[key]=numeric_readback(pv.get(use_monitor=False, timeout=0.7), pv.severity)
+            if self.auto_enable_timeout <= 0 and self._value('ErrId') == 0 and self._needs_enable():
+                self.enable_btn.setFocus()
+                raise RuntimeError('Use Enable drive in this window, then start the scan once the drive is enabled')
             self._ready()
             if self._bit(3)!=0 or self._bit(5)!=0:
                 raise RuntimeError('Axis must be stationary before starting')
@@ -558,13 +569,23 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
             self.pause_btn.setText('Resume')
             self.status.setText('Pause requested — finish current move')
 
+    def _needs_enable(self):
+        return self._value('Enabled') == 0 or self._value('EnableCmd') == 0
+
+    def _can_enable(self):
+        return (self._value('ErrId') == 0 and self._bit(10) == 1 and
+                all(self._bit(bit) == 0 for bit in (3, 5, 11, 16, 23)))
+
     def enable_drive(self):
         if self.active or self.stop_pending:
             return
-        if self._value('ErrId')!=0 or self._bit(10)!=1 or self._bit(3)!=0 or self._bit(23)!=0:
+        if not self._can_enable():
             self.status.setText('Cannot enable: axis error, busy, blocked or unavailable')
             return
         if not self.demo and QtWidgets.QMessageBox.question(self,'Enable drive',f'Enable {self.base}?',QtWidgets.QMessageBox.Yes|QtWidgets.QMessageBox.No,QtWidgets.QMessageBox.No)!=QtWidgets.QMessageBox.Yes:
+            return
+        if not self._can_enable():
+            self.status.setText('Enable cancelled — axis state changed')
             return
         try:
             self._put('EnaCmd',1)
@@ -599,10 +620,16 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
         lag=self.read_lag() if self.read_lag is not None else (0.01 if self.demo else None)
         self.error.limit=lag
         self.lag_label.setText('Lag: '+(f'±{lag:g}' if lag is not None else 'off / unknown'))
-        self.enable_btn.setEnabled(not self.active and not self.stop_pending and self._value('Enabled')==0)
+        self.enable_btn.setEnabled(not self.active and not self.stop_pending and self._needs_enable())
         self.position.update()
         self.error.update()
-        self.readout.setText('   '.join(k+': '+('—' if self.latest.get(k) is None else f'{self.latest[k]:.6g}') for k in ('PosSet','PosAct','PosErr')))
+        for key,label in self.readouts.items():
+            value=self._value(key)
+            if key in ('Enabled','EnableCmd'):
+                states=('Disabled','Enabled') if key=='Enabled' else ('Off','On')
+                label.setText(states[int(value)] if value in (0,1) else 'Unknown')
+            else:
+                label.setText('—' if value is None else f'{value:.9g}')
         if self.stop_pending:
             if now>=self.stop_confirm_after and self.stop_sent and self._bit(3)==0 and self._bit(5)==0 and (not self.killing or (self._value('Enabled')==0 and self._value('EnableCmd')==0)):
                 self.stop_pending=False

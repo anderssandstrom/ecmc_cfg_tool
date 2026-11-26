@@ -1697,6 +1697,9 @@ class CntrlWindow(QtWidgets.QMainWindow):
         def read_auto_enable():
             if self._context_identity() != identity:
                 raise RuntimeError('Controller selection changed; reopen tuning for this axis')
+            ok, reply = self.read_raw_command(f'GetAxisEnableAutoEnable({axis})', quiet=True)
+            if not ok or float(reply.rsplit(': ',1)[1]) != 1:
+                return 0.0
             ok, reply = self.read_raw_command(f'GetAxisAutoEnableTimeout({axis})', quiet=True)
             if not ok:
                 return 0.0
