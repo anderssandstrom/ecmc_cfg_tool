@@ -2,7 +2,7 @@
 import math
 import time
 from qt_compat import QtCore, QtWidgets
-from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value
+from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value, axis_status_value
 from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
 from ecmc_axis_write import AxisWriteTask
 from ecmc_axis_position import PositionTask
@@ -139,7 +139,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
             grid.setContentsMargins(6,5,6,5)
             grid.setHorizontalSpacing(6)
             grid.setVerticalSpacing(2)
-            compact = group in ("State", "Interlocks", "Limits")
+            compact = group in ("State", "Interlocks", "Limits", "ECMC soft limits")
             position = 0
             for i,(label,pv) in enumerate(rows):
                 suffix = pv[len(self.base):]
@@ -148,8 +148,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 if suffix in BOOL_COMMANDS:
                     value = BooleanValue(lambda old,new,pv=pv: self._toggle_boolean(pv,old,new))
                 elif suffix in BOOL_STATUS:
-                    alarm = suffix in ("-Blocked","-SumIlockFwd","-SumIlockBwd",".LVIO")
-                    value = BooleanStatus("#c43c3c" if alarm else "#b7791f" if suffix in ("-LimFwd","-LimBwd",".HLS",".LLS") else "#26804b")
+                    alarm = suffix in ("-Blocked","-SumIlockFwd","-SumIlockBwd",".LVIO","-SftLimFwdIlock","-SftLimBwdIlock")
+                    limit = suffix in ("-LimFwd","-LimBwd",".HLS",".LLS")
+                    value = BooleanStatus("#c43c3c" if alarm else "#b7791f" if limit else "#26804b", "Active" if alarm or limit else "On", "OK" if alarm or limit else "Off")
                 else:
                     value = SignalValue("—",lambda pv=pv: self._edit(pv))
                 value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
@@ -179,7 +180,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
             grid.setColumnStretch(1,1)
             if compact:
                 grid.setColumnStretch(3,1)
-            if index == 0 or group == "State" or group in ("Interlocks","Limits"):
+            if index == 0 or group == "State" or group in ("Interlocks","Limits","ECMC soft limits"):
                 layout.addWidget(box)
             else:
                 toggle = QtWidgets.QToolButton()
@@ -318,7 +319,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         if not stop:
             allowed = NATIVE_EDIT if native else MOTOR_EDIT
             actions = NATIVE_ACTIONS if native else MOTOR_ACTIONS
-            if suffix not in allowed and not (enum and native and suffix in MOTION_ENUMS) and not any(suffix==s and tuple(values)==v for _,s,v in actions):
+            if suffix not in allowed and not (suffix in BOOL_COMMANDS and suffix in ("-SftLimFwdEna","-SftLimBwdEna") and native and values in ((0,),(1,))) and not (enum and native and suffix in MOTION_ENUMS) and not any(suffix==s and tuple(values)==v for _,s,v in actions):
                 return
             if not self.demo and QtWidgets.QMessageBox.question(self,"Confirm axis write",
                     f"Write {values} to {pv}? This may start motion.",
@@ -329,6 +330,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 return
         if self.demo:
             self._overrides[suffix] = values[-1]
+            if suffix in ("-SftLimFwdEna","-SftLimBwdEna"):
+                self._overrides[suffix+"-RB"] = values[-1]
             if suffix=="-EnaCmd":
                 self._overrides.update({"-EnaCmd-RB":values[-1],"-EnaAct":values[-1]})
             if suffix==".VAL":
@@ -371,6 +374,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         values = {"-PosAct":actual,"-PosSet":10,"-TgtPosCmd":10,"-PosErr":10-actual,
                   "-VelAct":0,"-TgtVelCmd":1,"-AccCmd":2,"-DecCmd":2,
                   "-TgtPosCmd.EGU":"mm","-EnaCmd":1,"-EnaCmd-RB":1,"-EnaAct":1,"-Homed":1,
+                  "-LimFwd":1,"-LimBwd":1,"-SftLimFwdEna":1,"-SftLimBwdEna":1,"-SftLimFwdEna-RB":1,"-SftLimBwdEna-RB":1,
                   "-AtTarget":1,"-InRT":1,"-EncCnt":1,"-SetEncIdCmd-RB":1,
                   "-MsgTxt":"","-IlockTxt":"","-Ctrl-Kp":1,"-Ctrl-Ki":0,"-Ctrl-Kd":0,
                   ".RBV":actual+5,".VAL":15,".VELO":1,".EGU":"mm",".DMOV":1,
@@ -428,7 +432,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                     pass
             count += value is not None
             if isinstance(label,(BooleanValue,BooleanStatus)):
-                label.set_value(value)
+                label.set_value(axis_status_value(name[len(self.base):],value))
             else:
                 suffix = name[len(self.base):]
                 text = format_axis_value(value,self._precision)

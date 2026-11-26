@@ -6,6 +6,7 @@ NATIVE = (
     ("Motion", (("Actual position","-PosAct"), ("Target position","-TgtPosCmd"), ("Trajectory position","-PosSet"), ("Following error","-PosErr"), ("Actual velocity","-VelAct"), ("Target velocity","-TgtVelCmd"), ("Acceleration command","-AccCmd"), ("Deceleration command","-DecCmd"), ("Position units","-TgtPosCmd.EGU"), ("Tweak distance","-TwkDstCmd"))),
     ("State", (("Enable command","-EnaCmd"), ("Enable command RB","-EnaCmd-RB"), ("Auto execute","-AutoExecuteOnTargetPos-RB"), ("Enabled","-EnaAct"), ("Busy","-Busy"), ("Moving","-Moving"), ("Homed","-Homed"), ("At target","-AtTarget"), ("Sequence state","-SeqState"), ("Motion command","-MtnCmd"), ("Blocked","-Blocked"), ("In realtime","-InRT"))),
     ("Interlocks", (("Forward limit","-LimFwd"), ("Backward limit","-LimBwd"), ("Home switch","-HomeSwitch"), ("Forward interlock","-SumIlockFwd"), ("Backward interlock","-SumIlockBwd"), ("Interlock text","-IlockTxt"))),
+    ("ECMC soft limits", (("Forward enabled","-SftLimFwdEna-RB"), ("Backward enabled","-SftLimBwdEna-RB"), ("Forward interlock","-SftLimFwdIlock"), ("Backward interlock","-SftLimBwdIlock"), ("Forward enable command","-SftLimFwdEna"), ("Backward enable command","-SftLimBwdEna"))),
     ("Controller and diagnostics", (("Error ID","-ErrId"), ("Warning ID","-WrnId"), ("Message","-MsgTxt"), ("Encoder count","-EncCnt"), ("Selected encoder RB","-SetEncIdCmd-RB"), ("Encoder source","-EncSrcTyp-RB"), ("Trajectory source","-TrjSrcTyp-RB"), ("Trajectory type","-TrajType"), ("Drive type","-DrvType"), ("Drive mode","-DrvMode"), ("Kp","-Ctrl-Kp"), ("Ki","-Ctrl-Ki"), ("Kd","-Ctrl-Kd"))),
 )
 MOTOR = (
@@ -30,8 +31,8 @@ MOTOR_ACTIONS = (("Enable",".CNEN",(1,)),("Disable",".CNEN",(0,)),
                  ("Home forward",".HOMF",(1,)),("Home reverse",".HOMR",(1,)),
                  ("Tweak −",".TWR",(1,)),("Tweak +",".TWF",(1,)))
 
-BOOL_COMMANDS = {"-EnaCmd",".CNEN"}
-BOOL_STATUS = {"-EnaCmd-RB","-AutoExecuteOnTargetPos-RB","-EnaAct","-Busy","-Moving",
+BOOL_COMMANDS = {"-EnaCmd",".CNEN","-SftLimFwdEna","-SftLimBwdEna"}
+BOOL_STATUS = {"-SftLimFwdEna-RB","-SftLimBwdEna-RB","-SftLimFwdIlock","-SftLimBwdIlock","-EnaCmd-RB","-AutoExecuteOnTargetPos-RB","-EnaAct","-Busy","-Moving",
                "-Homed","-AtTarget","-Blocked","-InRT","-LimFwd","-LimBwd",
                "-HomeSwitch","-SumIlockFwd","-SumIlockBwd",".DMOV",".LVIO",".HLS",".LLS"}
 MOTION_ENUMS = {"-MtnCmd"}
@@ -42,3 +43,11 @@ def format_axis_value(value, precision=8):
     if isinstance(value,float):
         return f"{value:.{precision}g}"
     return str(value)
+
+# Native hard-limit inputs are active-low, unlike motor record HLS/LLS.
+ACTIVE_LOW_STATUS = {"-LimFwd","-LimBwd"}
+
+def axis_status_value(suffix, value):
+    if suffix in ACTIVE_LOW_STATUS and value in (0,1):
+        return 1-int(value)
+    return value
