@@ -28,6 +28,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._stop_pool = QtCore.QThreadPool(self)
         self._stop_pool.setMaxThreadCount(1)
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(6,6,6,6)
+        layout.setSpacing(5)
         title = QtWidgets.QLabel(f"Axis {axis_id} — {base}")
         title.setWordWrap(True)
         layout.addWidget(title)
@@ -52,6 +54,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         controls.addWidget(QtWidgets.QLabel("Digits"))
         controls.addWidget(precision)
         self.stop_button = QtWidgets.QPushButton("STOP")
+        self.stop_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed,QtWidgets.QSizePolicy.Fixed)
         self.stop_button.setStyleSheet("font-weight: bold; color: #c43c3c;")
         self.stop_button.clicked.connect(self._stop_motion)
         controls.addWidget(self.stop_button)
@@ -94,32 +97,48 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.move_mode.addItem("Relative","rel")
         self.move_target = QtWidgets.QLineEdit()
         self.move_target.setPlaceholderText("Position / distance")
+        self.move_target.setMaximumWidth(160)
         self.move_velocity = QtWidgets.QLineEdit()
         self.move_velocity.setPlaceholderText("Velocity")
+        self.move_velocity.setMaximumWidth(100)
         self.move_button = QtWidgets.QPushButton("Move")
-        self.move_button.setStyleSheet("font-weight: bold;")
+        self.move_button.setStyleSheet("font-weight: bold; color: #26804b;")
+        self.move_button.setSizePolicy(QtWidgets.QSizePolicy.Fixed,QtWidgets.QSizePolicy.Fixed)
         self.move_button.clicked.connect(self._move)
         command_grid.addWidget(self.move_mode,0,0)
         command_grid.addWidget(self.move_target,0,1)
         command_grid.addWidget(self.move_velocity,0,2)
         command_grid.addWidget(self.move_button,0,3)
-        command_grid.setColumnStretch(1,1)
-        command_grid.setColumnStretch(2,1)
+        command_grid.setColumnStretch(4,1)
         self._motion_widgets = [self.move_mode,self.move_target,self.move_velocity,self.move_button]
         layout.addWidget(command)
-        action_grid = QtWidgets.QGridLayout()
-        for i,(caption,suffix,values) in enumerate(NATIVE_ACTIONS if native else MOTOR_ACTIONS):
-            if caption in ('Enable','Disable','Execute'):
-                continue
-            button = QtWidgets.QPushButton(caption)
-            button.clicked.connect(lambda checked=False,suffix=suffix,values=values: self._write(suffix,values))
-            self._action_buttons.append(button)
-            action_grid.addWidget(button,i//3,i%3)
-        layout.addLayout(action_grid)
+        action_row = QtWidgets.QHBoxLayout()
+        action_row.setSpacing(4)
+        available = {caption:(suffix,values) for caption,suffix,values in
+                     (NATIVE_ACTIONS if native else MOTOR_ACTIONS)}
+        # Reserve identical positions even when a command is unavailable.
+        for caption,short in (("Tweak −","− Tweak"),("Tweak +","+ Tweak"),
+                              ("Home reverse","Home −"),("Home forward","Home +"),
+                              ("Reset error","Reset")):
+            button = QtWidgets.QPushButton(short)
+            button.setSizePolicy(QtWidgets.QSizePolicy.Fixed,QtWidgets.QSizePolicy.Fixed)
+            button.setToolTip(caption)
+            if caption in available:
+                suffix,values = available[caption]
+                button.clicked.connect(lambda checked=False,suffix=suffix,values=values: self._write(suffix,values))
+                self._action_buttons.append(button)
+            else:
+                button.setEnabled(False)
+                button.setToolTip(caption+" unavailable in this interface")
+            action_row.addWidget(button)
+        action_row.addStretch()
+        layout.addLayout(action_row)
         for index,(group,rows) in enumerate(axis_signals(self.base,self.interface.currentData())):
             box = QtWidgets.QGroupBox(group)
             grid = QtWidgets.QGridLayout(box)
-            grid.setSpacing(3)
+            grid.setContentsMargins(6,5,6,5)
+            grid.setHorizontalSpacing(6)
+            grid.setVerticalSpacing(2)
             compact = group in ("State", "Interlocks", "Limits")
             position = 0
             for i,(label,pv) in enumerate(rows):
@@ -160,7 +179,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
             grid.setColumnStretch(1,1)
             if compact:
                 grid.setColumnStretch(3,1)
-            if index == 0 or group == "State":
+            if index == 0 or group == "State" or group in ("Interlocks","Limits"):
                 layout.addWidget(box)
             else:
                 toggle = QtWidgets.QToolButton()
@@ -389,6 +408,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
             else:
                 label.setText("—")
         self.status.setText("Paused")
+        self.status.setStyleSheet("")
 
     def _tick(self):
         if not self.isVisible():
@@ -410,10 +430,29 @@ class AxisExpertPanel(QtWidgets.QWidget):
             if isinstance(label,(BooleanValue,BooleanStatus)):
                 label.set_value(value)
             else:
+                suffix = name[len(self.base):]
                 text = format_axis_value(value,self._precision)
+                color = ""
+                if suffix in ("-ErrId","-WrnId"):
+                    try:
+                        code = int(value)
+                        text = f"0x{code:X}" if code else "0"
+                        color = ("#c43c3c" if suffix=="-ErrId" else "#b7791f") if code else "#26804b"
+                    except (TypeError,ValueError,OverflowError):
+                        pass
+                elif suffix in ("-PosAct",".RBV","-VelAct"):
+                    color = "#287bc0" if value is not None else ""
+                elif suffix in ("-TgtPosCmd",".VAL","-TgtVelCmd",".VELO"):
+                    color = "#26804b" if value is not None else ""
+                style = f"color: {color};" if color else ""
+                if label.styleSheet() != style:
+                    label.setStyleSheet(style)
                 if label.text() != text:
                     label.setText(text)
         self.status.setText(f"{'DEMO — ' if self.demo else ''}{count}/{len(self._labels)} signals available")
+        status_style = "color: #26804b;" if count == len(self._labels) else "color: #b7791f;" if count else "color: #c43c3c;"
+        if self.status.styleSheet() != status_style:
+            self.status.setStyleSheet(status_style)
 
         self._update_controls()
 
