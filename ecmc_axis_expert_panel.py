@@ -11,6 +11,7 @@ from ecmc_encoder_homing_panel import EncoderHomingPanel
 from ecmc_encoder_overview import EncoderOverview
 from ecmc_demo_model import DemoMotion
 from ecmc_homing_spec import HOME_PROCEDURES, home_procedure_label
+from ecmc_homing_indicators import HomingIndicators
 from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
 
 class AxisExpertPanel(QtWidgets.QWidget):
@@ -102,6 +103,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._encoder_overview = None
         self.home_selector = None
         self.home_status = None
+        self.home_indicators = None
         self._edit_widgets = {}
         self._action_buttons = []
         root = QtWidgets.QWidget()
@@ -280,6 +282,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 self.home_status=QtWidgets.QLabel("Homing status unavailable")
                 self.home_status.setWordWrap(True)
                 grid.addWidget(self.home_status,grid.rowCount(),0,1,4)
+                self.home_indicators=HomingIndicators()
+                grid.addWidget(self.home_indicators,grid.rowCount(),0,1,4)
                 self._encoder_homing = EncoderHomingPanel(self.base,demo=self.demo,on_plot=self.on_plot)
                 grid.addWidget(self._encoder_homing,grid.rowCount(),0,1,4)
             tab=("Motion" if group.startswith("Motion") else "Homing" if group=="Homing" else
@@ -652,6 +656,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         if hasattr(self,"enable_button"): self.enable_button.set_value(None)
         for button in getattr(self,"_shortcut_readbacks",{}):
             button.setStyleSheet("QPushButton:pressed { background-color: #26804b; color: white; }")
+        if getattr(self,"home_indicators",None) is not None: self.home_indicators.update_samples({})
         self.status.setText("Paused")
         self.status.setStyleSheet("")
 
@@ -720,6 +725,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
             style="QPushButton:pressed { background-color: #26804b; color: white; }"
             if value==1: style+=" QPushButton { background-color: #26804b; color: white; }"
             if button.styleSheet()!=style: button.setStyleSheet(style)
+        if self.home_indicators is not None: self.home_indicators.update_samples(samples)
         if self.home_status is not None:
             proc=samples.get("-movHomCmd")
             self.home_status.setText(f"IOC procedure: {home_procedure_label(proc)} · Homed: {samples.get('-Homed')} · Busy: {samples.get('-Busy')} · Sequence state: {samples.get('-SeqState')}")

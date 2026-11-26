@@ -10,7 +10,7 @@ NATIVE = (
     ("ECMC soft limits", (("Lower limit (dial)","-CfgDLLM"), ("Upper limit (dial)","-CfgDHLM"), ("Forward enabled","-SftLimFwdEna-RB"), ("Backward enabled","-SftLimBwdEna-RB"), ("Forward interlock","-SftLimFwdIlock"), ("Backward interlock","-SftLimBwdIlock"), ("Forward enable command","-SftLimFwdEna"), ("Backward enable command","-SftLimBwdEna"))),
     ("Trajectory", (("Trajectory type","-TrajType"), ("Trajectory source","-TrjSrcTyp-RB"), ("Actual setpoint","-PosSet"), ("Acceleration command","-AccCmd"), ("Deceleration command","-DecCmd"))),
     ("Controller", (("Kp","-Ctrl-Kp"), ("Ki","-Ctrl-Ki"), ("Kd","-Ctrl-Kd"))),
-    ("Diagnostics", (("Error ID","-ErrId"), ("Warning ID","-WrnId"), ("Message","-MsgTxt"), ("Encoder count","-EncCnt"), ("Selected encoder RB","-SetEncIdCmd-RB"), ("Encoder selection mode","-EncMode-RB"), ("Encoder source","-EncSrcTyp-RB"), ("Drive type","-DrvType"), ("Drive mode","-DrvMode"))),
+    ("Diagnostics", (("Error ID","-ErrId"), ("Warning ID","-WrnId"), ("Message","-MsgTxt"), ("Encoder count","-EncCnt"), ("Selected encoder RB","-SetEncIdCmd-RB"), ("Encoder selection mode","-EncMode-RB"), ("Encoder source","-EncSrcTyp-RB"), ("Drive type","-DrvType"), ("Drive mode","-DrvMode"), ("Safety group","-SS1-GrpNam"), ("Safety active","-SS1-EnaAct"), ("Safety velocity maximum","-SS1-VelMaxLim"), ("Safety velocity restriction","-SS1-VelRestLim"))),
 )
 MOTOR = (
     ("Motion (motor record user coordinates)", (("Actual position",".RBV"), ("Requested position",".VAL"), ("Velocity setting",".VELO"), ("Acceleration time",".ACCL"), ("Units",".EGU"), ("Tweak distance",".TWV"))),
@@ -35,7 +35,7 @@ MOTOR_ACTIONS = (("Enable",".CNEN",(1,)),("Disable",".CNEN",(0,)),
                  ("Tweak −",".TWR",(1,)),("Tweak +",".TWF",(1,)))
 
 BOOL_COMMANDS = {"-EnaCmd",".CNEN","-SftLimFwdEna","-SftLimBwdEna"}
-BOOL_STATUS = {"-SftLimFwdEna-RB","-SftLimBwdEna-RB","-SftLimFwdIlock","-SftLimBwdIlock","-EnaCmd-RB","-AutoExecuteOnTargetPos-RB","-EnaAct","-Busy","-Moving",
+BOOL_STATUS = {"-SS1-EnaAct","-SftLimFwdEna-RB","-SftLimBwdEna-RB","-SftLimFwdIlock","-SftLimBwdIlock","-EnaCmd-RB","-AutoExecuteOnTargetPos-RB","-EnaAct","-Busy","-Moving",
                "-Homed","-AtTarget","-Blocked","-InRT","-LimFwd","-LimBwd",
                "-HomeSwitch","-SumIlockFwd","-SumIlockBwd",".DMOV",".LVIO",".HLS",".LLS"}
 MOTION_ENUMS = {"-MtnCmd","-movHomCmd"}

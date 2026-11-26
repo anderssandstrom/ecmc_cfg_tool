@@ -38,6 +38,8 @@ CPP = (("Control word","CtrlWord-RB","hex"),("Status word","StatWord","hex"),
        ("Execution time","ExeMsAct","ms"),("Input copy","InMsAct","ms"),
        ("Output copy","OutMsAct","ms"),("Total time","TotMsAct","ms"),("Debug text","DbgTxtAct","text"))
 
+SAFETY = (("Plugin loaded","Loaded","bool"),("Group count","GrpCnt","number"))
+
 def diagnostic_rows(prefix,kind,object_id=None):
     prefix = str(prefix).strip().rstrip(":")
     if not prefix:
@@ -50,6 +52,8 @@ def diagnostic_rows(prefix,kind,object_id=None):
             raise ValueError("Invalid object ID")
         base = prefix+(":PLC" if kind=="plc" else ":SM")+f"{index:02d}-"
         rows = PLC if kind=="plc" else SM
+    elif kind=="safety_plugin":
+        base,rows=prefix+":SS1-",SAFETY
     elif kind=="cpp_logic":
         index=int(object_id)
         if index<0: raise ValueError("Invalid object ID")

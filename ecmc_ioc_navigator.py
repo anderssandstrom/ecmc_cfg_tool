@@ -763,6 +763,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._menu_action(menu, "Native CppLogic Diagnostics", lambda: self._open_cpp_logic(data))
             self._menu_action(menu.addMenu("caQtDM"), "CppLogic panel", lambda:self._caqtdm("ecmcCppLogic.ui",f"IOC={self._prefix()},CPP_ID={int(data['id'])}"))
         elif kind == "safety_plugin":
+            self._menu_action(menu,"Native safety plugin diagnostics",lambda:self._open_native_diagnostic("safety_plugin",data))
             self._menu_action(menu.addMenu("caQtDM"), "Safety plugin panel", self._open_safety_plugin)
         elif kind == "hardware_group":
             self._menu_action(menu, "Open EtherCAT Master Diagnostics", self._open_master_diagnostics)
@@ -813,7 +814,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         elif kind == "cpp_logic":
             self._open_cpp_logic(data)
         elif kind == "safety_plugin":
-            self._open_safety_plugin()
+            self._open_native_diagnostic("safety_plugin",data)
 
     def _global_motion(self,kill):
         from ecmc_axis_write import AxisWriteTask
