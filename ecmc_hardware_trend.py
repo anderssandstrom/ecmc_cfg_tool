@@ -24,6 +24,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self._providers = {}
         self._colors = {}
         self._visible = {}
+        self._axes = {}
         self._color_index = 0
         self._independent = {}
         self._initial_pvs = list(dict.fromkeys(pvs))
@@ -79,7 +80,37 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.y_max.returnPressed.connect(self._apply_manual)
         self.independent_check = QtWidgets.QCheckBox("Independent axes")
         self.independent_check.toggled.connect(self._rebuild_plots)
-        layout.addWidget(self.independent_check)
+        self.dual_check = QtWidgets.QCheckBox("Dual Y-axis")
+        self.dual_check.toggled.connect(self._dual_changed)
+        axis_options = QtWidgets.QHBoxLayout()
+        axis_options.addWidget(self.independent_check)
+        axis_options.addWidget(self.dual_check)
+        axis_options.addStretch(1)
+        layout.addLayout(axis_options)
+        self.right_controls = QtWidgets.QWidget()
+        right_row = QtWidgets.QHBoxLayout(self.right_controls)
+        right_row.setContentsMargins(0, 0, 0, 0)
+        right_row.addWidget(QtWidgets.QLabel("Right Y-axis"))
+        self.right_mode = QtWidgets.QComboBox()
+        self.right_mode.addItems(["Auto", "Include zero", "Manual"])
+        right_row.addWidget(self.right_mode)
+        self.right_min = QtWidgets.QLineEdit("0")
+        self.right_max = QtWidgets.QLineEdit("1")
+        for label, edit in (("Min", self.right_min), ("Max", self.right_max)):
+            right_row.addWidget(QtWidgets.QLabel(label))
+            edit.setMaximumWidth(130)
+            edit.setEnabled(False)
+            right_row.addWidget(edit)
+        self.right_apply = QtWidgets.QPushButton("Apply")
+        self.right_apply.setEnabled(False)
+        right_row.addWidget(self.right_apply)
+        right_row.addStretch(1)
+        self.right_mode.currentIndexChanged.connect(self._right_scale)
+        self.right_apply.clicked.connect(self._apply_right)
+        self.right_min.returnPressed.connect(self._apply_right)
+        self.right_max.returnPressed.connect(self._apply_right)
+        self.right_controls.hide()
+        layout.addWidget(self.right_controls)
         self.plot_area = QtWidgets.QScrollArea()
         self.plot_area.setWidgetResizable(True)
         self.plot_root = QtWidgets.QWidget()
@@ -87,8 +118,8 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.plot_layout.addWidget(self.trend, 1)
         self.plot_area.setWidget(self.plot_root)
         layout.addWidget(self.plot_area, 1)
-        self.curves = QtWidgets.QTableWidget(0, 4)
-        self.curves.setHorizontalHeaderLabels(["Show / PV", "Color", "Value", "Events/s"])
+        self.curves = QtWidgets.QTableWidget(0, 5)
+        self.curves.setHorizontalHeaderLabels(["Show / PV", "Color", "Value", "Events/s", "Y-axis"])
         self.curves.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.curves.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.curves.horizontalHeader().setStretchLastSection(False)
@@ -139,6 +170,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self._colors[name] = palette[self._color_index % len(palette)]
         self._color_index += 1
         self._visible[name] = True
+        self._axes[name] = 'Left' if len(self._pvs) == 1 else 'Right' if len(self._pvs) == 2 else 'Left'
         if demo_value is not None:
             self._providers[name] = demo_value
         else:
@@ -178,7 +210,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
             self.trend.samples.pop(name, None)
             if self.trend.frozen is not None:
                 self.trend.frozen[1].pop(name, None)
-            for mapping in (self._providers, self._colors, self._visible, self._latest, self._counts, self._rate):
+            for mapping in (self._providers, self._colors, self._visible, self._axes, self._latest, self._counts, self._rate):
                 mapping.pop(name, None)
         self._refresh_table()
         self._rebuild_plots()
@@ -196,6 +228,12 @@ class HardwareTrendWindow(QtWidgets.QDialog):
             self.curves.setItem(i, 1, color)
             self.curves.setItem(i, 2, QtWidgets.QTableWidgetItem("—"))
             self.curves.setItem(i, 3, QtWidgets.QTableWidgetItem("—"))
+            axis = QtWidgets.QComboBox()
+            axis.addItems(["Left", "Right"])
+            axis.setCurrentText(self._axes[name])
+            axis.currentTextChanged.connect(lambda side, key=name: self._assign_axis(key, side))
+            axis.setEnabled(self.dual_check.isChecked() and not self.independent_check.isChecked())
+            self.curves.setCellWidget(i, 4, axis)
         self.curves.blockSignals(False)
 
     def _visibility_changed(self, item):
@@ -213,6 +251,47 @@ class HardwareTrendWindow(QtWidgets.QDialog):
             self._refresh_table()
             self._rebuild_plots()
 
+    def _assign_axis(self, key, side):
+        self._axes[key] = side
+        self._rebuild_plots()
+
+    def _dual_changed(self, checked):
+        if checked:
+            self.independent_check.setChecked(False)
+        self._rebuild_plots()
+
+    def _right_scale(self, index):
+        manual = index == 2
+        for widget in (self.right_min, self.right_max, self.right_apply):
+            widget.setEnabled(manual)
+        self.trend.right_include_zero = index == 1
+        if manual:
+            now, source = self.trend.frozen if self.trend.frozen is not None else (time.monotonic(), self.trend.samples)
+            values = [v for key, q in source.items() if self._visible.get(key) and self._axes.get(key) == "Right"
+                      for t, v in q if now-self.trend.history <= t <= now and v is not None]
+            if values:
+                lo, hi = min(values), max(values)
+                pad = (hi-lo)*.05 or max(abs(hi)*1e-6, 1e-9)
+                self.right_min.setText(format(lo-pad, ".15g"))
+                self.right_max.setText(format(hi+pad, ".15g"))
+            self._apply_right()
+        else:
+            self.trend.right_fixed_range = None
+            self.trend.update()
+
+    def _apply_right(self):
+        if self.right_mode.currentIndex() != 2:
+            return
+        try:
+            lo, hi = float(self.right_min.text()), float(self.right_max.text())
+            if not math.isfinite(lo) or not math.isfinite(hi) or not math.isfinite(hi-lo) or lo >= hi:
+                raise ValueError()
+        except ValueError:
+            QtWidgets.QMessageBox.warning(self, "Invalid right Y-axis range", "Enter finite values with Min < Max.")
+            return
+        self.trend.right_fixed_range = (lo, hi)
+        self.trend.update()
+
     def _rebuild_plots(self, *_):
         for plot in self._independent.values():
             self.plot_layout.removeWidget(plot)
@@ -222,6 +301,18 @@ class HardwareTrendWindow(QtWidgets.QDialog):
                    for name in self._pvs if self._visible[name]]
         self.trend.series = visible
         separate = self.independent_check.isChecked()
+        if separate and self.dual_check.isChecked():
+            self.dual_check.blockSignals(True)
+            self.dual_check.setChecked(False)
+            self.dual_check.blockSignals(False)
+        dual = self.dual_check.isChecked() and not separate
+        self.trend.dual_axis = dual
+        self.trend.right_keys = {key for key, side in self._axes.items() if side == "Right"}
+        self.right_controls.setVisible(dual)
+        for i in range(self.curves.rowCount()):
+            axis = self.curves.cellWidget(i, 4)
+            if axis is not None:
+                axis.setEnabled(dual)
         self.trend.setVisible(not separate)
         self.scale_mode.setEnabled(not separate)
         manual = not separate and self.scale_mode.currentIndex() == 2
@@ -267,7 +358,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.apply_scale.setEnabled(manual)
         if manual:
             now, source = self.trend.frozen if self.trend.frozen is not None else (time.monotonic(), self.trend.samples)
-            values = [v for key, q in source.items() if self._visible.get(key) for t, v in q
+            values = [v for key, q in source.items() if self._visible.get(key) and (not self.trend.dual_axis or self._axes.get(key) == 'Left') for t, v in q
                       if now - self.trend.history <= t <= now and v is not None]
             if values:
                 lo, hi = min(values), max(values)

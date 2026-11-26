@@ -34,6 +34,10 @@ class Trend(QtWidgets.QWidget):
         self.fixed_range = None
         self.include_zero = len(series) == 1
         self.axis_precision = 5
+        self.dual_axis = False
+        self.right_keys = set()
+        self.right_fixed_range = None
+        self.right_include_zero = False
         self.limit = None
         self.setMinimumHeight(145)
 
@@ -56,7 +60,7 @@ class Trend(QtWidgets.QWidget):
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         p.fillRect(self.rect(),QtGui.QColor('#f7f9fb'))
         margin = max(76, self.fontMetrics().horizontalAdvance('−0.' + '0' * self.axis_precision + 'e+00') + 8) if self.axis_precision > 5 else 76
-        r = QtCore.QRectF(margin,24,self.width()-margin-14,self.height()-49)
+        r = QtCore.QRectF(margin,24,self.width()-margin-(margin if self.dual_axis else 14),self.height()-49)
         if r.width() < 10 or r.height() < 10:
             return
         now, source = self.frozen if self.frozen is not None else (time.monotonic(),self.samples)
@@ -76,13 +80,20 @@ class Trend(QtWidgets.QWidget):
         if not values:
             p.drawText(r,QtCore.Qt.AlignCenter,'Waiting for PV samples')
             return
-        lo,hi = min(values),max(values)
-        if self.include_zero:
-            lo,hi = min(0,lo),max(0,hi)
-        pad = (hi-lo)*.05 or max(abs(hi)*1e-6,1e-9)
-        lo,hi = lo-pad,hi+pad
-        if self.fixed_range is not None:
-            lo,hi = self.fixed_range
+        def bounds(samples, include_zero, fixed):
+            if fixed is not None:
+                return fixed
+            if not samples:
+                return (0., 1.)
+            lo, hi = min(samples), max(samples)
+            if include_zero:
+                lo, hi = min(0, lo), max(0, hi)
+            pad = (hi-lo)*.05 or max(abs(hi)*1e-6, 1e-9)
+            return lo-pad, hi+pad
+        left = [v for key, seq in data.items() if not self.dual_axis or key not in self.right_keys for _, v in seq]
+        right = [v for key, seq in data.items() if key in self.right_keys for _, v in seq]
+        lo, hi = bounds(left, self.include_zero, self.fixed_range)
+        rlo, rhi = bounds(right, self.right_include_zero, self.right_fixed_range)
         for i in range(5):
             y = r.top()+r.height()*i/4
             x = r.left()+r.width()*i/4
@@ -91,6 +102,8 @@ class Trend(QtWidgets.QWidget):
             p.drawLine(QtCore.QPointF(x,r.top()),QtCore.QPointF(x,r.bottom()))
             p.setPen(QtGui.QColor('#465565'))
             p.drawText(QtCore.QRectF(0,y-9,margin-6,18),QtCore.Qt.AlignRight|QtCore.Qt.AlignVCenter,f'{hi-(hi-lo)*i/4:.{self.axis_precision}g}')
+            if self.dual_axis:
+                p.drawText(QtCore.QRectF(r.right()+6,y-9,margin-8,18),QtCore.Qt.AlignLeft|QtCore.Qt.AlignVCenter,f'{rhi-(rhi-rlo)*i/4:.{self.axis_precision}g}')
             p.drawText(QtCore.QRectF(x-28,r.bottom()+3,56,18),QtCore.Qt.AlignCenter,f'{-self.history*(1-i/4):g}s')
         p.save()
         p.setClipRect(r)
@@ -101,6 +114,7 @@ class Trend(QtWidgets.QWidget):
                     y=r.bottom()-(v-lo)/(hi-lo)*r.height()
                     p.drawLine(QtCore.QPointF(r.left(),y),QtCore.QPointF(r.right(),y))
         for key,_,color in self.series:
+            low, high = (rlo, rhi) if self.dual_axis and key in self.right_keys else (lo, hi)
             path = QtGui.QPainterPath()
             started = False
             for stamp,v in source.get(key, ()):
@@ -110,7 +124,7 @@ class Trend(QtWidgets.QWidget):
                 if stamp<start or stamp>now:
                     continue
                 x=r.left()+(stamp-start)/self.history*r.width()
-                y=r.bottom()-(v-lo)/(hi-lo)*r.height()
+                y=r.bottom()-(v-low)/(high-low)*r.height()
                 if started:
                     path.lineTo(x,y)
                 else:
