@@ -3,8 +3,8 @@ import re
 from threading import Lock
 from qt_compat import QtCore, QtWidgets
 from ecmc_epics import EpicsClient
-from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_views
-from ecmc_hardware_write import WriteTask
+from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_views, hardware_commands
+from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
 from ecmc_hardware_widgets import HardwareSymbol, SignalValue, WordValue, signal_role
 
@@ -42,6 +42,8 @@ class HardwarePanel(QtWidgets.QWidget):
         self._closed = False
         self._write_task = None
         self.writable = {}
+        self.commands = {}
+        self._enum_task = None
         self.rows = {}
         self._monitor_lock = Lock()
         self._monitor_generation = 0
@@ -94,6 +96,7 @@ class HardwarePanel(QtWidgets.QWidget):
         self.views.addTab(self.table, "All PVs")
         layout.addWidget(self.views, 1)
         self.card_values = {}
+        self._command_buttons = {}
         self.table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.table_menu)
         self.table.cellClicked.connect(self._table_click)
@@ -129,6 +132,9 @@ class HardwarePanel(QtWidgets.QWidget):
         candidates = slave.get("panels") or [slave.get("panel"), slave.get("name")]
         pairs = hardware_pvs(self.prefix, slave.get("master", self.master), slave["id"], candidates)
         self.writable = hardware_writable_pvs(self.prefix, slave.get("master", self.master), slave["id"], candidates)
+        self.commands = hardware_commands(self.prefix, slave.get('master', self.master), slave['id'], candidates)
+        for pv in self.commands:
+            self.writable.setdefault(pv, 'caMessageButton')
         self.table.setRowCount(len(pairs))
         self.rows = {}
         for row, (label, pv) in enumerate(pairs):
@@ -329,6 +335,9 @@ class HardwarePanel(QtWidgets.QWidget):
             self._click_write(self.table.item(row, 3).text())
 
     def _update_edit_cursors(self, *_):
+        for pv, buttons in self._command_buttons.items():
+            for button in buttons:
+                button.setEnabled(self._can_write(pv))
         for pv, widgets in self.card_values.items():
             for _, widget in widgets:
                 editable = self._can_write(pv)
@@ -385,6 +394,18 @@ class HardwarePanel(QtWidgets.QWidget):
                 leds.addWidget(label, i // 2, (i % 2) * 2)
                 leds.addWidget(self._value_widget(name, pv), i // 2, (i % 2) * 2 + 1)
             outer.addLayout(leds)
+        command_rows = [(name,pv) for name,pv,_ in rows if pv in self.commands]
+        if command_rows:
+            actions = QtWidgets.QHBoxLayout()
+            for name,pv in command_rows:
+                button = QtWidgets.QPushButton(self.commands[pv]['label'])
+                button.setEnabled(False)
+                self._bind(button,pv)
+                button.clicked.connect(lambda checked=False, pv=pv: self._execute_command(pv))
+                self._command_buttons.setdefault(pv,[]).append(button)
+                actions.addWidget(button)
+            outer.addLayout(actions)
+        detail = [r for r in detail if self.writable.get(r[1]) != 'caMessageButton']
         if detail:
             form = QtWidgets.QGridLayout()
             form.setVerticalSpacing(2)
@@ -403,6 +424,7 @@ class HardwarePanel(QtWidgets.QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
         self.card_values = {}
+        self._command_buttons = {}
         self.device_values = {}
         header = self.device_header_layout
         while header.count():
@@ -589,7 +611,11 @@ class HardwarePanel(QtWidgets.QWidget):
         add = menu.addAction("Add to existing trend…")
         add.setEnabled(trend.isEnabled() and self.on_plot is not None)
         add.triggered.connect(lambda: self._trend_pv(pv, add=True))
-        if pv in self.writable:
+        if pv in self.commands:
+            command = menu.addAction(self.commands[pv]["label"])
+            command.setEnabled(self._can_write(pv))
+            command.triggered.connect(lambda: self._execute_command(pv))
+        if pv in self.writable and self.writable[pv] != "caMessageButton":
             write = menu.addAction("Write PV…")
             write.setEnabled(self._can_write(pv))
             write.triggered.connect(lambda: self._write_pv(pv))
@@ -616,7 +642,7 @@ class HardwarePanel(QtWidgets.QWidget):
     def _can_write(self, pv):
         row = self.rows.get(pv)
         return (not self._closed and self.isVisible() and pv in self._active_scope and self.write_enable.isChecked()
-                and self._task is None and self._write_task is None
+                and self._task is None and self._write_task is None and self._enum_task is None
                 and pv in self.writable and row is not None
                 and self.table.item(row, 2).text() in ("Read OK", "Simulated"))
 
@@ -624,6 +650,15 @@ class HardwarePanel(QtWidgets.QWidget):
         if not self._can_write(pv):
             return
         current = self.table.item(self.rows[pv], 1).text()
+        if self.writable[pv] == 'caMessageButton':
+            self._execute_command(pv)
+            return
+        if self.writable[pv] == 'caMenu' and not self.demo:
+            self._enum_task = EnumTask(pv, self.timeout)
+            self._enum_task.signals.finished.connect(lambda choices, error: self._enum_ready(pv, choices, error))
+            self._update_edit_cursors()
+            QtCore.QThreadPool.globalInstance().start(self._enum_task)
+            return
         if self.writable[pv] == "caToggleButton":
             value, ok = QtWidgets.QInputDialog.getItem(self, "Write hardware PV", pv, ["0", "1"], 1 if current.strip() in ("1", "True", "Yes") else 0, False)
         else:
@@ -636,6 +671,35 @@ class HardwarePanel(QtWidgets.QWidget):
             value = parse_write_value(value, self.writable[pv])
         except ValueError as ex:
             QtWidgets.QMessageBox.warning(self, "Invalid value", str(ex))
+            return
+        self._submit_write(pv, value)
+
+    def _execute_command(self, pv):
+        if self._can_write(pv) and pv in self.commands:
+            self._submit_write(pv, self.commands[pv]['release'])
+
+    def _enum_ready(self, pv, choices, error):
+        self._enum_task = None
+        if self._closed:
+            return
+        self._update_edit_cursors()
+        if not self._can_write(pv):
+            return
+        if error or not choices:
+            QtWidgets.QMessageBox.warning(self, 'Enum unavailable', error or 'No enum labels')
+            return
+        current = self.table.item(self.rows[pv], 1).text()
+        labels = [f'{i}: {label}' for i, label in enumerate(choices)]
+        try:
+            index = int(current)
+        except ValueError:
+            index = choices.index(current) if current in choices else 0
+        selected, ok = QtWidgets.QInputDialog.getItem(self, 'Select enum value', pv, labels, max(0, min(index, len(labels)-1)), False)
+        if ok:
+            self._submit_write(pv, labels.index(selected))
+
+    def _submit_write(self, pv, value):
+        if not self._can_write(pv):
             return
         if self.demo:
             if self._can_write(pv):

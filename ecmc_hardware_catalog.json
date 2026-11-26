@@ -398,7 +398,19 @@
       "Enc01-PosAct",
       "Enc01-PosAct02",
       "Enc02-PosAct",
-      "Enc02-PosAct02"
+      "Enc02-PosAct02",
+      "Drv01-Cmd",
+      "Drv01-Stat",
+      "Drv01-Spd",
+      "Drv01-Cmd-RB",
+      "Drv01-TrgDS402Ena",
+      "Drv01-TrgDS402Dis",
+      "Drv02-Cmd",
+      "Drv02-Stat",
+      "Drv02-Spd",
+      "Drv02-Cmd-RB",
+      "Drv02-TrgDS402Ena",
+      "Drv02-TrgDS402Dis"
     ],
     "EL7062_CSP": [
       "Drv01-BI01",
@@ -663,5 +675,39 @@
     ]
   },
   "source_commit": "4cda3c9b694730a2b9ba050c9cbbff3a1ef9b5d0",
-  "coverage": "partial"
+  "coverage": "partial",
+  "commands": {
+    "EL70x1": {
+      "Drv01-RstCmd": {
+        "label": "Reset",
+        "release": 1
+      }
+    },
+    "EL7062": {
+      "Drv01-Cmd": {
+        "label": "Reset",
+        "release": 128
+      },
+      "Drv01-TrgDS402Ena": {
+        "label": "Enable",
+        "release": 1
+      },
+      "Drv01-TrgDS402Dis": {
+        "label": "Disable",
+        "release": 1
+      },
+      "Drv02-Cmd": {
+        "label": "Reset",
+        "release": 128
+      },
+      "Drv02-TrgDS402Ena": {
+        "label": "Enable",
+        "release": 1
+      },
+      "Drv02-TrgDS402Dis": {
+        "label": "Disable",
+        "release": 1
+      }
+    }
+  }
 }

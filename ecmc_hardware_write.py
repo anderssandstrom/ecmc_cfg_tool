@@ -59,3 +59,34 @@ class WriteTask(QtCore.QRunnable):
                 except Exception:
                     pass
             self.signals.finished.emit(error)
+
+class EnumSignals(QtCore.QObject):
+    finished = QtCore.Signal(object, str) if hasattr(QtCore, "Signal") else QtCore.pyqtSignal(object, str)
+
+class EnumTask(QtCore.QRunnable):
+    def __init__(self, name, timeout):
+        super().__init__()
+        self.name, self.timeout = name, timeout
+        self.signals = EnumSignals()
+
+    def run(self):
+        pv = None
+        choices, error = [], ""
+        try:
+            import epics
+            pv = epics.PV(self.name, auto_monitor=False)
+            if not pv.wait_for_connection(timeout=self.timeout) or not pv.write_access:
+                raise RuntimeError("PV disconnected or write access denied.")
+            pv.get_ctrlvars(timeout=self.timeout)
+            choices = list(pv.enum_strs or [])
+            if not choices:
+                raise RuntimeError("IOC did not provide enum labels.")
+        except Exception as ex:
+            error = str(ex)
+        finally:
+            if pv is not None:
+                try:
+                    pv.disconnect()
+                except Exception:
+                    pass
+            self.signals.finished.emit(choices, error)

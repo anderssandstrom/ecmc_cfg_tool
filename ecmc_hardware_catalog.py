@@ -57,3 +57,14 @@ def hardware_views(prefix, master, slave, candidates, catalog=None):
             groups.append((title, [(s, by_name[s]) for s in expert["signals"] if s in by_name]))
         return [(s,pv) for s,pv in pairs if s in overview], groups
     return pairs, []
+
+def hardware_commands(prefix, master, slave, candidates, catalog=None):
+    if catalog is None:
+        catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
+    base = f"{prefix.rstrip(':')}:m{int(master)}s{int(slave):03d}"
+    for candidate in candidates:
+        key = str(candidate or "").removesuffix(".ui").removeprefix("ecmc")
+        if key in catalog["panels"]:
+            return {f"{base}-{suffix}": cmd for suffix, cmd in catalog.get("commands", {}).get(key, {}).items()
+                    if suffix in catalog["panels"][key] and re.fullmatch(r"[A-Za-z0-9_.:-]+", suffix)}
+    return {}
