@@ -7,20 +7,44 @@ class DS402Status(SignalValue):
     def __init__(self):
         super().__init__("Unavailable", lambda: False)
         self.setAlignment(QtCore.Qt.AlignCenter)
-        self.setMinimumHeight(28)
+        self.setMinimumHeight(22)
 
     def set_status(self, value):
         state = decode_state(value)
         color = {"Operation enabled": "#26804b", "Fault": "#c43c3c",
                  "Fault reaction active": "#c43c3c", "Quick stop active": "#b7791f"}.get(state, "#777")
         self.setText(state)
-        self.setStyleSheet("font-weight: bold; color: " + color + "; border: 1px solid " + color + "; border-radius: 4px; padding: 3px;")
+        self.setStyleSheet("font-weight: bold; color: " + color + "; border: 1px solid " + color + "; border-radius: 4px; padding: 1px;")
 
 
 class DS402Word(WordValue):
     def __init__(self, callback, status=False):
         super().__init__(callback)
         self.status_word = status
+        self.setMinimumHeight(32)
+        self.setMinimumWidth(190)
+        self.setMaximumHeight(34)
+
+    def paintEvent(self, event):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        p.setPen(self.palette().color(QtGui.QPalette.Text))
+        if self._editable:
+            p.drawRect(self.rect().adjusted(0, 0, -1, -1))
+        font = p.font()
+        font.setPointSize(max(7, font.pointSize()-3))
+        p.setFont(font)
+        cell = self.width_px()/16
+        for i in range(16):
+            bit = 15-i
+            x = i*cell
+            p.setPen(self.palette().color(QtGui.QPalette.Text))
+            p.drawText(QtCore.QRectF(x, 1, cell, 12), QtCore.Qt.AlignCenter, str(bit))
+            color = "#87919b" if self.word is None else "#287bc0" if self.word & (1 << bit) else "#c2c8cd"
+            p.setPen(QtCore.Qt.NoPen)
+            p.setBrush(QtGui.QColor(color))
+            p.drawRoundedRect(QtCore.QRectF(x+1, 15, max(2,cell-2), 11), 2, 2)
+        p.end()
 
     def event(self, event):
         if event.type() == QtCore.QEvent.ToolTip and self.width_px() > 0:
@@ -34,8 +58,9 @@ class DS402StateMap(SignalValue):
     def __init__(self):
         super().__init__("", lambda: False)
         self.state = "Unavailable"
-        self.setMinimumHeight(150)
-        self.setMinimumWidth(240)
+        self.setMinimumHeight(84)
+        self.setMaximumHeight(84)
+        self.setMinimumWidth(210)
 
     def set_status(self, value):
         self.state = decode_state(value)
@@ -52,9 +77,12 @@ class DS402StateMap(SignalValue):
                   ("Quick stop active", "Quick stop active"),
                   ("Fault reaction active", "Fault reaction"),
                   ("Fault", "Fault")]
+        font = p.font()
+        font.setPointSize(max(8, font.pointSize()-2))
+        p.setFont(font)
         width = (self.width()-12)/2
         for i,(state, label) in enumerate(states):
-            rect = QtCore.QRectF(3+(i%2)*(width+6), 3+(i//2)*36, width, 30)
+            rect = QtCore.QRectF(3+(i%2)*(width+6), 2+(i//2)*20, width, 18)
             active = state == self.state
             color = "#c43c3c" if state.startswith("Fault") else "#b7791f" if state == "Quick stop active" else "#26804b" if state == "Operation enabled" else "#287bc0"
             p.setPen(QtGui.QPen(QtGui.QColor(color if active else "#89929d"), 2 if active else 1))

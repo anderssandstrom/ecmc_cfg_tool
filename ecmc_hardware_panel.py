@@ -433,25 +433,51 @@ class HardwarePanel(QtWidgets.QWidget):
 
     def _ds402_group(self, rows):
         group = QtWidgets.QGroupBox("CiA 402")
-        layout = QtWidgets.QVBoxLayout(group)
-        for name, pv, short in rows:
-            if short == 'Stat':
-                state = DS402Status()
-                self._bind(state, pv)
-                self.card_values.setdefault(pv, []).append((name, state))
-                layout.addWidget(state)
-                state_map = DS402StateMap()
-                self._bind(state_map, pv)
-                self.card_values.setdefault(pv, []).append((name, state_map))
-                layout.addWidget(state_map)
-            label = QtWidgets.QLabel({'Cmd': 'Controlword', 'Cmd-RB': 'Controlword RB',
-                                      'Stat': 'Statusword'}[short])
+        layout = QtWidgets.QGridLayout(group)
+        layout.setContentsMargins(4, 3, 4, 3)
+        layout.setSpacing(2)
+        by_suffix = {short: (name, pv) for name, pv, short in rows}
+        row = 0
+        if 'Stat' in by_suffix:
+            name, pv = by_suffix['Stat']
+            state = DS402Status()
+            self._bind(state, pv)
+            self.card_values.setdefault(pv, []).append((name, state))
+            layout.addWidget(state, row, 0, 1, 3)
+            row += 1
+        for short in ('Cmd', 'Cmd-RB', 'Stat'):
+            if short not in by_suffix:
+                continue
+            name, pv = by_suffix[short]
+            label = QtWidgets.QLabel({'Cmd': 'CW', 'Cmd-RB': 'CW RB', 'Stat': 'SW'}[short])
             self._bind(label, pv)
-            layout.addWidget(label)
+            layout.addWidget(label, row, 0)
             word = DS402Word(lambda pv=pv: self._click_write(pv), status=short == 'Stat')
             self._bind(word, pv)
             self.card_values.setdefault(pv, []).append((name, word))
-            layout.addWidget(word)
+            layout.addWidget(word, row, 1)
+            number = SignalValue("—", lambda pv=pv: self._click_write(pv))
+            self._bind(number, pv)
+            self.card_values.setdefault(pv, []).append((name, number))
+            number.setProperty("ds402_hex", True)
+            layout.addWidget(number, row, 2)
+            row += 1
+        if 'Stat' in by_suffix:
+            name, pv = by_suffix['Stat']
+            details = QtWidgets.QToolButton()
+            details.setText("State details")
+            details.setCheckable(True)
+            details.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            details.setArrowType(QtCore.Qt.RightArrow)
+            layout.addWidget(details, row, 0, 1, 3)
+            state_map = DS402StateMap()
+            self._bind(state_map, pv)
+            self.card_values.setdefault(pv, []).append((name, state_map))
+            state_map.hide()
+            details.toggled.connect(state_map.setVisible)
+            details.toggled.connect(lambda on: details.setArrowType(QtCore.Qt.DownArrow if on else QtCore.Qt.RightArrow))
+            layout.addWidget(state_map, row+1, 0, 1, 3)
+        layout.setColumnStretch(1, 1)
         return group
 
     def build_cards(self, pairs):
@@ -614,6 +640,10 @@ class HardwarePanel(QtWidgets.QWidget):
             label.setToolTip(pv + ("\n" + error if error else ""))
             if isinstance(label, (DS402Status, DS402StateMap)):
                 label.set_status(value)
+                continue
+            if label.property('ds402_hex'):
+                number = word_number(value)
+                label.setText('—' if number is None else f'0x{number:04X}')
                 continue
             if isinstance(label, WordValue):
                 label.set_word(value)

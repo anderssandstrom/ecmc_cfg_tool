@@ -241,7 +241,10 @@ class IocNavigator(QtWidgets.QMainWindow):
         nav_layout.addLayout(health_row)
 
         self.tree = QtWidgets.QTreeWidget()
-        self.tree.setHeaderLabels(["Object", "ID", "Type / Panel", "PV / Motor", "Health"])
+        self.tree.setHeaderLabels(["Object", "ID", "Type", "PV / Motor", "Health"])
+        self.tree.setUniformRowHeights(True)
+        self.tree.setIndentation(14)
+        self.tree.setTextElideMode(QtCore.Qt.ElideMiddle)
         self.tree.setAlternatingRowColors(True)
         self.tree.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._context_menu)
@@ -249,13 +252,22 @@ class IocNavigator(QtWidgets.QMainWindow):
         header = self.tree.header()
         for column in range(5):
             header.setSectionResizeMode(column, QtWidgets.QHeaderView.Interactive)
-        self.tree.setColumnWidth(0, 190)
-        self.tree.setColumnWidth(1, 55)
-        self.tree.setColumnWidth(2, 115)
-        self.tree.setColumnWidth(3, 210)
+        header.setStretchLastSection(False)
+        header.moveSection(header.visualIndex(4), 2)
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)
+        self.tree.setColumnWidth(2, 85)
+        self.tree.setColumnWidth(3, 160)
+        self.tree.setColumnHidden(3, True)
+        self.tree.setColumnHidden(2, True)
+        header.setToolTip("Right-click to show optional columns")
+        header.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        header.customContextMenuRequested.connect(self._tree_header_menu)
         nav_layout.addWidget(self.tree, 1)
 
-        hint = QtWidgets.QLabel("Double-click an object for its default panel, or right-click for all available actions.")
+        hint = QtWidgets.QLabel("Double-click to open · Right-click for actions")
+        hint.setWordWrap(True)
         nav_layout.addWidget(hint)
 
         right = QtWidgets.QWidget()
@@ -339,6 +351,19 @@ class IocNavigator(QtWidgets.QMainWindow):
         task.signals.finished.connect(done)
         self.thread_pool.start(task)
 
+    def _tree_header_menu(self, pos):
+        menu = QtWidgets.QMenu(self)
+        for column, label in ((2, "Type / Panel"), (3, "PV / Motor")):
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(not self.tree.isColumnHidden(column))
+            action.toggled.connect(lambda checked, c=column: self.tree.setColumnHidden(c, not checked))
+        header = self.tree.header()
+        if hasattr(menu, "exec"):
+            menu.exec(header.mapToGlobal(pos))
+        else:
+            menu.exec_(header.mapToGlobal(pos))
+
     def _populate(self, snapshot):
         self._disconnect_health()
         self.tree.clear()
@@ -381,6 +406,7 @@ class IocNavigator(QtWidgets.QMainWindow):
                     columns = [obj["name"], obj["id"], kind.replace("_", " ").upper(), ""]
                 item = QtWidgets.QTreeWidgetItem(columns)
                 item.setData(0, self.DATA_ROLE, {"kind": kind, **obj})
+                item.setToolTip(0, "\\n".join(str(v) for v in columns if v))
                 parent.addChild(item)
                 total += 1
             parent.setExpanded(True)
@@ -511,6 +537,7 @@ class IocNavigator(QtWidgets.QMainWindow):
                 else:
                     status=f'Error {int(a)}' if a is not None and a!=0 else 'Enabled' if a==0 and b==1 else 'Disabled' if a==0 and b==0 else 'Unknown'
             item.setText(4,status)
+            item.setToolTip(4, status)
             problem=status.startswith('Error') or status in ('Offline','Not OP','Unknown')
             item.setForeground(4,QtGui.QBrush(QtGui.QColor('#b91c1c' if problem else '#16803b' if status in ('OP','Enabled') else '#64748b')))
             self._health_values['|'.join(names)]={'status':status,'pvs':names}
