@@ -7,7 +7,8 @@ from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_
 from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
 from ecmc_hardware_widgets import HardwareSymbol, SignalValue, WordValue, signal_role
-from ecmc_ds402_widget import DS402Status, DS402Word
+from ecmc_ds402_widget import DS402Status, DS402Word, DS402StateMap, controlword_dialog
+from ecmc_ds402 import word_number
 
 
 class ReadSignals(QtCore.QObject):
@@ -439,11 +440,15 @@ class HardwarePanel(QtWidgets.QWidget):
                 self._bind(state, pv)
                 self.card_values.setdefault(pv, []).append((name, state))
                 layout.addWidget(state)
+                state_map = DS402StateMap()
+                self._bind(state_map, pv)
+                self.card_values.setdefault(pv, []).append((name, state_map))
+                layout.addWidget(state_map)
             label = QtWidgets.QLabel({'Cmd': 'Controlword', 'Cmd-RB': 'Controlword RB',
                                       'Stat': 'Statusword'}[short])
             self._bind(label, pv)
             layout.addWidget(label)
-            word = DS402Word(lambda pv=pv: self._click_write(pv))
+            word = DS402Word(lambda pv=pv: self._click_write(pv), status=short == 'Stat')
             self._bind(word, pv)
             self.card_values.setdefault(pv, []).append((name, word))
             layout.addWidget(word)
@@ -607,7 +612,7 @@ class HardwarePanel(QtWidgets.QWidget):
             return
         for name, label in self.card_values[pv]:
             label.setToolTip(pv + ("\n" + error if error else ""))
-            if isinstance(label, DS402Status):
+            if isinstance(label, (DS402Status, DS402StateMap)):
                 label.set_status(value)
                 continue
             if isinstance(label, WordValue):
@@ -684,6 +689,15 @@ class HardwarePanel(QtWidgets.QWidget):
         if not self._can_write(pv):
             return
         current = self.table.item(self.rows[pv], 1).text()
+        if self.writable[pv] == 'caByteController' and any(isinstance(widget, DS402Word) and not widget.status_word for _, widget in self.card_values.get(pv, [])):
+            original = word_number(current)
+            value = controlword_dialog(self, original)
+            if value is not None and self._can_write(pv):
+                if word_number(self.table.item(self.rows[pv], 1).text()) != original:
+                    QtWidgets.QMessageBox.warning(self, 'Controlword changed', 'The live controlword changed during editing. Reopen the editor.')
+                    return
+                self._submit_write(pv, value)
+            return
         if self.writable[pv] == 'caMessageButton':
             self._execute_command(pv)
             return

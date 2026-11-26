@@ -1,5 +1,5 @@
 import unittest
-from ecmc_ds402 import decode_state
+from ecmc_ds402 import decode_state, edit_controlword, bit_label
 
 class DS402Test(unittest.TestCase):
     def test_states(self):
@@ -13,3 +13,12 @@ class DS402Test(unittest.TestCase):
         self.assertEqual(decode_state(None), "Unavailable")
         self.assertEqual(decode_state(-1), "Unavailable")
         self.assertEqual(decode_state(0x006F), "Unknown state")
+
+    def test_controlword_edit(self):
+        self.assertEqual(edit_controlword(0x8006, {0: True, 3: True}), 0x800F)
+        self.assertEqual(edit_controlword(0x008F, {7: False}), 0x000F)
+        with self.assertRaises(ValueError):
+            edit_controlword(0, {15: True})
+        with self.assertRaises(ValueError):
+            edit_controlword(None, {0: True})
+        self.assertEqual(bit_label(3, True), "Fault")
