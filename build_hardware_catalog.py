@@ -24,7 +24,7 @@ WRITE_WIDGETS = {"caTextEntry", "caToggleButton", "caMenu", "caByteController", 
 
 def extract_catalog(directory, source):
     roots = {p.name: ET.parse(p).getroot() for p in sorted(Path(directory).glob("*.ui"))}
-    def collect(name, env, trail, out, writable):
+    def collect(name, env, trail, out, writable, experts, scope=None, ancestry=()):
         if name not in roots or name in trail or len(trail) > 15:
             return
         def visit(node, context):
@@ -38,31 +38,56 @@ def extract_catalog(directory, source):
                         suffix = pv[len(PREFIX):]
                         if pv.startswith(PREFIX) and re.fullmatch(r"[A-Za-z0-9_.:-]+", suffix):
                             out.add(suffix)
+                            if scope is not None:
+                                scope['signals'].add(suffix)
                             if key == 'channel' and node.get('class') in WRITE_WIDGETS:
                                 writable[suffix] = node.get('class')
+                                if scope is not None:
+                                    scope['writable'][suffix] = node.get('class')
             if node.get("class") == "caInclude":
-                collect(Path(expand(props.get("filename", ""), local)).name, local, trail + (name,), out, writable)
+                collect(Path(expand(props.get("filename", ""), local)).name, local, trail + (name,), out, writable, experts, scope, ancestry)
             if node.get("class") == "caRelatedDisplay":
                 args = props.get("args", "").split(";")
                 for i, file in enumerate(props.get("files", "").split(";")):
                     target = Path(expand(file, local)).name
-                    collect(target, macros(args[i] if i < len(args) else "", local), trail + (name,), out, writable)
+                    if not target or target not in roots or target in trail or target == name:
+                        continue
+                    if re.search(r"graph|trend|plot", target, re.I):
+                        continue
+                    context = macros(args[i] if i < len(args) else "", local)
+                    labels = props.get("labels", "").split(";")
+                    label = labels[i].strip() if i < len(labels) else ""
+                    scope_key = (target, tuple(sorted(context.items())), ancestry)
+                    if scope_key not in experts:
+                        expert = {"file": target, "label": label or target,
+                                  "macros": context, "parents": list(ancestry),
+                                  "signals": set(), "writable": {}}
+                        experts[scope_key] = expert
+                        collect(target, context, trail + (name,), out, writable,
+                                experts, expert, ancestry + (target,))
             for child in node:
                 if child.tag != "property":
                     visit(child, local)
         visit(roots[name], env)
     panels = {}
     writes = {}
+    overview = {}
+    expert_panels = {}
     for name in sorted(roots):
         if not HARDWARE.fullmatch(name):
             continue
         out = set()
         writable = {}
-        collect(name, BASE, (), out, writable)
+        experts = {}
+        main = {'signals': set(), 'writable': {}}
+        collect(name, BASE, (), out, writable, experts, main)
         key = name.removeprefix("ecmc").removesuffix(".ui")
         panels[key] = sorted(out)
         writes[key] = dict(sorted(writable.items()))
-    return {"source": source, "panels": panels, "writable": writes}
+        overview[key] = sorted(main['signals'])
+        expert_panels[key] = [dict(e, signals=sorted(e['signals'])) for e in experts.values() if e['signals']]
+    return {"source": source, "panels": panels, "writable": writes,
+            "overview": overview, "experts": expert_panels}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)

@@ -2,7 +2,7 @@
 import re
 from qt_compat import QtCore, QtWidgets
 from ecmc_epics import EpicsClient
-from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs
+from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_views
 from ecmc_hardware_write import WriteTask
 from ecmc_hardware_widgets import HardwareSymbol, SignalValue, signal_role
 
@@ -59,7 +59,10 @@ class HardwarePanel(QtWidgets.QWidget):
         self.views = QtWidgets.QTabWidget()
         self.cards = QtWidgets.QScrollArea()
         self.cards.setWidgetResizable(True)
-        self.views.addTab(self.cards, "Hardware")
+        self.views.addTab(self.cards, "Overview")
+        self.expert = QtWidgets.QScrollArea()
+        self.expert.setWidgetResizable(True)
+        self.views.addTab(self.expert, "Expert")
         self.views.addTab(self.table, "All PVs")
         layout.addWidget(self.views, 1)
         self.card_values = {}
@@ -97,7 +100,9 @@ class HardwarePanel(QtWidgets.QWidget):
             for col, value in enumerate((label, "—", "Demo: not read" if self.demo else "Pending", pv)):
                 self.table.setItem(row, col, QtWidgets.QTableWidgetItem(value))
         self.table.resizeColumnsToContents()
-        self.build_cards(pairs)
+        overview, experts = hardware_views(self.prefix, slave.get('master', self.master), slave['id'], candidates)
+        self.build_cards(overview)
+        self.build_experts(experts)
         if self.demo:
             self._update_edit_cursors()
             self.status.setText("Demo mode — no network requests")
@@ -145,9 +150,10 @@ class HardwarePanel(QtWidgets.QWidget):
             self._click_write(self.table.item(row, 3).text())
 
     def _update_edit_cursors(self, *_):
-        for pv, (_, widget) in self.card_values.items():
-            widget.setCursor(QtCore.Qt.PointingHandCursor if self._can_write(pv)
-                             else QtCore.Qt.ArrowCursor)
+        for pv, widgets in self.card_values.items():
+            for _, widget in widgets:
+                widget.setCursor(QtCore.Qt.PointingHandCursor if self._can_write(pv)
+                                 else QtCore.Qt.ArrowCursor)
 
     def _value_widget(self, name, pv, primary=False):
         value = SignalValue("—", lambda pv=pv: self._click_write(pv))
@@ -158,7 +164,7 @@ class HardwarePanel(QtWidgets.QWidget):
             font.setBold(True)
             value.setFont(font)
         self._bind(value, pv)
-        self.card_values[pv] = (name, value)
+        self.card_values.setdefault(pv, []).append((name, value))
         return value
 
     def _group(self, title, rows):
@@ -252,6 +258,34 @@ class HardwarePanel(QtWidgets.QWidget):
         layout.addStretch(1)
         self.cards.setWidget(root)
 
+    def build_experts(self, experts):
+        root = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(root)
+        if not experts:
+            layout.addWidget(QtWidgets.QLabel("No expert panel definitions in the bundled catalog for this slave."))
+        else:
+            selector = QtWidgets.QComboBox()
+            stack = QtWidgets.QStackedWidget()
+            for title, pairs in experts:
+                selector.addItem(title)
+                page = QtWidgets.QWidget()
+                column = QtWidgets.QVBoxLayout(page)
+                groups = {}
+                for name, pv in pairs:
+                    match = re.fullmatch(r"(Drv|Enc|Tp|AI|AO|BI|BO)(\d+)(?:-?(.*))", name)
+                    group = match[1] + match[2] if match else "Other signals"
+                    short = match[3] or "Value" if match else name
+                    groups.setdefault(group, []).append((name, pv, short))
+                for group, rows in sorted(groups.items()):
+                    column.addWidget(self._group(group, rows))
+                column.addStretch(1)
+                stack.addWidget(page)
+            selector.currentIndexChanged.connect(stack.setCurrentIndex)
+            layout.addWidget(selector)
+            layout.addWidget(stack)
+        layout.addStretch(1)
+        self.expert.setWidget(root)
+
     def update_card(self, pv, value, error):
         truth = {"1": True, "0": False, "1.0": True, "0.0": False,
                  "true": True, "false": False, "yes": True, "no": False}.get(str(value).strip().lower())
@@ -272,23 +306,23 @@ class HardwarePanel(QtWidgets.QWidget):
             return
         if pv not in self.card_values:
             return
-        name, label = self.card_values[pv]
-        label.setToolTip(pv + ("\n" + error if error else ""))
-        if value is None:
-            label.setText("—")
-            label.setStyleSheet("color: #888;")
-            return
-        alarm = name.endswith("Alrm")
-        positive = name.endswith(("Rdy", "RdyStat", "RdyToEna"))
-        digital = bool(re.fullmatch(r"(BI|BO)\d+(-RB)?", name))
-        if truth is not None and (alarm or positive or digital):
-            color = ("#c43c3c" if truth == alarm else "#26804b") if (alarm or positive) else ("#26804b" if truth else "#888")
-            label.setText("●")
-            label.setToolTip(f"{pv}: {value}")
-            label.setStyleSheet("font-weight: bold; color: " + color + ";")
-        else:
-            label.setText(str(value))
-            label.setStyleSheet("font-weight: bold;")
+        for name, label in self.card_values[pv]:
+            label.setToolTip(pv + ("\n" + error if error else ""))
+            if value is None:
+                label.setText("—")
+                label.setStyleSheet("color: #888;")
+                continue
+            alarm = name.endswith("Alrm")
+            positive = name.endswith(("Rdy", "RdyStat", "RdyToEna"))
+            digital = bool(re.fullmatch(r"(BI|BO)\d+(-RB)?", name))
+            if truth is not None and (alarm or positive or digital):
+                color = ("#c43c3c" if truth == alarm else "#26804b") if (alarm or positive) else ("#26804b" if truth else "#888")
+                label.setText("●")
+                label.setToolTip(f"{pv}: {value}")
+                label.setStyleSheet("font-weight: bold; color: " + color + ";")
+            else:
+                label.setText(str(value))
+                label.setStyleSheet("font-weight: bold;")
 
     def table_menu(self, pos):
         item = self.table.itemAt(pos)
