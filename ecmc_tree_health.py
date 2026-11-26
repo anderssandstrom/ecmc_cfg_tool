@@ -31,6 +31,10 @@ def health_status(kind,a,b):
             return math.isfinite(float(v))
         except (ValueError,TypeError,OverflowError):
             return False
+    if valid(a):
+        if kind=="hardware" and a==0: return "Offline"
+        if kind=="state_machine" and a==1: return "Timeout"
+        if kind in ("plc","axis") and a!=0: return f"Error {int(a)}"
     if not valid(a) or not valid(b):
         return "Unknown"
     if kind=="hardware":

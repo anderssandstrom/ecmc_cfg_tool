@@ -398,7 +398,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
             self._overview.set_pending(self.move_target.text() if self.move_mode.currentData()=="abs" else None)
 
     def _stage_target(self,value):
-        if not self.arm.isChecked() or self._writes or self._enum_task is not None or not self.isVisible():
+        if not self.arm.isChecked() or self._writes or self._enum_task is not None or not self.isVisible() or self._jog_native is not None or self._jog_stops:
             return
         self.move_mode.setCurrentIndex(0)
         self.move_target.setText(format_axis_value(value,self._precision))
@@ -596,12 +596,13 @@ class AxisExpertPanel(QtWidgets.QWidget):
         def done(error):
             self._writes.discard(task)
             self._jog_task=None
-            if task.cancelled.is_set() or error:
+            cancelled=task.cancelled.is_set()
+            if cancelled or error:
                 # A stop sent before the final start write completed may have
                 # raced with it. Always send another stop after completion.
                 self._release_jog()
                 self._queue_jog_stop(native)
-            if error and not task.cancelled.is_set() and not self._closed:
+            if error and not cancelled and not self._closed:
                 self.status.setText("Jog start not confirmed: "+error)
             if not self._closed: self._update_controls()
         task.signals.finished.connect(done)
@@ -625,7 +626,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
         native=self._jog_native
         if native is None: return
         self._jog_native=None
+        button=self._jog_button
         self._jog_button=None
+        if button is not None: button.setDown(False)
         if self._jog_task is not None:
             self._jog_task.cancelled.set()
         if self.demo:
@@ -871,7 +874,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         if self._encoder_homing is not None:
             self._encoder_homing.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"))
         if self._encoder_overview is not None:
-            self._encoder_overview.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"),samples.get("-EncMode-RB"),self.arm.isChecked() and not self._writes and all(samples.get(k)==0 for k in ("-EnaAct","-EnaCmd-RB","-Busy","-Moving")))
+            self._encoder_overview.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"),samples.get("-EncMode-RB"),self.arm.isChecked() and not self._writes and self._jog_native is None and not self._jog_stops and all(samples.get(k)==0 for k in ("-EnaAct","-EnaCmd-RB","-Busy","-Moving")))
         self._overview.set_values(samples)
         samples.update({"msta:"+label: bit for label,bit in decode_msta(samples.get(".MSTA")).items()})
         for icon in self._status_icons + self._msta_icons:

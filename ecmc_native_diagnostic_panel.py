@@ -42,7 +42,7 @@ class NativeDiagnosticPanel(QtWidgets.QWidget):
         self.graphic=DiagnosticGraphic(kind) if kind in ("thread","state_machine") else None
         if self.graphic is not None: layout.addWidget(self.graphic)
         if kind=="plugin":
-            note=QtWidgets.QLabel("Generic plugin discovery records only; runtime signals depend on the plugin.")
+            note=QtWidgets.QLabel("ECMCCFG exposes linked-list IDs only. Add plugin-specific PVs below for read-only monitoring and trends.")
             note.setWordWrap(True)
             layout.addWidget(note)
         grid=QtWidgets.QGridLayout()
@@ -66,7 +66,10 @@ class NativeDiagnosticPanel(QtWidgets.QWidget):
         grid.setColumnStretch(1,1)
         grid.setColumnStretch(3,1)
         layout.addLayout(grid)
-        if kind=="data_storage":
+        if kind=="plugin":
+            from ecmc_plugin_monitor import PluginMonitor
+            layout.addWidget(PluginMonitor(prefix,demo=demo,on_plot=on_plot),1)
+        elif kind=="data_storage":
             layout.addWidget(StorageWaveformPanel(f"{prefix.rstrip(':')}:DS{int(object_id):02d}-DataAct",demo=demo,timeout=timeout),1)
         else:
             layout.addStretch()

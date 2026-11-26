@@ -875,7 +875,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             if getattr(self.tabs.widget(i),"_dashboard_key",None)==prefix:
                 self.tabs.setCurrentIndex(i)
                 return
-        pane=IocDashboard(self._snapshot,self._open_native_group,
+        pane=IocDashboard(self._snapshot,lambda key:self._open_native_group(key) if self._snapshot.get("prefix")==prefix and self._prefix()==prefix else self.statusBar().showMessage("Select dashboard IOC before opening objects",5000),
                           lambda kill:self._global_motion(kill) if self._snapshot.get("prefix")==prefix and self._prefix()==prefix else self.statusBar().showMessage("Select dashboard IOC before issuing commands",5000),
                           demo=self._demo)
         pane._dashboard_key=prefix

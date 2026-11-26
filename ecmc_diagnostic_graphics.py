@@ -1,6 +1,6 @@
 """Live status graphics. No inferred sequence transitions or combined WCET."""
 import math
-from qt_compat import QtWidgets
+from qt_compat import QtCore, QtWidgets
 
 PHASES=("IDLE","SLV_ACT","PREP_MST","WAIT_EXT","MST_MOV","WAIT_AT","WAIT_DIS","TIMEOUT")
 def utilization(duration_ns, frequency_hz):
@@ -20,7 +20,7 @@ class DiagnosticGraphic(QtWidgets.QGroupBox):
         if kind=="state_machine":
             for i,name in enumerate(PHASES):
                 label=QtWidgets.QLabel(name)
-                label.setAlignment(0x84)
+                label.setAlignment(QtCore.Qt.AlignCenter)
                 grid.addWidget(label,i//4,i%4)
                 self.items[name]=label
             self.note=QtWidgets.QLabel("Phase indicators only; transitions depend on configuration.")
