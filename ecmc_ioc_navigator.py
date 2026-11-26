@@ -1069,7 +1069,18 @@ class IocNavigator(QtWidgets.QMainWindow):
         master = int(data.get("master", self._snapshot.get("master", "0")))
         slave = int(data["id"])
         name = data.get("name") or data.get("panel") or ""
-        self._open_native_hardware([data], f"m{master} s{slave:03d} {name}".strip())
+        prefix = self._snapshot.get("prefix") or self._prefix()
+        key = (prefix, master, slave, self._demo)
+        for index in range(self.tabs.count()):
+            existing = self.tabs.widget(index)
+            if getattr(existing, "_hardware_tab_key", None) == key:
+                self.tabs.setCurrentIndex(index)
+                return
+        title = f"s{slave:03d} {name}" if master == 0 else f"m{master} s{slave:03d} {name}"
+        self._open_native_hardware([data], title.strip())
+        panel = self.tabs.currentWidget()
+        panel._hardware_tab_key = key
+        self.tabs.setTabToolTip(self.tabs.currentIndex(), f"{prefix}: m{master} s{slave:03d} {name}")
 
     def _open_hardware_trend(self, pvs, add=False, demo_value=None):
         if not pvs or (self._demo and demo_value is None):

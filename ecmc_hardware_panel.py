@@ -83,6 +83,10 @@ class HardwarePanel(QtWidgets.QWidget):
         self.views = QtWidgets.QTabWidget()
         self.cards = QtWidgets.QScrollArea()
         self.cards.setWidgetResizable(True)
+        self.cards.viewport().installEventFilter(self)
+        self._channel_grid = None
+        self._channel_widgets = []
+        self._channel_columns = 0
         self.views.addTab(self.cards, "Overview")
         self.expert = QtWidgets.QScrollArea()
         self.expert.setWidgetResizable(True)
@@ -107,7 +111,7 @@ class HardwarePanel(QtWidgets.QWidget):
         self.write_enable.toggled.connect(self._update_edit_cursors)
         buttons.addWidget(self.write_enable)
         buttons.addStretch(1)
-        buttons.addWidget(QtWidgets.QLabel("Click writable values to edit; right-click for trend"))
+        self.write_enable.setToolTip("Click writable values to edit; right-click any monitored signal to trend.")
         layout.addLayout(buttons)
         self.selector.currentIndexChanged.connect(lambda _: self.write_enable.setChecked(False))
         self.selector.currentIndexChanged.connect(self.refresh)
@@ -430,6 +434,9 @@ class HardwarePanel(QtWidgets.QWidget):
             if signals:
                 layout.addWidget(self._digital_group(kind, signals), 0, QtCore.Qt.AlignLeft)
         grid = QtWidgets.QGridLayout()
+        self._channel_grid = grid
+        self._channel_widgets = []
+        self._channel_columns = 0
         for i, (ch, groups) in enumerate(sorted(channels.items())):
             col = QtWidgets.QWidget()
             stack = QtWidgets.QVBoxLayout(col)
@@ -441,14 +448,36 @@ class HardwarePanel(QtWidgets.QWidget):
             for group, rows in sorted(groups.items(), key=lambda item: ({"Drv":0,"Enc":1,"Tp":2}.get(re.sub(r"\d+$","",item[0]),3),item[0])):
                 stack.addWidget(self._group(group, rows))
             stack.addStretch(1)
-            grid.addWidget(col, i // 2, i % 2, QtCore.Qt.AlignTop)
+            self._channel_widgets.append(col)
+            grid.addWidget(col, i, 0, QtCore.Qt.AlignTop)
         grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
         layout.addLayout(grid)
         if other:
             layout.addWidget(self._group("Other signals", other))
         layout.addStretch(1)
         self.cards.setWidget(root)
+        self._reflow_channels()
+
+    def eventFilter(self, watched, event):
+        if watched is self.cards.viewport() and event.type() == QtCore.QEvent.Resize:
+            QtCore.QTimer.singleShot(0, self._reflow_channels)
+        return super().eventFilter(watched, event)
+
+    def _reflow_channels(self):
+        if self._closed or self._channel_grid is None or not self._channel_widgets:
+            return
+        required = max(w.minimumSizeHint().width() for w in self._channel_widgets)
+        columns = 2 if len(self._channel_widgets) > 1 and self.cards.viewport().width() >= 2*max(270, required)+20 else 1
+        if columns == self._channel_columns:
+            return
+        self._channel_columns = columns
+        grid = self._channel_grid
+        for w in self._channel_widgets:
+            grid.removeWidget(w)
+        for i, w in enumerate(self._channel_widgets):
+            grid.addWidget(w, i//columns, i%columns, QtCore.Qt.AlignTop)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1 if columns == 2 else 0)
 
     def _digital_group(self, kind, signals):
         card = QtWidgets.QGroupBox("Digital inputs" if kind == "BI" else "Digital outputs")
@@ -534,10 +563,10 @@ class HardwarePanel(QtWidgets.QWidget):
                 continue
             alarm = name.endswith("Alrm")
             positive = name.endswith(("Rdy", "RdyStat", "RdyToEna"))
-            digital = bool(re.fullmatch(r"(BI|BO)\d+(-RB)?", name))
+            digital = bool(re.search(r"(?:^|-)(BI|BO)\d+(-RB)?$", name))
             if truth is not None and (alarm or positive or digital):
                 color = ("#c43c3c" if truth == alarm else "#26804b") if (alarm or positive) else ("#26804b" if truth else "#888")
-                label.setText("●")
+                label.setText(("● FAULT" if truth else "● OK") if alarm else ("● YES" if truth else "● NO") if positive else ("● 1" if truth else "○ 0"))
                 label.setToolTip(f"{pv}: {value}")
                 label.setStyleSheet("font-weight: bold; color: " + color + ";")
             else:
