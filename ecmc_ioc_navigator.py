@@ -287,6 +287,9 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.setTabsClosable(True)
         self.tabs.tabCloseRequested.connect(self._close_tool_tab)
+        self.close_all_tabs_btn = QtWidgets.QPushButton("Close all tabs")
+        self.close_all_tabs_btn.clicked.connect(self._close_all_tool_tabs)
+        self.tabs.setCornerWidget(self.close_all_tabs_btn, QtCore.Qt.TopRightCorner)
         self.tool_scroll = QtWidgets.QScrollArea()
         self.tool_scroll.setWidgetResizable(True)
         self.tool_scroll.setWidget(self.tabs)
@@ -335,6 +338,12 @@ class IocNavigator(QtWidgets.QMainWindow):
         widget.close()
         if self.tabs.count() == 0:
             self._add_workspace_placeholder()
+
+    def _close_all_tool_tabs(self):
+        for index in range(self.tabs.count() - 1, -1, -1):
+            widget = self.tabs.widget(index)
+            if widget is not None and not widget.property("placeholder"):
+                self._close_tool_tab(index)
 
     def refresh(self):
         prefix = self.prefix_edit.text().strip().rstrip(":")
