@@ -141,8 +141,9 @@ class BooleanValue(SignalValue):
     def paintEvent(self, event):
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
-        x = self.width()-65
-        rect = QtCore.QRectF(x, 3, 62, 18)
+        width = min(62, max(1, self.width()-4))
+        x = (self.width()-width)/2
+        rect = QtCore.QRectF(x, 3, width, 18)
         color = "#26804b" if self.value == 1 else "#737d87" if self.value == 0 else "#aab0b5"
         p.setPen(QtGui.QPen(QtGui.QColor("#287bc0" if self._editable else color), 1.5))
         p.setBrush(QtGui.QColor(color))
@@ -150,9 +151,9 @@ class BooleanValue(SignalValue):
         p.setPen(QtCore.Qt.NoPen)
         p.setBrush(QtGui.QColor("white"))
         if self.value is not None:
-            p.drawEllipse(QtCore.QRectF(x+45 if self.value else x+3, 6, 12, 12))
+            p.drawEllipse(QtCore.QRectF(x+width-17 if self.value else x+3, 6, 12, 12))
         p.setPen(QtGui.QColor("white"))
-        p.drawText(QtCore.QRectF(x+4 if self.value else x+17, 3, 41, 18),
+        p.drawText(QtCore.QRectF(x+3 if self.value else x+17, 3, max(1,width-20), 18),
                    QtCore.Qt.AlignCenter, "ON" if self.value == 1 else "OFF" if self.value == 0 else "—")
         p.end()
 
@@ -162,3 +163,42 @@ class BooleanValue(SignalValue):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+class AnalogValue(SignalValue):
+    """Raw numerical value with a small autoscaled history; no assumed engineering range."""
+    def __init__(self, callback):
+        super().__init__("—", callback)
+        self.history = []
+        self.value = None
+        self.setMinimumSize(130, 38)
+
+    def set_value(self, value):
+        import math
+        try:
+            n = float(value)
+            if not math.isfinite(n):
+                raise ValueError()
+            self.value = n
+            self.history.append(n)
+            self.history = self.history[-60:]
+        except (TypeError, ValueError, OverflowError):
+            self.value = None
+            self.history.clear()
+        self.update()
+
+    def paintEvent(self, event):
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        p.setPen(self.palette().color(QtGui.QPalette.Text))
+        p.drawText(QtCore.QRectF(2, 0, self.width()-4, 18), QtCore.Qt.AlignRight,
+                   "—" if self.value is None else f"{self.value:.9g}")
+        if self._editable:
+            p.drawRect(self.rect().adjusted(0, 0, -1, -1))
+        if len(self.history) > 1:
+            lo, hi = min(self.history), max(self.history)
+            span = hi-lo
+            points = [QtCore.QPointF(3+i*(self.width()-6)/max(1,len(self.history)-1),
+                        29 if span == 0 else 35-(v-lo)*15/span) for i,v in enumerate(self.history)]
+            p.setPen(QtGui.QPen(QtGui.QColor("#287bc0"), 1.3))
+            p.drawPolyline(QtGui.QPolygonF(points))
+        p.end()

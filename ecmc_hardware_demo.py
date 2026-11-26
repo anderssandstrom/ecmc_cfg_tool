@@ -86,6 +86,10 @@ class HardwareDemo:
             return 39
         if name.endswith("-Cmd"):
             return 15
+        if re.fullmatch(r'(BO|AO)\d+-RB', name):
+            return self.overrides.get(pv[:-3], 0)
+        if re.fullmatch(r'AO\d+', name):
+            return 0
         if re.search(r"(BI|BO)\d+(-RB)?$", name):
             return int(t % 4 < 2) if "BI" in name else 0
         if re.search(r"AI\d+", name):

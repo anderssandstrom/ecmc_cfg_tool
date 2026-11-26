@@ -6,7 +6,7 @@ from ecmc_epics import EpicsClient
 from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_views, hardware_commands
 from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
-from ecmc_hardware_widgets import HardwareSymbol, SignalValue, WordValue, BooleanValue, boolean_value, signal_role
+from ecmc_hardware_widgets import HardwareSymbol, SignalValue, WordValue, BooleanValue, AnalogValue, boolean_value, signal_role
 from ecmc_ds402_widget import DS402Status, DS402Word, DS402StateMap, controlword_dialog
 from ecmc_ds402 import word_number
 
@@ -355,6 +355,8 @@ class HardwarePanel(QtWidgets.QWidget):
         kind = self.writable.get(pv)
         if kind == 'caToggleButton':
             value = BooleanValue(lambda old, new, pv=pv: self._direct_boolean(pv, old, new))
+        elif re.fullmatch(r'(AI|AO)\d+(-RB)?', name):
+            value = AnalogValue(lambda pv=pv: self._click_write(pv))
         elif known_word:
             value = WordValue(lambda pv=pv: self._click_write(pv),
                               bit_callback=(lambda old, bit, pv=pv: self._direct_bit(pv, old, bit)) if kind == 'caByteController' and name.endswith('-Cmd') else None)
@@ -587,7 +589,7 @@ class HardwarePanel(QtWidgets.QWidget):
                     continue
                 value = self._value_widget(name, pv)
                 value.setAlignment(QtCore.Qt.AlignCenter)
-                value.setMinimumWidth(35)
+                value.setMinimumWidth(max(35, value.minimumWidth()))
                 grid.addWidget(value, row + (2 if rb else 1), column)
                 label = QtWidgets.QLabel("RB" if rb else ("IN" if kind == "BI" else "CMD"))
                 grid.addWidget(label, row + (2 if rb else 1), 0) if column == 1 else label.deleteLater()
@@ -646,6 +648,10 @@ class HardwarePanel(QtWidgets.QWidget):
             return
         for name, label in self.card_values[pv]:
             label.setToolTip(pv + ("\n" + error if error else ""))
+            if isinstance(label, AnalogValue):
+                label.set_value(value)
+                label.setToolTip(pv + '\nRaw PV value; history autoscaled (not time calibrated)' + ('\n' + error if error else ''))
+                continue
             if isinstance(label, BooleanValue):
                 label.set_value(value)
                 continue
