@@ -9,6 +9,7 @@ from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTa
 from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
 from ecmc_encoder_homing_panel import EncoderHomingPanel
 from ecmc_encoder_overview import EncoderOverview
+from ecmc_demo_model import DemoMotion
 from ecmc_homing_spec import HOME_PROCEDURES, home_procedure_label
 from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
 
@@ -20,6 +21,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._pvs = {}
         self._labels = {}
         self._started = time.monotonic()
+        self._demo_motion={True:DemoMotion(10),False:DemoMotion(15)}
+        self._demo_tick_time=self._started
         self._overrides = {}
         self._writes = set()
         self._enum_task = None
@@ -156,17 +159,17 @@ class AxisExpertPanel(QtWidgets.QWidget):
         action_row.setSpacing(4)
         available = {caption:(suffix,values) for caption,suffix,values in
                      (NATIVE_ACTIONS if native else MOTOR_ACTIONS)}
-        # Reserve identical positions even when a command is unavailable.
-        for caption,short in (("Tweak −","◀"),("Tweak +","▶"),
-                              ("Home reverse","⌂−"),("Home forward","⌂+"),
-                              ("Reset error","↻")):
+        for caption,short in (("Tweak −","◀ Tweak"),("Tweak +","Tweak ▶"),
+                              ("Home reverse","Home −"),("Home forward","Home +"),
+                              ("Reset error","↻ Reset error")):
+            if caption not in available and not (native and caption=="Home reverse"):
+                continue
             button = QtWidgets.QPushButton(short)
-            button.setFixedWidth(42)
             button.setAccessibleName(caption)
             button.setSizePolicy(QtWidgets.QSizePolicy.Fixed,QtWidgets.QSizePolicy.Fixed)
             button.setToolTip(caption)
             if native and caption == "Home reverse":
-                button.setText("⌂")
+                button.setText("Home")
                 button.setAccessibleName("Home configured procedure")
                 button.setToolTip("Home using configured ECMC procedure")
                 button.clicked.connect(self._home)
@@ -431,10 +434,10 @@ class AxisExpertPanel(QtWidgets.QWidget):
         if self.demo:
             actual = self._demo_value(self.base+("-PosAct" if native else ".RBV"))
             target = actual+target if relative else target
-            if native:
-                self._overrides.update({"-PosAct":target,"-PosSet":target,"-TgtPosCmd":target,"-TgtVelCmd":velocity,"-PosErr":0})
-            else:
-                self._overrides.update({".RBV":target,".VAL":target,".VELO":velocity})
+            if self._demo_value(self.base+("-EnaAct" if native else ".CNEN"))!=1:
+                return
+            self._demo_motion[native].start(target,velocity)
+            self._overrides.update({"-TgtPosCmd":target,"-TgtVelCmd":velocity} if native else {".VAL":target,".VELO":velocity})
             self._tick()
             return
         self._launch_position_task(PositionTask(self.base,native,relative,target,velocity))
@@ -449,7 +452,10 @@ class AxisExpertPanel(QtWidgets.QWidget):
             return
         native = self.interface.currentData()=="native"
         if self.demo:
-            QtWidgets.QMessageBox.information(self,"Demo","Continuous velocity simulation is not yet available.")
+            if self._demo_value(self.base+("-EnaAct" if native else ".CNEN"))!=1:
+                return
+            self._demo_motion[native].start(self._demo_motion[native].position,speed,continuous=True)
+            self._tick()
             return
         if QtWidgets.QMessageBox.question(self,"Continuous motion",
                 "Start continuous motion? Use STOP to end it.",
@@ -475,6 +481,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         QtCore.QThreadPool.globalInstance().start(task)
 
     def cancel_pending_motion(self):
+        for model in self._demo_motion.values(): model.stop()
         if self._position_task is not None:
             self._position_task.cancelled.set()
         self.arm.setChecked(False)
@@ -502,6 +509,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._stop_pool.start(task)
 
     def _stop_motion(self):
+        for model in self._demo_motion.values(): model.stop()
         if self._position_task is not None:
             self._position_task.cancelled.set()
         self.arm.setChecked(False)
@@ -530,11 +538,12 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 self._overrides[suffix+"-RB"] = values[-1]
             if suffix=="-EnaCmd":
                 self._overrides.update({"-EnaCmd-RB":values[-1],"-EnaAct":values[-1]})
-            if suffix==".VAL":
-                self._overrides[".RBV"]=values[-1]
+            if suffix==".VAL" and self._demo_value(self.base+".CNEN")==1:
+                self._demo_motion[False].start(values[-1],max(.001,abs(self._demo_value(self.base+".VELO"))))
             if suffix=="-ExeCmd":
                 target=self._demo_value(self.base+"-TgtPosCmd")
-                self._overrides.update({"-PosAct":target,"-PosSet":target,"-PosErr":0})
+                if self._demo_value(self.base+"-EnaAct")==1:
+                    self._demo_motion[True].start(target,max(.001,abs(self._demo_value(self.base+"-TgtVelCmd"))))
             self._tick()
             return
         task = MotorStopTask(self.base) if stop and not native else WriteTask(pv,values[0],1.0,"caMenu") if enum else AxisWriteTask(pv,values)
@@ -620,6 +629,18 @@ class AxisExpertPanel(QtWidgets.QWidget):
         if not self.isVisible():
             self._stop()
             return
+        if self.demo:
+            now=time.monotonic()
+            dt=now-self._demo_tick_time
+            self._demo_tick_time=now
+            for native,model in self._demo_motion.items():
+                low,high=("-CfgDLLM","-CfgDHLM") if native else (".LLM",".HLM")
+                if self._demo_value(self.base+("-EnaAct" if native else ".CNEN"))!=1: model.stop()
+                model.step(dt,self._demo_value(self.base+low),self._demo_value(self.base+high))
+            x,m=self._demo_motion[True],self._demo_motion[False]
+            self._overrides.update({"-PosAct":x.position,"-PosSet":x.position,"-VelAct":x.velocity,
+                "-PosErr":0,"-Busy":int(x.active),"-Moving":int(x.active),"-AtTarget":int(not x.active),
+                ".RBV":m.position,".DMOV":int(not m.active),".MSTA":0x4100 | (0x400 if m.active else 2)})
         count = 0
         samples = {}
         for name,label in self._labels.items():
@@ -680,6 +701,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         QtCore.QTimer.singleShot(0,self._start)
 
     def hideEvent(self,event):
+        for model in self._demo_motion.values(): model.stop()
         if self._position_task is not None:
             self._position_task.cancelled.set()
         self._generation += 1

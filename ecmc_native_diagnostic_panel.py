@@ -5,6 +5,7 @@ from ecmc_native_diagnostic_spec import diagnostic_rows
 from ecmc_hardware_widgets import BooleanValue, BooleanStatus, SignalValue
 from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_diagnostic_graphics import DiagnosticGraphic
+from ecmc_storage_waveform import StorageWaveformPanel
 
 class NativeDiagnosticPanel(QtWidgets.QWidget):
     def __init__(self,prefix,kind,object_id=None,demo=False,on_plot=None,timeout=1.0):
@@ -65,7 +66,10 @@ class NativeDiagnosticPanel(QtWidgets.QWidget):
         grid.setColumnStretch(1,1)
         grid.setColumnStretch(3,1)
         layout.addLayout(grid)
-        layout.addStretch()
+        if kind=="data_storage":
+            layout.addWidget(StorageWaveformPanel(f"{prefix.rstrip(':')}:DS{int(object_id):02d}-DataAct",demo=demo,timeout=timeout),1)
+        else:
+            layout.addStretch()
         self.timer=QtCore.QTimer(self)
         self.timer.setInterval(500)
         self.timer.timeout.connect(self._tick)
