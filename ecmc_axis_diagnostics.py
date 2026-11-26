@@ -29,3 +29,16 @@ NATIVE_ACTIONS = (("Enable","-EnaCmd",(1,)),("Disable","-EnaCmd",(0,)),
 MOTOR_ACTIONS = (("Enable",".CNEN",(1,)),("Disable",".CNEN",(0,)),
                  ("Home forward",".HOMF",(1,)),("Home reverse",".HOMR",(1,)),
                  ("Tweak −",".TWR",(1,)),("Tweak +",".TWF",(1,)))
+
+BOOL_COMMANDS = {"-EnaCmd",".CNEN"}
+BOOL_STATUS = {"-EnaCmd-RB","-AutoExecuteOnTargetPos-RB","-EnaAct","-Busy","-Moving",
+               "-Homed","-AtTarget","-Blocked","-InRT","-LimFwd","-LimBwd",
+               "-HomeSwitch","-SumIlockFwd","-SumIlockBwd",".DMOV",".LVIO",".HLS",".LLS"}
+MOTION_ENUMS = {"-MtnCmd"}
+
+def format_axis_value(value, precision=8):
+    if value is None:
+        return "—"
+    if isinstance(value,float):
+        return f"{value:.{precision}g}"
+    return str(value)

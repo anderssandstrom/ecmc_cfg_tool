@@ -2,10 +2,10 @@
 import math
 import time
 from qt_compat import QtCore, QtWidgets
-from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS
-from ecmc_hardware_widgets import SignalValue
+from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value
+from ecmc_hardware_widgets import SignalValue, BooleanValue
 from ecmc_axis_write import AxisWriteTask
-from ecmc_hardware_write import parse_write_value
+from ecmc_hardware_write import parse_write_value, EnumTask, WriteTask
 
 class AxisExpertPanel(QtWidgets.QWidget):
     def __init__(self, base, axis_id, demo=False, on_plot=None, actions=(), interface="native"):
@@ -17,6 +17,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._started = time.monotonic()
         self._overrides = {}
         self._writes = set()
+        self._enum_task = None
+        self._precision = 8
+        self._generation = 0
         self._edit_widgets = {}
         self._action_buttons = []
         self._stop_pool = QtCore.QThreadPool(self)
@@ -38,6 +41,13 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.arm.toggled.connect(self._update_controls)
         controls.addWidget(self.arm)
         controls.addStretch()
+        precision = QtWidgets.QSpinBox()
+        precision.setRange(4,12)
+        precision.setValue(self._precision)
+        precision.setToolTip("Significant digits for floating point values")
+        precision.valueChanged.connect(self._set_precision)
+        controls.addWidget(QtWidgets.QLabel("Digits"))
+        controls.addWidget(precision)
         self.stop_button = QtWidgets.QPushButton("STOP")
         self.stop_button.setStyleSheet("font-weight: bold; color: #c43c3c;")
         self.stop_button.clicked.connect(self._stop_motion)
@@ -60,6 +70,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._rebuild()
 
     def _rebuild(self,*_):
+        self._generation += 1
         self._stop()
         self.arm.setChecked(False)
         self._labels = {}
@@ -86,7 +97,12 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 suffix = pv[len(self.base):]
                 name = QtWidgets.QLabel(label)
                 name.setWordWrap(True)
-                value = SignalValue("—",lambda pv=pv: self._edit(pv))
+                if suffix in BOOL_COMMANDS:
+                    value = BooleanValue(lambda old,new,pv=pv: self._toggle_boolean(pv,old,new))
+                elif suffix in BOOL_STATUS:
+                    value = BooleanValue(lambda old,new: None)
+                else:
+                    value = SignalValue("—",lambda pv=pv: self._edit(pv))
                 value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
                 value.setToolTip(pv)
                 if suffix in ("-PosAct",".RBV","-TgtPosCmd",".VAL"):
@@ -94,7 +110,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                     font.setPointSize(max(14,font.pointSize()+4))
                     font.setBold(True)
                     value.setFont(font)
-                if suffix in editable:
+                if suffix in editable or suffix in BOOL_COMMANDS or suffix in MOTION_ENUMS:
                     self._edit_widgets[pv] = value
                 grid.addWidget(name,i,0)
                 grid.addWidget(value,i,1)
@@ -102,7 +118,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 value.customContextMenuRequested.connect(lambda pos,v=value,pv=pv: self._menu(v,pos,pv))
                 self._labels[pv] = value
             grid.setColumnStretch(1,1)
-            if index == 0:
+            if index == 0 or group == "State":
                 layout.addWidget(box)
             else:
                 toggle = QtWidgets.QToolButton()
@@ -123,17 +139,20 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._start()
 
     def _update_controls(self,*_):
-        armed = self.arm.isChecked() and self.isVisible() and not self._writes and not self._closed
+        armed = self.arm.isChecked() and self.isVisible() and not self._writes and self._enum_task is None and not self._closed
         for b in self._action_buttons:
             b.setEnabled(armed)
         for pv,w in self._edit_widgets.items():
-            w.set_editable(armed and w.text() != "—")
+            available = w.value is not None if isinstance(w,BooleanValue) else w.text() != "—"
+            w.set_editable(armed and available)
             w.setCursor(QtCore.Qt.PointingHandCursor if armed else QtCore.Qt.ArrowCursor)
 
     def _edit(self,pv):
         if not self.arm.isChecked() or self._writes or not self.isVisible() or pv not in self._edit_widgets or self._labels[pv].text()=="—":
             return False
         suffix = pv[len(self.base):]
+        if suffix in MOTION_ENUMS:
+            return self._select_motion_mode(pv)
         text,ok = QtWidgets.QInputDialog.getText(self,"Edit axis setting",pv,text=self._labels[pv].text())
         if ok:
             try:
@@ -144,19 +163,62 @@ class AxisExpertPanel(QtWidgets.QWidget):
             self._write(suffix,(value,))
         return True
 
+    def _set_precision(self,value):
+        self._precision = value
+        if self.isVisible():
+            self._tick()
+
+    def _toggle_boolean(self,pv,old,new):
+        suffix = pv[len(self.base):]
+        widget = self._edit_widgets.get(pv)
+        if suffix not in BOOL_COMMANDS or not isinstance(widget,BooleanValue) or widget.value != old:
+            return
+        self._write(suffix,(new,))
+
+    def _select_motion_mode(self,pv):
+        if self._enum_task is not None:
+            return False
+        if self.demo:
+            QtWidgets.QMessageBox.information(self,"Motion mode","Demo does not emulate IOC enum metadata.")
+            return True
+        task = EnumTask(pv,1.0)
+        generation = self._generation
+        self._enum_task = task
+        def ready(choices,error):
+            self._enum_task = None
+            self._update_controls()
+            if self._closed or generation != self._generation or not self.arm.isChecked() or not self.isVisible() or self.interface.currentData() != "native":
+                return
+            if error or not choices:
+                QtWidgets.QMessageBox.warning(self,"Motion mode unavailable",error or "No enum labels")
+                return
+            labels = [f"{i}: {label}" for i,label in enumerate(choices)]
+            current = self._labels[pv].text()
+            try:
+                index = int(current)
+            except ValueError:
+                index = choices.index(current) if current in choices else 0
+            choice,ok = QtWidgets.QInputDialog.getItem(self,"Motion command",pv,labels,max(0,min(index,len(labels)-1)),False)
+            if ok and generation == self._generation:
+                self._write("-MtnCmd",(labels.index(choice),),enum=True)
+        task.signals.finished.connect(ready)
+        self._update_controls()
+        QtCore.QThreadPool.globalInstance().start(task)
+        return True
+
     def _stop_motion(self):
         self.arm.setChecked(False)
         self._write("-StpCmd" if self.interface.currentData()=="native" else ".STOP",(1,),stop=True)
 
-    def _write(self,suffix,values,stop=False):
-        if self._closed or not self.isVisible() or (not stop and (not self.arm.isChecked() or self._writes)):
+    def _write(self,suffix,values,stop=False,enum=False):
+        if self._closed or not self.isVisible() or (not stop and (not self.arm.isChecked() or self._writes or self._enum_task is not None)):
             return
         native = self.interface.currentData()=="native"
         pv = self.base+suffix
         if not stop:
             allowed = NATIVE_EDIT if native else MOTOR_EDIT
             actions = NATIVE_ACTIONS if native else MOTOR_ACTIONS
-            if suffix not in allowed and not any(suffix==s and tuple(values)==v for _,s,v in actions):
+            if suffix not in allowed and not (enum and native and suffix in MOTION_ENUMS) and not any(suffix==s and tuple(values)==v for _,s,v in actions):
                 return
             if not self.demo and QtWidgets.QMessageBox.question(self,"Confirm axis write",
                     f"Write {values} to {pv}? This may start motion.",
@@ -176,7 +238,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 self._overrides.update({"-PosAct":target,"-PosSet":target,"-PosErr":0})
             self._tick()
             return
-        task = AxisWriteTask(pv,values)
+        task = WriteTask(pv,values[0],1.0,"caMenu") if enum else AxisWriteTask(pv,values)
         self._writes.add(task)
         def done(error):
             self._writes.discard(task)
@@ -241,7 +303,10 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 pass
         self._pvs.clear()
         for label in self._labels.values():
-            label.setText("—")
+            if isinstance(label,BooleanValue):
+                label.set_value(None)
+            else:
+                label.setText("—")
         self.status.setText("Paused")
 
     def _tick(self):
@@ -261,9 +326,12 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 except Exception:
                     pass
             count += value is not None
-            text = "—" if value is None else f"{value:.12g}" if isinstance(value,float) else str(value)
-            if label.text() != text:
-                label.setText(text)
+            if isinstance(label,BooleanValue):
+                label.set_value(value)
+            else:
+                text = format_axis_value(value,self._precision)
+                if label.text() != text:
+                    label.setText(text)
         self.status.setText(f"{'DEMO — ' if self.demo else ''}{count}/{len(self._labels)} signals available")
 
         self._update_controls()
@@ -273,6 +341,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         QtCore.QTimer.singleShot(0,self._start)
 
     def hideEvent(self,event):
+        self._generation += 1
         self.arm.setChecked(False)
         self._stop()
         super().hideEvent(event)
