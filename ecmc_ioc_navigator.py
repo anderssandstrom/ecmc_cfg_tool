@@ -1291,7 +1291,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._open_overview("ecmc_start_axis_overview.py", "--sm_id_mst", str(data["id"]))
 
     def _open_cpp_logic(self, data):
-        self._caqtdm("ecmcCppLogic.ui", f"IOC={self._prefix()},CPP_ID={int(data['id'])}")
+        self._open_native_diagnostic("cpp_logic",data)
 
     def _open_cpp_logic_overview(self):
         self._caqtdm("ecmcCppLogicOverview.ui", f"IOC={self._prefix()}")

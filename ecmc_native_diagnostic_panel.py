@@ -4,6 +4,7 @@ from qt_compat import QtCore, QtWidgets
 from ecmc_native_diagnostic_spec import diagnostic_rows
 from ecmc_hardware_widgets import BooleanValue, BooleanStatus, SignalValue
 from ecmc_hardware_write import WriteTask, EnumTask
+from ecmc_diagnostic_graphics import DiagnosticGraphic
 
 class NativeDiagnosticPanel(QtWidgets.QWidget):
     def __init__(self,prefix,kind,object_id=None,demo=False,on_plot=None,timeout=1.0):
@@ -37,6 +38,8 @@ class NativeDiagnosticPanel(QtWidgets.QWidget):
                                                   demo_value=self._demo_value if demo else None))
             top.addWidget(trend)
         layout.addLayout(top)
+        self.graphic=DiagnosticGraphic(kind) if kind in ("thread","state_machine") else None
+        if self.graphic is not None: layout.addWidget(self.graphic)
         if kind=="plugin":
             note=QtWidgets.QLabel("Generic plugin discovery records only; runtime signals depend on the plugin.")
             note.setWordWrap(True)
@@ -110,6 +113,7 @@ class NativeDiagnosticPanel(QtWidgets.QWidget):
         for w,mode in self._widgets.values():
             if isinstance(w,(BooleanValue,BooleanStatus)): w.set_value(None)
             else: w.setText("—")
+        if self.graphic is not None: self.graphic.set_values({})
         self.status.setText("Paused")
 
     def _tick(self):
@@ -137,6 +141,7 @@ class NativeDiagnosticPanel(QtWidgets.QWidget):
                     try:
                         if mode=="ns": text=f"{float(value)/1000:.3f} µs"
                         elif mode=="seconds": text=f"{float(value)*1000:.3f} ms"
+                        elif mode=="ms": text=f"{float(value):.6g} ms"
                         elif mode=="hz": text=f"{float(value):.2f} Hz"
                         elif mode in ("hex","error"): text=f"0x{int(value):X}"
                         elif mode=="enum":
@@ -147,6 +152,7 @@ class NativeDiagnosticPanel(QtWidgets.QWidget):
                 w.setText(text)
                 if mode=="error":
                     w.setStyleSheet("color: #c43c3c;" if value not in (None,0) else "")
+        if self.graphic is not None: self.graphic.set_values({k.rsplit("-",1)[-1]:v for k,v in self._values.items()})
         self.status.setText(f"{'DEMO · ' if self.demo else ''}{count}/{len(self.rows)} connected")
         self._controls()
 

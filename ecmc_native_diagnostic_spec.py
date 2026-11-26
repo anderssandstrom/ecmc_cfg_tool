@@ -31,6 +31,13 @@ STORAGE = (("Description","Desc","text"),("Write index","DataIdAct","number"),
            ("Elements reported","DataAct.NORD","number"))
 PLUGIN = (("Previous object","PrvObjId","number"),("Next object","NxtObjId","number"))
 
+CPP = (("Control word","CtrlWord-RB","hex"),("Status word","StatWord","hex"),
+       ("Execution divider","DivAct","number"),("Execution count","CntAct","number"),
+       ("Requested rate","RateMs-RB","ms"),("Actual rate","RateMsAct","ms"),
+       ("Requested update rate","UpdMs-RB","ms"),("Actual update rate","UpdMsAct","ms"),
+       ("Execution time","ExeMsAct","ms"),("Input copy","InMsAct","ms"),
+       ("Output copy","OutMsAct","ms"),("Total time","TotMsAct","ms"),("Debug text","DbgTxtAct","text"))
+
 def diagnostic_rows(prefix,kind,object_id=None):
     prefix = str(prefix).strip().rstrip(":")
     if not prefix:
@@ -43,6 +50,10 @@ def diagnostic_rows(prefix,kind,object_id=None):
             raise ValueError("Invalid object ID")
         base = prefix+(":PLC" if kind=="plc" else ":SM")+f"{index:02d}-"
         rows = PLC if kind=="plc" else SM
+    elif kind=="cpp_logic":
+        index=int(object_id)
+        if index<0: raise ValueError("Invalid object ID")
+        base,rows=prefix+f":CPP{index:02d}-",CPP
     elif kind in ("data_storage","plugin"):
         index=int(object_id)
         if index<0:
