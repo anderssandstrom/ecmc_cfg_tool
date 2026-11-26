@@ -5,6 +5,7 @@ import argparse
 import os
 import json
 from ecmc_caqtdm import launch_caqtdm, panel_directories
+from ecmc_hardware_panel import HardwarePanel
 from ecmc_app_launcher import script_command
 from ecmc_diagnostic_presets import axis_diagnostic_pvs
 from ecmc_settings import UiSettings
@@ -793,7 +794,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             self.statusBar().showMessage(f"No EtherCAT slaves found for {prefix}.", 5000)
             return
         rows = int(self._snapshot.get("ec_rows", "1"))
-        self._launch_generated_overview(write_hardware_overview, "EtherCATOverview", prefix, hardware, rows)
+        self._open_native_hardware(hardware, "EtherCAT Overview")
 
     def _open_command_parser(self, separate=False):
         if self.embed_tools_check.isChecked() and not separate:
@@ -1036,7 +1037,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         if not hardware:
             self.statusBar().showMessage(f"No EtherCAT hardware links found for {motor}.", 5000)
             return
-        self._launch_generated_overview(write_axis_hardware_display, "AxisHardware", prefix, motor, hardware)
+        self._open_native_hardware(hardware, f"{motor} Hardware")
 
     def _launch_generated_overview(self, write_display, name, *args):
         directory = tempfile.TemporaryDirectory(prefix="ecmc_overview_")
@@ -1064,12 +1065,14 @@ class IocNavigator(QtWidgets.QMainWindow):
         timer.start(1000)
 
     def _open_hardware_panel(self, data):
-        slave = f"{int(data['id']):03d}"
-        macro = (
-            f"SYS={self._prefix()},IOC={self._prefix()},MasterID={self._snapshot.get('master', '0')},"
-            f"SlaveID={slave},PANEL={data.get('panel', 'GenericSlave')}"
-        )
-        self._caqtdm("ecmcGenericSlaveOverview.ui", macro)
+        self._open_native_hardware([data], "EtherCAT Slave")
+
+    def _open_native_hardware(self, slaves, title):
+        panel = HardwarePanel(self._snapshot.get("prefix") or self._prefix(),
+                              self._snapshot.get("master", "0"), slaves,
+                              timeout=self.timeout, demo=self._demo,
+                              on_plot=lambda pvs: self._open_daq(pvs))
+        self._add_tool_tab(panel, title)
 
     def _open_object_panel(self, panel, data):
         item_id = int(data["id"])
