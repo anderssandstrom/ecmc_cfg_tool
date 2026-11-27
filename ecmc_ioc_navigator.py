@@ -916,7 +916,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         bases = {a.get("motor") for a in self._snapshot.get("axes",[])}
         for index in range(self.tabs.count()):
             panel = self.tabs.widget(index)
-            if getattr(panel,"base",None) in bases and hasattr(panel,"cancel_pending_motion"):
+            if (getattr(panel,"base",None) in bases or any(a.get("motor") in bases for a,_,_,_ in getattr(panel,"cards",[]))) and hasattr(panel,"cancel_pending_motion"):
                 panel.cancel_pending_motion()
         suffix = "MCU-DisableAll" if kill else "MCU-StopAll"
         if self._demo:
