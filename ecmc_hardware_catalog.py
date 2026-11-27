@@ -11,7 +11,13 @@ GENERIC = ("HWType", "PnlTyp", "Online", "Operational", "Alstate-Init",
 
 @lru_cache(maxsize=2)
 def _load_catalog(path):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    catalog = json.loads(Path(path).read_text(encoding="utf-8"))
+    if Path(path).resolve() == CATALOG.resolve():
+        extra = json.loads(CATALOG.with_name("ecmc_hardware_variants.json").read_text(encoding="utf-8"))
+        for key, signals in extra["panels"].items():
+            catalog["panels"][key] = sorted(set(catalog["panels"].get(key, [])) | set(signals))
+            catalog.setdefault("overview", {}).setdefault(key, signals)
+    return catalog
 
 def load_catalog():
     return _load_catalog(os.environ.get("ECMC_HARDWARE_CATALOG", str(CATALOG)))

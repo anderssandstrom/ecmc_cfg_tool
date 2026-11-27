@@ -96,6 +96,28 @@ def merge_database(catalog, root):
         panels[key] = sorted(existing | signals)
         # Preserve deliberately compact specialized overviews.
         overview.setdefault(key, sorted(existing or signals))
+    # EL7062_OPT loads records directly via applyTemplate, not DEFAULT_SUBS.
+    # Both channel calls are explicit in ecmcEX7062_OPT.cmd.
+    if (root / 'hardware/Beckhoff_7XXX/ecmcEX7062_OPT.cmd').is_file():
+        variant_signals = set()
+        direct = ["ecmcEX7062_OPT_common.template","ecmcEX7062_OPT_csv.template","ecmcEX7062_OPT_csp.template","ecmcEX7062_OPT_cst.template","ecmcEX7062_OPT_inputs.template","ecmcEX7062_OPT_enc2.template","ecmcEL7062_TP-chX.template","ecmcEX7062_OPT_tpDc.template","ecmcEL7062_autoTune-chX.template","ecmcEX72XX_OPT_state.template","ecmcEX7062_OPT_config.template","ecmcEX7062_OPT_supplyConfig.template"]
+        for name in direct:
+            matches = templates.get(name, [])
+            if len(matches) != 1:
+                warnings.append(f'EX7062_OPT: missing/ambiguous {name}')
+                continue
+            for ch in ('01', '02'):
+                variant_signals.update(record_suffixes(matches[0].read_text(encoding='utf-8'),
+                    {'CH_ID': ch, 'CFG_SUFFIX': '' if ch == '01' else '02'}))
+        for key in ('EX7062_OPT_diagnostics', 'EX72XX_OPT_followingError', 'EX7062_OPT_supply'):
+            for suffix in database.get(key, ()):
+                variant_signals.add(suffix)
+                if key != 'EX7062_OPT_supply' and suffix.startswith('Drv01-'):
+                    variant_signals.add('Drv02-' + suffix[6:])
+        for key in ('EX7062_OPT', 'EL7062_OPT'):
+            panels[key] = sorted(set(panels.get(key, [])) | variant_signals)
+            overview[key] = sorted(set(overview.get(key, [])) | variant_signals)
+            database[key] = variant_signals
     catalog['database'] = {k: sorted(v) for k,v in sorted(database.items())}
     catalog['database_warnings'] = warnings
     return catalog
