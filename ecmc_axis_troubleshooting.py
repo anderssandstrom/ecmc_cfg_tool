@@ -1,6 +1,6 @@
 """Compact side-by-side native axis troubleshooting and control."""
 import math
-from ecmc_compact_layout import column_count
+from ecmc_compact_layout import column_count, visible_width
 import time
 from ecmc_demo_model import DemoMotion
 from ecmc_pv_menu import bind_pv_menu
@@ -229,7 +229,7 @@ class AxisTroubleshooting(QtWidgets.QWidget):
         if self.closed or self._axis_grid is None or not self._axis_widgets:
             return
         required=max(w.minimumSizeHint().width() for w in self._axis_widgets)
-        columns=column_count(self.scroll.viewport().width()-12,len(self._axis_widgets),max(260,min(300,required)))
+        columns=column_count(visible_width(self.scroll.viewport())-12,len(self._axis_widgets),max(300,required))
         if columns==self._axis_columns:
             return
         self._axis_columns=columns
@@ -399,6 +399,7 @@ class AxisTroubleshooting(QtWidgets.QWidget):
 
     def showEvent(self,event):
         super().showEvent(event)
+        QtCore.QTimer.singleShot(0,self._reflow_axes)
         self._start()
 
     def hideEvent(self,event):

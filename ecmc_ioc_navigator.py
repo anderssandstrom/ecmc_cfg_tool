@@ -6,6 +6,7 @@ import os
 import json
 from ecmc_caqtdm import launch_caqtdm, panel_directories
 from ecmc_hardware_panel import HardwarePanel
+from ecmc_compact_layout import BoundedTabWidget
 from ecmc_hardware_trend import HardwareTrendWindow
 from ecmc_app_launcher import script_command
 from ecmc_diagnostic_presets import axis_diagnostic_pvs
@@ -298,7 +299,10 @@ class IocNavigator(QtWidgets.QMainWindow):
 
         right = QtWidgets.QWidget()
         right_layout = QtWidgets.QVBoxLayout(right)
-        self.tabs = QtWidgets.QTabWidget()
+        self.tabs = BoundedTabWidget()
+        self.tabs.setUsesScrollButtons(True)
+        self.tabs.setElideMode(QtCore.Qt.ElideNone)
+        self.tabs.tabBar().setExpanding(False)
         self.tabs.setTabsClosable(True)
         self.tabs.tabCloseRequested.connect(self._close_tool_tab)
         self.close_all_tabs_btn = QtWidgets.QPushButton("Close all tabs")
@@ -307,6 +311,9 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.tool_scroll = QtWidgets.QScrollArea()
         self.tool_scroll.setWidgetResizable(True)
         self.tool_scroll.setWidget(self.tabs)
+        self.tool_scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.tabs.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Ignored)
+        self.tabs.setMinimumSize(0,0)
         right_layout.addWidget(self.tool_scroll, 1)
         self._add_workspace_placeholder()
         workspace.addWidget(right)
@@ -345,6 +352,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._embedded_tools.append(widget)
         index = self.tabs.addTab(widget, title)
         self.tabs.setCurrentIndex(index)
+        self.tabs.setTabToolTip(index,title)
         self.statusBar().showMessage(f"Opened tab: {title}", 5000)
 
     def _add_error_tab(self, title, message):

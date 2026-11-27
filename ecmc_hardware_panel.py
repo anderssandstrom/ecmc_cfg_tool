@@ -1,6 +1,6 @@
 """Native EtherCAT process signal browser with explicit write controls."""
 import re
-from ecmc_compact_layout import column_count
+from ecmc_compact_layout import column_count, visible_width, BoundedTabWidget
 from threading import Lock
 from qt_compat import QtCore, QtWidgets
 from ecmc_epics import EpicsClient
@@ -105,7 +105,8 @@ class HardwarePanel(QtWidgets.QWidget):
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.horizontalHeader().setStretchLastSection(True)
-        self.views = QtWidgets.QTabWidget()
+        self.views = BoundedTabWidget()
+        self.views.setSizePolicy(QtWidgets.QSizePolicy.Ignored,QtWidgets.QSizePolicy.Expanding)
         self.cards = QtWidgets.QScrollArea()
         self.cards.setWidgetResizable(True)
         self.cards.viewport().installEventFilter(self)
@@ -288,6 +289,7 @@ class HardwarePanel(QtWidgets.QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         QtCore.QTimer.singleShot(0, self._scope_changed)
+        QtCore.QTimer.singleShot(0, self._reflow_channels)
 
     def hideEvent(self, event):
         super().hideEvent(event)
@@ -687,8 +689,9 @@ class HardwarePanel(QtWidgets.QWidget):
         if self._closed or self._channel_grid is None or not self._channel_widgets:
             return
         required = max(w.minimumSizeHint().width() for w in self._channel_widgets)
-        preferred = max(300, min(360, required))
-        columns = column_count(self.cards.viewport().width()-12, len(self._channel_widgets), preferred)
+        preferred = max(300, required, max(w.sizeHint().width() for w in self._channel_widgets))
+        preferred = min(540, preferred)
+        columns = column_count(visible_width(self.cards.viewport())-12, len(self._channel_widgets), preferred)
         if columns == self._channel_columns:
             return
         self._channel_columns = columns
