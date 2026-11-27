@@ -137,8 +137,10 @@ class BooleanValue(SignalValue):
         self.setMinimumSize(68, 24)
 
     def set_value(self, value):
-        self.value = boolean_value(value)
-        self.update()
+        new = boolean_value(value)
+        if new != self.value:
+            self.value = new
+            self.update()
 
     def paintEvent(self, event):
         p = QtGui.QPainter(self)
@@ -168,11 +170,12 @@ class BooleanValue(SignalValue):
 
 class AnalogValue(SignalValue):
     """Raw numerical value with a small autoscaled history; no assumed engineering range."""
-    def __init__(self, callback):
+    def __init__(self, callback, command=False):
         super().__init__("—", callback)
+        self.command = command
         self.history = []
         self.value = None
-        self.setMinimumSize(130, 38)
+        self.setMinimumSize(110, 48)
 
     def set_value(self, value):
         import math
@@ -191,8 +194,12 @@ class AnalogValue(SignalValue):
     def paintEvent(self, event):
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
-        p.setPen(self.palette().color(QtGui.QPalette.Text))
-        p.drawText(QtCore.QRectF(2, 0, self.width()-4, 18), QtCore.Qt.AlignRight,
+        p.setPen(QtGui.QColor("#26804b" if self.command else "#287bc0") if self.value is not None else self.palette().color(QtGui.QPalette.Text))
+        font = p.font()
+        font.setBold(True)
+        font.setPointSize(max(13, font.pointSize()))
+        p.setFont(font)
+        p.drawText(QtCore.QRectF(2, 0, self.width()-4, 26), QtCore.Qt.AlignRight,
                    "—" if self.value is None else f"{self.value:.9g}")
         if self._editable:
             p.drawRect(self.rect().adjusted(0, 0, -1, -1))
@@ -200,7 +207,7 @@ class AnalogValue(SignalValue):
             lo, hi = min(self.history), max(self.history)
             span = hi-lo
             points = [QtCore.QPointF(3+i*(self.width()-6)/max(1,len(self.history)-1),
-                        29 if span == 0 else 35-(v-lo)*15/span) for i,v in enumerate(self.history)]
+                        38 if span == 0 else 45-(v-lo)*15/span) for i,v in enumerate(self.history)]
             p.setPen(QtGui.QPen(QtGui.QColor("#287bc0"), 1.3))
             p.drawPolyline(QtGui.QPolygonF(points))
         p.end()
@@ -254,3 +261,26 @@ class AlarmSummary(QtWidgets.QLabel):
         title = {'fault':'FAULT','warning':'WARNING','ok':'OK','unknown':'UNKNOWN'}[severity]
         self.setText(title + ' — ' + text)
         self.setStyleSheet('QLabel { border: 1px solid '+color+'; border-left: 4px solid '+color+'; padding: 5px; font-weight: bold; }')
+
+
+def digital_pair_status(command, readback):
+    a,b = boolean_value(command),boolean_value(readback)
+    return 'Unknown' if a is None or b is None else 'Match' if a == b else 'Mismatch'
+
+
+def signal_caption(name):
+    labels = {'PosAct':'Actual position','PosAct02':'Secondary position',
+              'Spd':'Velocity command','Spd-RB':'Velocity readback',
+              'PosCmd':'Position command','PosCmd-RB':'Position readback',
+              'Trq':'Torque command','Trq-RB':'Torque readback',
+              'VelAct':'Actual velocity','TrqAct':'Actual torque',
+              'PosDiff':'Following error','ErrAlrm':'Error','WrnAlrm':'Warning',
+              'NotValid':'Encoder invalid','ExtLtchOK':'External latch ready',
+              'CLtchOK':'Counter latch ready','Value':'Value','RB':'Readback'}
+    if name in labels:
+        return labels[name]
+    if '-' in name:
+        prefix,suffix = name.split('-',1)
+        if suffix in labels:
+            return prefix+' '+labels[suffix]
+    return name
