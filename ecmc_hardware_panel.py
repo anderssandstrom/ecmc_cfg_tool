@@ -131,16 +131,23 @@ class HardwarePanel(QtWidgets.QWidget):
         buttons.addWidget(self.refresh_button)
         buttons.addWidget(self.live_check)
         self.write_enable = QtWidgets.QCheckBox("Enable simulated writes" if demo else "Enable writes")
+        self._write_protected = False
+        self.write_enable.setChecked(True)
         self.write_enable.setEnabled(True)
         self.write_enable.toggled.connect(self._update_edit_cursors)
         buttons.addWidget(self.write_enable)
         buttons.addStretch(1)
         self.write_enable.setToolTip("Arms direct single-click Boolean and controlword bit writes, which may enable motion. Numeric edits still require confirmation.")
         layout.addLayout(buttons)
-        self.selector.currentIndexChanged.connect(lambda _: self.write_enable.setChecked(False))
+        self.selector.currentIndexChanged.connect(lambda _: self.write_enable.setChecked(not self._write_protected))
         self.selector.currentIndexChanged.connect(self.refresh)
         self.views.currentChanged.connect(self._scope_changed)
         self.refresh()
+
+    def set_write_protected(self, protected):
+        self._write_protected = bool(protected)
+        self.write_enable.setChecked(not protected)
+        self._update_edit_cursors()
 
     def refresh(self, *_):
         if self._closed or self._task is not None or self._write_task is not None or self._options_task is not None:
@@ -155,7 +162,6 @@ class HardwarePanel(QtWidgets.QWidget):
         key, channels = variant(candidates)
         self._options_note = ""
         if key and not self.demo:
-            self.write_enable.setChecked(False)
             self.writable = {}
             self.commands = {}
             self.selector.setEnabled(False)
@@ -888,7 +894,7 @@ class HardwarePanel(QtWidgets.QWidget):
 
     def _can_write(self, pv):
         row = self.rows.get(pv)
-        return (not self._closed and self.isVisible() and pv in self._active_scope and self.write_enable.isChecked()
+        return (not self._closed and self.isVisible() and pv in self._active_scope and not self._write_protected and self.write_enable.isChecked()
                 and self._task is None and self._write_task is None and self._enum_task is None
                 and pv in self.writable and row is not None
                 and self.table.item(row, 2).text() in ("Read OK", "Simulated"))

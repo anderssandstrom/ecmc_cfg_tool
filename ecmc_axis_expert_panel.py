@@ -64,7 +64,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
         layout.addWidget(self.alarm_summary)
         controls = QtWidgets.QHBoxLayout()
         self.arm = QtWidgets.QCheckBox("Enable writes")
-        self.arm.setToolTip("Arms motion commands; target writes may initiate motion.")
+        self._write_protected = False
+        self.arm.setChecked(True)
+        self.arm.setToolTip("Controlled by navigator write protection when embedded.")
         self.arm.toggled.connect(self._update_controls)
         self.arm.toggled.connect(lambda on: None if on else self._release_jog())
         controls.addWidget(self.arm)
@@ -110,11 +112,20 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._rebuild()
         QtWidgets.QApplication.instance().applicationStateChanged.connect(self._jog_app_state)
 
+    def set_write_protected(self, protected):
+        self._write_protected = bool(protected)
+        if protected:
+            self._release_jog()
+            if self._position_task is not None:
+                self._position_task.cancelled.set()
+        self.arm.setChecked(not protected)
+        self._update_controls()
+
     def _rebuild(self,*_):
         self._release_jog()
         self._generation += 1
         self._stop()
-        self.arm.setChecked(False)
+        self.arm.setChecked(not self._write_protected)
         self._labels = {}
         self._encoder_homing = None
         self._encoder_overview = None
@@ -937,6 +948,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
 
     def showEvent(self,event):
         super().showEvent(event)
+        self.arm.setChecked(not self._write_protected)
         QtCore.QTimer.singleShot(0,self._start)
 
     def hideEvent(self,event):
@@ -945,7 +957,6 @@ class AxisExpertPanel(QtWidgets.QWidget):
         if self._position_task is not None:
             self._position_task.cancelled.set()
         self._generation += 1
-        self.arm.setChecked(False)
         self._stop()
         super().hideEvent(event)
 

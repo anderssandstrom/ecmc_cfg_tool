@@ -169,6 +169,11 @@ class IocNavigator(QtWidgets.QMainWindow):
         self._ssh_host = ssh_host
         self._embedded_tools = []
         self._build_ui(prefix, ssh_host, ssh_host_pv)
+        protection_bar = self.addToolBar("Widget write protection")
+        self.widget_protection = QtWidgets.QCheckBox("Write protection (axis / hardware)")
+        self.widget_protection.setToolTip("Disable writes in native axis and hardware widgets. STOP and KILL remain available.")
+        protection_bar.addWidget(self.widget_protection)
+        self.widget_protection.toggled.connect(self._apply_widget_protection)
         self._ui_settings = None if demo else UiSettings('navigator')
         if self._ui_settings is not None:
             self._ui_settings.restore_geometry(self)
@@ -319,7 +324,19 @@ class IocNavigator(QtWidgets.QMainWindow):
         placeholder.setProperty("placeholder", True)
         self.tabs.addTab(placeholder, "Workspace")
 
+    def _apply_widget_protection(self, protected):
+        for widget in self._embedded_tools:
+            setter = getattr(widget,"set_write_protected",None)
+            if setter:
+                setter(protected)
+
     def _add_tool_tab(self, widget, title):
+        if hasattr(widget,"set_write_protected"):
+            widget.set_write_protected(self.widget_protection.isChecked())
+            for name in ("arm","write_enable"):
+                control = getattr(widget,name,None)
+                if control is not None:
+                    control.hide()
         if self.tabs.count() == 1 and self.tabs.widget(0).property("placeholder"):
             old = self.tabs.widget(0)
             self.tabs.removeTab(0)
