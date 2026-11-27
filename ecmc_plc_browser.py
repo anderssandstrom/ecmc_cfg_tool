@@ -3,7 +3,7 @@ import weakref
 import re
 from concurrent.futures import ThreadPoolExecutor
 from qt_compat import QtCore, QtGui, QtWidgets
-from ecmc_plc_metadata import fetch_metadata
+from ecmc_plc_metadata import fetch_metadata, fetch_values
 
 
 class PlcHighlighter(QtGui.QSyntaxHighlighter):
@@ -25,11 +25,17 @@ class PlcBrowser(QtWidgets.QWidget):
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.future = None
         self.variables = []
+        self.values = {}
+        self._fetching_values = False
         layout = QtWidgets.QVBoxLayout(self)
         self.refresh = QtWidgets.QPushButton('Load compiled PLC source')
         self.refresh.clicked.connect(self._load)
         layout.addWidget(self.refresh)
-        self.status = QtWidgets.QLabel('Compile-time metadata only; variable values are not sampled.')
+        self.read_values = QtWidgets.QPushButton('Refresh selected variable page (up to 32)')
+        self.read_values.setEnabled(False)
+        self.read_values.clicked.connect(self._load_values)
+        layout.addWidget(self.read_values)
+        self.status = QtWidgets.QLabel('Load source, then select a variable and refresh its page.')
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.source = QtWidgets.QPlainTextEdit()
@@ -47,8 +53,8 @@ class PlcBrowser(QtWidgets.QWidget):
         self.search.setPlaceholderText('Search variable names or scope')
         self.search.textChanged.connect(self._filter)
         layout.addWidget(self.search)
-        self.table = QtWidgets.QTableWidget(0, 2)
-        self.table.setHorizontalHeaderLabels(('Scope', 'Registered variable'))
+        self.table = QtWidgets.QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(('Scope', 'Registered variable', 'Snapshot value'))
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
@@ -70,6 +76,8 @@ class PlcBrowser(QtWidgets.QWidget):
         self.refresh.setEnabled(False)
         self.source.clear()
         self.variables = []
+        self.values.clear()
+        self.read_values.setEnabled(False)
         self._filter()
         self.status.setText('Loading…')
         if self.demo:
@@ -78,8 +86,26 @@ class PlcBrowser(QtWidgets.QWidget):
             self._filter()
             self.status.setText('DEMO · compile-time metadata')
             self.refresh.setEnabled(True)
+            self.read_values.setEnabled(True)
             return
         self.future = self.executor.submit(fetch_metadata, self.prefix, self.index)
+        self.timer.start()
+
+    def _load_values(self):
+        if self.future is not None or not self.variables:
+            return
+        row = self.table.currentRow()
+        item = self.table.item(row, 0) if row >= 0 else None
+        page = int(item.data(QtCore.Qt.UserRole))//32 if item is not None else 0
+        if self.demo:
+            self.values[0] = self.values.get(0, 0)+1
+            self._filter()
+            return
+        self._fetching_values = True
+        self.refresh.setEnabled(False)
+        self.read_values.setEnabled(False)
+        self.status.setText('Requesting bounded PLC snapshot…')
+        self.future = self.executor.submit(fetch_values,self.prefix,self.index,page)
         self.timer.start()
 
     def _poll(self):
@@ -87,6 +113,11 @@ class PlcBrowser(QtWidgets.QWidget):
             return
         self.timer.stop()
         try:
+            if self._fetching_values:
+                self.values = self.future.result()
+                self._filter()
+                self.status.setText(f'{len(self.values)} values sampled in one PLC execution')
+                return
             source, self.variables = self.future.result()
             self.source.setPlainText(source)
             self._filter()
@@ -95,15 +126,21 @@ class PlcBrowser(QtWidgets.QWidget):
             self.status.setText(str(ex))
         finally:
             self.future = None
+            self._fetching_values = False
             self.refresh.setEnabled(True)
+            self.read_values.setEnabled(bool(self.variables))
 
     def _filter(self):
         query = self.search.text().casefold()
-        rows = [row for row in self.variables if query in ' '.join(row).casefold()]
+        rows = [(index,row) for index,row in enumerate(self.variables) if query in ' '.join(row).casefold()]
         self.table.setRowCount(len(rows))
-        for i, row in enumerate(rows):
+        for i, (index,row) in enumerate(rows):
             for j, value in enumerate(row):
-                self.table.setItem(i, j, QtWidgets.QTableWidgetItem(value))
+                item=QtWidgets.QTableWidgetItem(value)
+                item.setData(QtCore.Qt.UserRole,index)
+                self.table.setItem(i,j,item)
+            value=self.values.get(index)
+            self.table.setItem(i,2,QtWidgets.QTableWidgetItem('—' if value is None else format(value,'.12g')))
 
     def _selected_variable(self):
         row = self.table.currentRow()
