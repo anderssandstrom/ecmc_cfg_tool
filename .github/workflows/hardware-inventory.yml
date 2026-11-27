@@ -1,0 +1,28 @@
+name: ECMCCFG hardware inventory
+on:
+  push:
+    branches: [feature/native-hardware-diagnostics]
+    paths:
+      - 'build_hardware_catalog.py'
+      - 'ecmc_hardware_inventory.py'
+      - 'ecmc_hardware_database.py'
+      - '.github/workflows/hardware-inventory.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: anderssandstrom/ecmccfg
+          ref: b5ab819ddea57c08a74c8c74e6dc1eb78384b5a0
+          path: upstream-cfg
+      - name: Generate catalog
+        run: python build_hardware_catalog.py upstream-cfg --source "ecmccfg v11.2.1_RC1" --source-commit b5ab819ddea57c08a74c8c74e6dc1eb78384b5a0 --output generated-hardware.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-hardware-catalog
+          path: generated-hardware.json

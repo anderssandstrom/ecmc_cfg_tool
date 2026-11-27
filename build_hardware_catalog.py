@@ -1,6 +1,7 @@
 """Build hardware PV and control metadata from a local ecmccfg/qt checkout."""
 import argparse
 from ecmc_hardware_database import merge_database
+from ecmc_hardware_inventory import augment_catalog, coverage_summary
 import json
 from pathlib import Path
 import re
@@ -111,7 +112,11 @@ def extract_catalog(directory, source, source_commit=None):
     catalog = {"source": source, "panels": panels, "writable": writes,
             "overview": overview, "experts": expert_panels, "commands": command_panels,
             "source_commit": source_commit}
-    return merge_database(catalog, root) if (root / "db").is_dir() else catalog
+    if (root / "db").is_dir():
+        merge_database(catalog, root)
+    if (root / "hardware").is_dir():
+        augment_catalog(catalog, root)
+    return catalog
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
@@ -120,4 +125,6 @@ if __name__ == "__main__":
     parser.add_argument("--source-commit")
     parser.add_argument("--output", type=Path, default=Path(__file__).with_name("ecmc_hardware_catalog.json"))
     args = parser.parse_args()
-    args.output.write_text(json.dumps(extract_catalog(args.directory, args.source, args.source_commit), indent=2) + "\n", encoding="utf-8")
+    catalog = extract_catalog(args.directory, args.source, args.source_commit)
+    args.output.write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(coverage_summary(catalog), indent=2))

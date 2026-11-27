@@ -785,6 +785,32 @@
       "BO16-OpnLdAlrm",
       "BO16-OvrCurrAlrm",
       "BO16-ShrtCircAlrm"
+    ],
+    "Ex2068": [
+      "BO01",
+      "BO01-RB",
+      "BO01-OvrLoad",
+      "BO02",
+      "BO02-RB",
+      "BO02-OvrLoad",
+      "BO03",
+      "BO03-RB",
+      "BO03-OvrLoad",
+      "BO04",
+      "BO04-RB",
+      "BO04-OvrLoad",
+      "BO05",
+      "BO05-RB",
+      "BO05-OvrLoad",
+      "BO06",
+      "BO06-RB",
+      "BO06-OvrLoad",
+      "BO07",
+      "BO07-RB",
+      "BO07-OvrLoad",
+      "BO08",
+      "BO08-RB",
+      "BO08-OvrLoad"
     ]
   },
   "writable": {
@@ -898,6 +924,26 @@
       "BO14": "caToggleButton",
       "BO15": "caToggleButton",
       "BO16": "caToggleButton"
+    },
+    "EL2068": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton",
+      "BO08": "caToggleButton"
+    },
+    "Ex2068": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton",
+      "BO08": "caToggleButton"
     }
   },
   "overview": {
@@ -1443,6 +1489,32 @@
       "BO16-OpnLdAlrm",
       "BO16-OvrCurrAlrm",
       "BO16-ShrtCircAlrm"
+    ],
+    "Ex2068": [
+      "BO01",
+      "BO01-RB",
+      "BO01-OvrLoad",
+      "BO02",
+      "BO02-RB",
+      "BO02-OvrLoad",
+      "BO03",
+      "BO03-RB",
+      "BO03-OvrLoad",
+      "BO04",
+      "BO04-RB",
+      "BO04-OvrLoad",
+      "BO05",
+      "BO05-RB",
+      "BO05-OvrLoad",
+      "BO06",
+      "BO06-RB",
+      "BO06-OvrLoad",
+      "BO07",
+      "BO07-RB",
+      "BO07-OvrLoad",
+      "BO08",
+      "BO08-RB",
+      "BO08-OvrLoad"
     ]
   },
   "experts": {
