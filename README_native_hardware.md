@@ -105,3 +105,14 @@ its overview. These two failures were reproduced on the original branch head.
 ### Incident capture
 
 In IOC Navigator, discover the IOC and click **Capture incident** to save a JSON file. **Open incident** opens a read-only offline tab (including legacy snapshots). The file extends the existing discovery snapshot with health, cached health PV values and monitor ages, IOC-scoped transition history and bounded samples from already-open hardware trends. Discovery includes versions as of last refresh. No additional CA requests, SDO reads or ECMC changes are made during capture. Values are asynchronous, not an RT snapshot. Demo captures are marked. The viewer initially presents read-only JSON sections; graphical replay and automatic triggering are not yet supported. Navigator health monitors now use the shared read-only pool.
+
+## Database-derived hardware catalogue
+
+Generate a catalogue from a local ECMCCFG checkout (the root or its qt directory):
+
+```sh
+python build_hardware_catalog.py /path/to/ecmccfg --source v11.2.1_RC1 --source-commit YOUR_COMMIT --output /tmp/ecmc-hardware.json
+export ECMC_HARDWARE_CATALOG=/tmp/ecmc-hardware.json
+```
+
+The generator merges explicit database substitution rows and resolvable record names with Qt panels. Database-only signals are read-only and missing PVs remain unavailable. Unresolved macros and missing/ambiguous templates are not guessed; inspect database_warnings in the generated JSON. This does not enumerate raw PDOs or guarantee coverage of dynamically loaded databases. The bundled legacy catalogue remains the default until regenerated. Restart the application after changing the catalogue.

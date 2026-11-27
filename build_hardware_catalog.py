@@ -1,5 +1,6 @@
 """Build hardware PV and control metadata from a local ecmccfg/qt checkout."""
 import argparse
+from ecmc_hardware_database import merge_database
 import json
 from pathlib import Path
 import re
@@ -23,6 +24,10 @@ def macros(text, env):
 WRITE_WIDGETS = {"caTextEntry", "caToggleButton", "caMenu", "caByteController", "caNumeric", "caSpinbox"}
 
 def extract_catalog(directory, source, source_commit=None):
+    directory = Path(directory)
+    root = directory if (directory / "db").is_dir() else directory.parent
+    if (directory / "qt").is_dir():
+        directory = directory / "qt"
     roots = {p.name: ET.parse(p).getroot() for p in sorted(Path(directory).glob("*.ui"))}
     def collect(name, env, trail, out, writable, experts, commands, scope=None, ancestry=()):
         if name not in roots or name in trail or len(trail) > 15:
@@ -103,9 +108,10 @@ def extract_catalog(directory, source, source_commit=None):
                         for suffix in ('Cmd', 'Stat', 'Spd', 'Cmd-RB', 'TrgDS402Ena', 'TrgDS402Dis')}
         overview[key] = sorted(main['signals'] | (promoted & out))
         expert_panels[key] = [dict(e, signals=sorted(e['signals'])) for e in experts.values() if e['signals']]
-    return {"source": source, "panels": panels, "writable": writes,
+    catalog = {"source": source, "panels": panels, "writable": writes,
             "overview": overview, "experts": expert_panels, "commands": command_panels,
             "source_commit": source_commit}
+    return merge_database(catalog, root) if (root / "db").is_dir() else catalog
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)

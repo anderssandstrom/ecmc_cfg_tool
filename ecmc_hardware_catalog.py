@@ -1,5 +1,7 @@
 """Read-only hardware PV catalog, independent of caQtDM at runtime."""
 import json
+import os
+from functools import lru_cache
 from pathlib import Path
 import re
 
@@ -7,16 +9,22 @@ CATALOG = Path(__file__).with_name("ecmc_hardware_catalog.json")
 GENERIC = ("HWType", "PnlTyp", "Online", "Operational", "Alstate-Init",
            "Alstate-Preop", "Alstate-Safeop", "Alstate-Op")
 
+@lru_cache(maxsize=2)
+def _load_catalog(path):
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+def load_catalog():
+    return _load_catalog(os.environ.get("ECMC_HARDWARE_CATALOG", str(CATALOG)))
+
 def hardware_pvs(prefix, master, slave, candidates, catalog=None):
     if catalog is None:
-        catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
+        catalog = load_catalog()
     panels = catalog["panels"]
     suffixes = list(GENERIC)
     for candidate in candidates:
         key = str(candidate or "").removesuffix(".ui").removeprefix("ecmc")
         if key in panels:
             suffixes.extend(panels[key])
-            break
     base = f"{prefix.rstrip(':')}:m{int(master)}s{int(slave):03d}"
     return [(s, f"{base}-{s}") for s in dict.fromkeys(suffixes)
             if re.fullmatch(r"[A-Za-z0-9_.:-]+", s)]
@@ -24,7 +32,7 @@ def hardware_pvs(prefix, master, slave, candidates, catalog=None):
 def hardware_writable_pvs(prefix, master, slave, candidates, catalog=None):
     """Only channels explicitly associated with supported write widgets."""
     if catalog is None:
-        catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
+        catalog = load_catalog()
     base = f"{prefix.rstrip(':')}:m{int(master)}s{int(slave):03d}"
     for candidate in candidates:
         key = str(candidate or "").removesuffix(".ui").removeprefix("ecmc")
@@ -38,7 +46,7 @@ def hardware_writable_pvs(prefix, master, slave, candidates, catalog=None):
 def hardware_views(prefix, master, slave, candidates, catalog=None):
     """Overview and expert groups with resolved PVs; legacy catalogs still work."""
     if catalog is None:
-        catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
+        catalog = load_catalog()
     pairs = hardware_pvs(prefix, master, slave, candidates, catalog)
     by_name = dict(pairs)
     for candidate in candidates:
@@ -60,7 +68,7 @@ def hardware_views(prefix, master, slave, candidates, catalog=None):
 
 def hardware_commands(prefix, master, slave, candidates, catalog=None):
     if catalog is None:
-        catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
+        catalog = load_catalog()
     base = f"{prefix.rstrip(':')}:m{int(master)}s{int(slave):03d}"
     for candidate in candidates:
         key = str(candidate or "").removesuffix(".ui").removeprefix("ecmc")
