@@ -4,6 +4,7 @@ from threading import Lock
 from qt_compat import QtCore, QtWidgets
 from ecmc_epics import EpicsClient
 from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_views, hardware_commands
+from ecmc_hardware_options import variant, read_options, allowed_signal
 from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
 from ecmc_hardware_widgets import HardwareSymbol, SignalValue, WordValue, BooleanValue, BooleanStatus, AnalogValue, boolean_value, signal_role
@@ -36,11 +37,27 @@ class ReadTask(QtCore.QRunnable):
         self.signals.finished.emit(result)
 
 
+class OptionsTask(QtCore.QRunnable):
+    def __init__(self, base, key, channels, timeout):
+        super().__init__()
+        self.args = base, key, channels, timeout
+        self.signals = ReadSignals()
+
+    def run(self):
+        try:
+            result = read_options(*self.args)
+        except Exception:
+            result = {}, "configuration unavailable"
+        self.signals.finished.emit(result)
+
+
 class HardwarePanel(QtWidgets.QWidget):
     def __init__(self, prefix, master, slaves, timeout=1.0, demo=False, on_plot=None):
         super().__init__()
         self.timeout, self.demo, self.on_plot = timeout, demo, on_plot
         self._task = None
+        self._options_task = None
+        self._options_note = ""
         self._closed = False
         self._write_task = None
         self.writable = {}
@@ -124,7 +141,7 @@ class HardwarePanel(QtWidgets.QWidget):
         self.refresh()
 
     def refresh(self, *_):
-        if self._closed or self._task is not None or self._write_task is not None:
+        if self._closed or self._task is not None or self._write_task is not None or self._options_task is not None:
             return
         slave = self.selector.currentData()
         if not slave:
@@ -132,9 +149,50 @@ class HardwarePanel(QtWidgets.QWidget):
         self._stop_monitors()
         self._scope_initialized = False
         candidates = slave.get("panels") or [slave.get("panel"), slave.get("name")]
+        candidates = list(candidates) + [slave.get("panel"), slave.get("name")]
+        key, channels = variant(candidates)
+        self._options_note = ""
+        if key and not self.demo:
+            self.write_enable.setChecked(False)
+            self.writable = {}
+            self.commands = {}
+            self.selector.setEnabled(False)
+            self.refresh_button.setEnabled(False)
+            self.live_check.setEnabled(False)
+            self.status.setText("Reading hardware configuration…")
+            base = f"{self.prefix.rstrip(':')}:m{int(slave.get('master', self.master))}s{int(slave['id']):03d}-"
+            self._options_task = OptionsTask(base, key, channels, min(self.timeout, 1.0))
+            self._options_task.signals.finished.connect(self._options_finished)
+            QtCore.QThreadPool.globalInstance().start(self._options_task)
+            return
+        self._build_panel(slave, candidates, key, channels, {})
+
+    def _options_finished(self, result):
+        self._options_task = None
+        if self._closed:
+            return
+        self.selector.setEnabled(True)
+        self.refresh_button.setEnabled(True)
+        self.live_check.setEnabled(True)
+        slave = self.selector.currentData()
+        candidates = list(slave.get("panels") or []) + [slave.get("panel"), slave.get("name")]
+        key, channels = variant(candidates)
+        opts, source = result
+        self._options_note = " | " + source
+        self._build_panel(slave, candidates, key, channels, opts)
+
+    def _build_panel(self, slave, candidates, key, channels, opts):
+        if key:
+            candidates = [key]
         pairs = hardware_pvs(self.prefix, slave.get("master", self.master), slave["id"], candidates)
+        if key and not self.demo:
+            from ecmc_hardware_catalog import GENERIC
+            pairs = [(s,pv) for s,pv in pairs if s in GENERIC or allowed_signal(s,key,channels,opts)]
         self.writable = hardware_writable_pvs(self.prefix, slave.get("master", self.master), slave["id"], candidates)
         self.commands = hardware_commands(self.prefix, slave.get('master', self.master), slave['id'], candidates)
+        if key:
+            self.writable = {}
+            self.commands = {}
         for pv in self.commands:
             self.writable.setdefault(pv, 'caMessageButton')
         self.table.setRowCount(len(pairs))
@@ -145,6 +203,9 @@ class HardwarePanel(QtWidgets.QWidget):
                 self.table.setItem(row, col, QtWidgets.QTableWidgetItem(value))
         self.table.resizeColumnsToContents()
         overview, experts = hardware_views(self.prefix, slave.get('master', self.master), slave['id'], candidates)
+        if key and not self.demo:
+            overview = [(s,pv) for s,pv in overview if pv in self.rows]
+            experts = [(name, [(s,pv) for s,pv in rows if pv in self.rows]) for name,rows in experts]
         self._overview_pvs = {pv for _, pv in overview}
         self._expert_pvs = [{pv for _, pv in pairs} for _, pairs in experts]
         self.build_cards(overview)
@@ -274,7 +335,7 @@ class HardwarePanel(QtWidgets.QWidget):
                 continue
             self._apply_value(pv, value, error)
         if self._write_task is None:
-            self.status.setText(f"Live CA monitoring — {connected}/{len(self._monitors)} connected | {len(self._monitors)} subscriptions")
+            self.status.setText(f"Live CA monitoring — {connected}/{len(self._monitors)} connected | {len(self._monitors)} subscriptions" + self._options_note)
         if pending:
             self._update_edit_cursors()
 
@@ -317,7 +378,7 @@ class HardwarePanel(QtWidgets.QWidget):
         for pv, value, error in results:
             self._apply_value(pv, value, error)
             available += value is not None
-        self.status.setText(f"{available}/{len(results)} visible PVs read (snapshot)")
+        self.status.setText(f"{available}/{len(results)} visible PVs read (snapshot)" + self._options_note)
         self._update_edit_cursors()
 
     def _bind(self, widget, pv):
