@@ -62,6 +62,9 @@ class HardwareDemo:
             return self.overrides[pv]
         name = pv.split("-", 1)[-1]
         t = time.monotonic() - self.started
+        if name.endswith("-Arr") and re.match(r"(AI|AO|Enc)\d+", name):
+            channel=int(re.search(r"\d+",name).group())
+            return [int(12000*math.sin(2*math.pi*i/32+t+channel)) for i in range(64)]
         if name == "HWType":
             return hardware
         if name == "PnlTyp":

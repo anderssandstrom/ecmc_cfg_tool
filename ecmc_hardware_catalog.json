@@ -349,7 +349,8 @@
       "Enc01-Cmd-RB",
       "Enc01-PosCmd",
       "Enc01-PosCmd-RB",
-      "Enc01-Time"
+      "Enc01-Time",
+      "Enc01-PosAct-Arr"
     ],
     "EL4132": [
       "AO01",
@@ -360,7 +361,9 @@
     "EL4732": [
       "AO01-CycCnt",
       "AO02-CycCnt",
-      "Dev-NxtTime"
+      "Dev-NxtTime",
+      "AO01-Arr",
+      "AO02-Arr"
     ],
     "EL2068": [
       "BO01",
@@ -586,7 +589,11 @@
       "AI04-Ctrl-RB",
       "AI01-Time_l32",
       "AI01-Time_u32",
-      "AI01-Time"
+      "AI01-Time",
+      "AI01-Arr",
+      "AI02-Arr",
+      "AI03-Arr",
+      "AI04-Arr"
     ],
     "EL7037": [
       "Drv01-Cmd-RB",
@@ -624,6 +631,46 @@
       "Enc01-Cmd-RB",
       "Enc01-PosCmd",
       "Enc01-PosCmd-RB"
+    ],
+    "ELM3504": [
+      "AI01-Arr",
+      "AI01-Stat",
+      "AI01-UndrLimAlrm",
+      "AI01-OvrLimAlrm",
+      "AI01-ErrAlrm",
+      "AI01-Ctrl",
+      "AI01-Ctrl-RB",
+      "AI02-Arr",
+      "AI02-Stat",
+      "AI02-UndrLimAlrm",
+      "AI02-OvrLimAlrm",
+      "AI02-ErrAlrm",
+      "AI02-Ctrl",
+      "AI02-Ctrl-RB",
+      "AI03-Arr",
+      "AI03-Stat",
+      "AI03-UndrLimAlrm",
+      "AI03-OvrLimAlrm",
+      "AI03-ErrAlrm",
+      "AI03-Ctrl",
+      "AI03-Ctrl-RB",
+      "AI04-Arr",
+      "AI04-Stat",
+      "AI04-UndrLimAlrm",
+      "AI04-OvrLimAlrm",
+      "AI04-ErrAlrm",
+      "AI04-Ctrl",
+      "AI04-Ctrl-RB"
+    ],
+    "EL3702": [
+      "AI01-Arr",
+      "AI02-Arr",
+      "Dev-NxtTime"
+    ],
+    "EL3751": [
+      "AI01-Arr",
+      "AI01-Ctrl",
+      "AI01-Ctrl-RB"
     ]
   },
   "writable": {
@@ -810,7 +857,8 @@
       "Enc01-Cmd-RB",
       "Enc01-PosCmd",
       "Enc01-PosCmd-RB",
-      "Enc01-Time"
+      "Enc01-Time",
+      "Enc01-PosAct-Arr"
     ],
     "EL4132": [
       "AO01",
@@ -821,7 +869,9 @@
     "EL4732": [
       "AO01-CycCnt",
       "AO02-CycCnt",
-      "Dev-NxtTime"
+      "Dev-NxtTime",
+      "AO01-Arr",
+      "AO02-Arr"
     ],
     "EL2068": [
       "BO01",
@@ -1047,7 +1097,11 @@
       "AI04-Ctrl-RB",
       "AI01-Time_l32",
       "AI01-Time_u32",
-      "AI01-Time"
+      "AI01-Time",
+      "AI01-Arr",
+      "AI02-Arr",
+      "AI03-Arr",
+      "AI04-Arr"
     ],
     "EL7037": [
       "Drv01-Cmd-RB",
@@ -1085,6 +1139,46 @@
       "Enc01-Cmd-RB",
       "Enc01-PosCmd",
       "Enc01-PosCmd-RB"
+    ],
+    "ELM3504": [
+      "AI01-Arr",
+      "AI01-Stat",
+      "AI01-UndrLimAlrm",
+      "AI01-OvrLimAlrm",
+      "AI01-ErrAlrm",
+      "AI01-Ctrl",
+      "AI01-Ctrl-RB",
+      "AI02-Arr",
+      "AI02-Stat",
+      "AI02-UndrLimAlrm",
+      "AI02-OvrLimAlrm",
+      "AI02-ErrAlrm",
+      "AI02-Ctrl",
+      "AI02-Ctrl-RB",
+      "AI03-Arr",
+      "AI03-Stat",
+      "AI03-UndrLimAlrm",
+      "AI03-OvrLimAlrm",
+      "AI03-ErrAlrm",
+      "AI03-Ctrl",
+      "AI03-Ctrl-RB",
+      "AI04-Arr",
+      "AI04-Stat",
+      "AI04-UndrLimAlrm",
+      "AI04-OvrLimAlrm",
+      "AI04-ErrAlrm",
+      "AI04-Ctrl",
+      "AI04-Ctrl-RB"
+    ],
+    "EL3702": [
+      "AI01-Arr",
+      "AI02-Arr",
+      "Dev-NxtTime"
+    ],
+    "EL3751": [
+      "AI01-Arr",
+      "AI01-Ctrl",
+      "AI01-Ctrl-RB"
     ]
   },
   "experts": {
@@ -1395,7 +1489,8 @@
       "Enc01-Cmd-RB",
       "Enc01-PosCmd",
       "Enc01-PosCmd-RB",
-      "Enc01-Time"
+      "Enc01-Time",
+      "Enc01-PosAct-Arr"
     ],
     "EL4132": [
       "AO01",
@@ -1406,7 +1501,9 @@
     "EL4732": [
       "AO01-CycCnt",
       "AO02-CycCnt",
-      "Dev-NxtTime"
+      "Dev-NxtTime",
+      "AO01-Arr",
+      "AO02-Arr"
     ],
     "EL2068": [
       "BO01",
@@ -1632,7 +1729,11 @@
       "AI04-Ctrl-RB",
       "AI01-Time_l32",
       "AI01-Time_u32",
-      "AI01-Time"
+      "AI01-Time",
+      "AI01-Arr",
+      "AI02-Arr",
+      "AI03-Arr",
+      "AI04-Arr"
     ],
     "EL7037": [
       "Drv01-Cmd-RB",
@@ -1670,6 +1771,46 @@
       "Enc01-Cmd-RB",
       "Enc01-PosCmd",
       "Enc01-PosCmd-RB"
+    ],
+    "ELM3504": [
+      "AI01-Arr",
+      "AI01-Stat",
+      "AI01-UndrLimAlrm",
+      "AI01-OvrLimAlrm",
+      "AI01-ErrAlrm",
+      "AI01-Ctrl",
+      "AI01-Ctrl-RB",
+      "AI02-Arr",
+      "AI02-Stat",
+      "AI02-UndrLimAlrm",
+      "AI02-OvrLimAlrm",
+      "AI02-ErrAlrm",
+      "AI02-Ctrl",
+      "AI02-Ctrl-RB",
+      "AI03-Arr",
+      "AI03-Stat",
+      "AI03-UndrLimAlrm",
+      "AI03-OvrLimAlrm",
+      "AI03-ErrAlrm",
+      "AI03-Ctrl",
+      "AI03-Ctrl-RB",
+      "AI04-Arr",
+      "AI04-Stat",
+      "AI04-UndrLimAlrm",
+      "AI04-OvrLimAlrm",
+      "AI04-ErrAlrm",
+      "AI04-Ctrl",
+      "AI04-Ctrl-RB"
+    ],
+    "EL3702": [
+      "AI01-Arr",
+      "AI02-Arr",
+      "Dev-NxtTime"
+    ],
+    "EL3751": [
+      "AI01-Arr",
+      "AI01-Ctrl",
+      "AI01-Ctrl-RB"
     ]
   },
   "database_expansion_source_commit": "b5ab819ddea57c08a74c8c74e6dc1eb78384b5a0"

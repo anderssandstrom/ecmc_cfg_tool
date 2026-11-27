@@ -7,6 +7,7 @@ from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_
 from ecmc_hardware_options import variant, read_options, allowed_signal, demo_options, overview_signal
 from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
+from ecmc_waveform_widget import WaveformValue, waveform_summary
 from ecmc_hardware_widgets import HardwareSymbol, SignalValue, WordValue, BooleanValue, BooleanStatus, AnalogValue, boolean_value, signal_role, AlarmSummary, signal_caption, digital_pair_status
 from ecmc_ds402_widget import DS402Status, DS402Word, DS402StateMap, controlword_dialog
 from ecmc_ds402 import word_number
@@ -391,10 +392,12 @@ class HardwarePanel(QtWidgets.QWidget):
         row = self.rows.get(pv)
         if row is None or pv not in self._active_scope:
             return
-        text = str(value) if value is not None else "—"
+        is_waveform = pv.endswith("-Arr")
+        summary = waveform_summary(value) if is_waveform else None
+        text = (f"{summary[0]} samples · last {summary[1]:.6g}" if summary else "—") if is_waveform else str(value) if value is not None else "—"
         state = "Simulated" if simulated else "Read OK" if value is not None else "Unavailable"
         item = self.table.item(row, 2)
-        if self.table.item(row, 1).text() == text and item.text() == state and item.toolTip() == error:
+        if not is_waveform and self.table.item(row, 1).text() == text and item.text() == state and item.toolTip() == error:
             return
         self.table.item(row, 1).setText(text)
         item.setText(state)
@@ -453,7 +456,9 @@ class HardwarePanel(QtWidgets.QWidget):
         candidates = slave.get('panels') or [panel, slave.get('name', '')]
         known_word = any(str(c).removeprefix('ecmc').removesuffix('.ui') == 'EL70x1' for c in candidates) and name in ('Drv01-Cmd', 'Drv01-Stat')
         kind = self.writable.get(pv)
-        if kind == 'caToggleButton':
+        if name.endswith('-Arr'):
+            value = WaveformValue()
+        elif kind == 'caToggleButton':
             value = BooleanValue(lambda old, new, pv=pv: self._direct_boolean(pv, old, new))
         elif kind is None and (re.search(r'(?:^|-)(BI|BO)\d+(-RB)?$', name) or name.endswith(('Alrm','Rdy','RdyStat','RdyToEna','EnaAct','EnaCmd-RB'))):
             alarm = name.endswith('Alrm')
@@ -465,8 +470,9 @@ class HardwarePanel(QtWidgets.QWidget):
                               bit_callback=(lambda old, bit, pv=pv: self._direct_bit(pv, old, bit)) if kind == 'caByteController' and name.endswith('-Cmd') else None)
         else:
             value = SignalValue("—", lambda pv=pv: self._click_write(pv))
-        value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-        if primary:
+        if not isinstance(value, WaveformValue):
+            value.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        if primary and not isinstance(value, WaveformValue):
             font = value.font()
             font.setPointSize(max(13, font.pointSize() + 4))
             font.setBold(True)
@@ -693,10 +699,10 @@ class HardwarePanel(QtWidgets.QWidget):
         grid = QtWidgets.QGridLayout(root)
         grid.setContentsMargins(0, 0, 0, 0)
         measurements = [(name, pv, short) for name,pv,short in rows
-                        if re.fullmatch(r'(AI|AO)\d+(-RB)?', name)]
+                        if re.fullmatch(r'(AI|AO)\d+(-RB|-Arr)?', name)]
         for i,(name,pv,short) in enumerate(measurements):
             column = i
-            caption = 'Input value' if kind == 'AI' else 'Command' if not name.endswith('-RB') else 'Readback'
+            caption = 'Output samples (command)' if name.endswith('-Arr') and kind=='AO' else 'Input samples' if name.endswith('-Arr') else 'Input value' if kind == 'AI' else 'Command' if not name.endswith('-RB') else 'Readback'
             title = QtWidgets.QLabel(caption)
             self._bind(title,pv)
             grid.addWidget(title,0,column)
@@ -815,6 +821,9 @@ class HardwarePanel(QtWidgets.QWidget):
             return
         for name, label in self.card_values[pv]:
             label.setToolTip(pv + ("\n" + error if error else ""))
+            if isinstance(label, WaveformValue):
+                label.set_value(value)
+                continue
             if isinstance(label, AnalogValue):
                 label.set_value(value)
                 label.setToolTip(pv + '\nRaw PV value; history autoscaled (not time calibrated)' + ('\n' + error if error else ''))
@@ -858,12 +867,15 @@ class HardwarePanel(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         trend = menu.addAction("Trend PV")
         row = self.rows.get(pv)
-        trend.setEnabled((self.demo or self.on_plot is not None) and row is not None
+        trend.setEnabled(not pv.endswith("-Arr") and (self.demo or self.on_plot is not None) and row is not None
                          and self.table.item(row, 2).text() in ("Read OK", "Simulated"))
         trend.triggered.connect(lambda: self._trend_pv(pv))
         add = menu.addAction("Add to existing trend…")
         add.setEnabled(trend.isEnabled() and self.on_plot is not None)
         add.triggered.connect(lambda: self._trend_pv(pv, add=True))
+        if pv.endswith("-Arr"):
+            action = menu.addAction("Inspect waveform in panel")
+            action.triggered.connect(lambda: self.views.setCurrentWidget(self.cards))
         if pv in self.commands:
             command = menu.addAction(self.commands[pv]["label"])
             command.setEnabled(self._can_write(pv))
