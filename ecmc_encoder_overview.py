@@ -1,6 +1,6 @@
 """Read-only simultaneous native encoder diagnostics."""
 import math
-from qt_compat import QtCore, QtWidgets
+from qt_compat import QtCore, QtGui, QtWidgets
 from ecmc_axis_diagnostics import format_axis_value
 
 FIELDS=("PosAct","VelAct","Homed","Absolute","Ready","ErrId")
@@ -32,10 +32,14 @@ class EncoderOverview(QtWidgets.QWidget):
         row.addWidget(self.apply)
         layout.addLayout(row)
         self.table=QtWidgets.QTableWidget(0,9)
-        self.table.setHorizontalHeaderLabels(("Encoder","Position","Δ primary","Velocity","Homed","Absolute","Ready","Error","Trend"))
+        self.table.setHorizontalHeaderLabels(("Encoder","Actual position","Δ primary","Velocity","Homed","Absolute","Ready","Error","Trend"))
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.verticalHeader().hide()
-        self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Interactive)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setAlternatingRowColors(True)
+        for col,width in enumerate((85,120,100,100,65,70,65,90,80)):
+            self.table.setColumnWidth(col,width)
         layout.addWidget(self.table)
         trends = QtWidgets.QHBoxLayout()
         self.trend_positions = QtWidgets.QPushButton("Trend all positions")
@@ -157,10 +161,25 @@ class EncoderOverview(QtWidgets.QWidget):
             except (ValueError,TypeError,OverflowError): values.append("—")
             for col,value in enumerate(values):
                 item=self.table.item(i-1,col)
-                item.setText(format_axis_value(value))
+                text = format_axis_value(value)
+                if item.text() != text:
+                    item.setText(text)
                 font=item.font()
-                font.setBold(i==self.primary)
-                item.setFont(font)
+                bold = (col == 0 and i==self.primary) or col in (1,7)
+                if font.bold() != bold:
+                    font.setBold(bold)
+                    item.setFont(font)
+                if col in (1,2,3):
+                    item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+                color = None
+                if col == 1:
+                    color = '#287bc0'
+                elif col == 7:
+                    color = '#89939e' if text == '—' else '#26804b' if text == '0x0' else '#c43c3c'
+                elif col in (4,6):
+                    color = '#26804b' if text == 'Yes' else '#b7791f' if text == 'No' else '#89939e'
+                if color and item.foreground().color() != QtGui.QColor(color):
+                    item.setForeground(QtGui.QColor(color))
 
     def showEvent(self,event):
         super().showEvent(event)

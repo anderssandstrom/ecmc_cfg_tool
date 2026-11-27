@@ -5,6 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from qt_compat import QtCore, QtGui, QtWidgets
 from ecmc_plc_metadata import fetch_metadata, fetch_values, registered_index_at
+from ecmc_plc_demo import demo_program, demo_snapshot
 
 
 class PlcHighlighter(QtGui.QSyntaxHighlighter):
@@ -104,8 +105,9 @@ class PlcBrowser(QtWidgets.QWidget):
         self._filter()
         self.status.setText('Loading…')
         if self.demo:
-            self.source.setPlainText('// DEMO compiled source\nvar counter := 0;\ncounter := counter + 1;')
-            self.variables = [('Local', 'counter')]
+            source, self.variables = demo_program()
+            self._demo_started = time.monotonic()
+            self.source.setPlainText(source)
             self._filter()
             self.status.setText('DEMO · compile-time metadata')
             self.refresh.setEnabled(True)
@@ -204,8 +206,7 @@ class PlcBrowser(QtWidgets.QWidget):
 
     def _queue_page(self, page):
         if self.demo:
-            for i in range(page*32, min((page+1)*32, len(self.variables))):
-                self.values[i] = self.values.get(i, 0)+1
+            self.values.update(demo_snapshot(self.variables,page,time.monotonic()-self._demo_started))
             self.page_times[page] = time.monotonic()
             self._filter()
             self._show_hover()

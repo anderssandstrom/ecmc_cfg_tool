@@ -146,6 +146,25 @@ class AxisExpertPanel(QtWidgets.QWidget):
             overview_row.addWidget(icon)
         overview_row.addStretch()
         layout.addLayout(overview_row)
+        self.position_summary = QtWidgets.QWidget()
+        summary_grid = QtWidgets.QGridLayout(self.position_summary)
+        summary_grid.setContentsMargins(4,2,4,2)
+        self._summary_values = {}
+        summary_fields = (('Actual position','-PosAct'),('Target position','-TgtPosCmd'),('Actual velocity','-VelAct'),('Following error','-PosErr')) if native else (('Actual position','.RBV'),('Requested position','.VAL'),('Velocity setting','.VELO'))
+        for i,(caption,suffix) in enumerate(summary_fields):
+            label = QtWidgets.QLabel(caption)
+            value = QtWidgets.QLabel('—')
+            font = value.font()
+            font.setPointSize(max(15,font.pointSize()+4) if i<2 else max(11,font.pointSize()))
+            font.setBold(True)
+            value.setFont(font)
+            if i<2:
+                value.setStyleSheet('color: '+('#287bc0' if i==0 else '#26804b'))
+            summary_grid.addWidget(label,0,i)
+            summary_grid.addWidget(value,1,i)
+            summary_grid.setColumnStretch(i,1)
+            self._summary_values[suffix] = value
+        layout.addWidget(self.position_summary)
         layout.addWidget(self._overview)
         command = QtWidgets.QGroupBox("Move")
         command_grid = QtWidgets.QGridLayout(command)
@@ -812,6 +831,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
             self._overview.set_values({})
             self._overview.set_armed(False)
             self._overview.set_pending(None)
+        for label in getattr(self,"_summary_values",{}).values():
+            label.setText("—")
         for icon in self._status_icons + self._msta_icons:
             icon.set_values({})
         if hasattr(self,"enable_button"): self.enable_button.set_value(None)
@@ -899,6 +920,10 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._readiness.update_samples(samples)
         self.alarm_summary.set_summary(*axis_alarm_summary(samples, self.interface.currentData() == 'native'))
         self._overview.set_values(samples)
+        for suffix,label in self._summary_values.items():
+            text = format_axis_value(samples.get(suffix),self._precision)
+            if label.text()!=text:
+                label.setText(text)
         samples.update({"msta:"+label: bit for label,bit in decode_msta(samples.get(".MSTA")).items()})
         for icon in self._status_icons + self._msta_icons:
             icon.set_values(samples)

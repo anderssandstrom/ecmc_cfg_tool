@@ -22,8 +22,9 @@ class AxisPositionBar(QtWidgets.QWidget):
         self.setToolTip("Click track to stage an absolute target. Click a limit number to edit it. Move executes the target.")
 
     def set_values(self,values):
-        self.values = values
-        self.update()
+        if self.values != values:
+            self.values = dict(values)
+            self.update()
 
     def set_armed(self,armed):
         if self.armed != bool(armed):
@@ -117,6 +118,9 @@ class AxisStatusIcon(QtWidgets.QLabel):
         text=f"{self.glyph} {self.caption}"
         if active is None:
             text+=" ?"
-        self.setText(text)
-        self.setStyleSheet(f"color: {color};")
+        if self.text()!=text:
+            self.setText(text)
+        style=f"color: {color};"
+        if self.styleSheet()!=style:
+            self.setStyleSheet(style)
         self.setToolTip(f"{self.caption}: {'unavailable' if active is None else 'active' if active else 'inactive'}")
