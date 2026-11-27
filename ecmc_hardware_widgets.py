@@ -40,6 +40,8 @@ class SignalValue(QtWidgets.QLabel):
         self._editable = False
 
     def set_editable(self, enabled):
+        if self._editable == enabled:
+            return
         self._editable = enabled
         self.setFrameShape(QtWidgets.QFrame.Box if enabled else QtWidgets.QFrame.NoFrame)
         self.setFrameShadow(QtWidgets.QFrame.Plain)

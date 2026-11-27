@@ -4,7 +4,7 @@ from threading import Lock
 from qt_compat import QtCore, QtWidgets
 from ecmc_epics import EpicsClient
 from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_views, hardware_commands
-from ecmc_hardware_options import variant, read_options, allowed_signal
+from ecmc_hardware_options import variant, read_options, allowed_signal, demo_options, overview_signal
 from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
 from ecmc_hardware_widgets import HardwareSymbol, SignalValue, WordValue, BooleanValue, BooleanStatus, AnalogValue, boolean_value, signal_role
@@ -58,6 +58,8 @@ class HardwarePanel(QtWidgets.QWidget):
         self._task = None
         self._options_task = None
         self._options_note = ""
+        self._expert_definitions = []
+        self._expert_built = False
         self._closed = False
         self._write_task = None
         self.writable = {}
@@ -75,11 +77,11 @@ class HardwarePanel(QtWidgets.QWidget):
         self._monitor_pending = {}
         self._monitor_connected = {}
         self._monitor_timer = QtCore.QTimer(self)
-        self._monitor_timer.setInterval(100)
+        self._monitor_timer.setInterval(250)
         self._monitor_timer.timeout.connect(self._monitor_tick)
         self._demo_model = HardwareDemo() if demo else None
         self._demo_timer = QtCore.QTimer(self)
-        self._demo_timer.setInterval(100)
+        self._demo_timer.setInterval(250)
         self._demo_timer.timeout.connect(self._demo_tick)
         layout = QtWidgets.QVBoxLayout(self)
         self.selector = QtWidgets.QComboBox()
@@ -125,7 +127,7 @@ class HardwarePanel(QtWidgets.QWidget):
         self.live_check = QtWidgets.QCheckBox('Live')
         self.live_check.setChecked(True)
         self.live_check.setEnabled(not demo)
-        self.live_check.toggled.connect(self.refresh)
+        self.live_check.toggled.connect(lambda: self._scope_changed(force=True))
         buttons.addWidget(self.refresh_button)
         buttons.addWidget(self.live_check)
         self.write_enable = QtWidgets.QCheckBox("Enable simulated writes" if demo else "Enable writes")
@@ -165,7 +167,7 @@ class HardwarePanel(QtWidgets.QWidget):
             self._options_task.signals.finished.connect(self._options_finished)
             QtCore.QThreadPool.globalInstance().start(self._options_task)
             return
-        self._build_panel(slave, candidates, key, channels, {})
+        self._build_panel(slave, candidates, key, channels, demo_options(key, channels) if key and self.demo else {})
 
     def _options_finished(self, result):
         self._options_task = None
@@ -185,7 +187,7 @@ class HardwarePanel(QtWidgets.QWidget):
         if key:
             candidates = [key]
         pairs = hardware_pvs(self.prefix, slave.get("master", self.master), slave["id"], candidates)
-        if key and not self.demo:
+        if key:
             from ecmc_hardware_catalog import GENERIC
             pairs = [(s,pv) for s,pv in pairs if s in GENERIC or allowed_signal(s,key,channels,opts)]
         self.writable = hardware_writable_pvs(self.prefix, slave.get("master", self.master), slave["id"], candidates)
@@ -203,13 +205,20 @@ class HardwarePanel(QtWidgets.QWidget):
                 self.table.setItem(row, col, QtWidgets.QTableWidgetItem(value))
         self.table.resizeColumnsToContents()
         overview, experts = hardware_views(self.prefix, slave.get('master', self.master), slave['id'], candidates)
-        if key and not self.demo:
-            overview = [(s,pv) for s,pv in overview if pv in self.rows]
+        if key:
+            overview = [(s,pv) for s,pv in pairs if overview_signal(s)]
+            details = [(s,pv) for s,pv in pairs if not overview_signal(s)]
             experts = [(name, [(s,pv) for s,pv in rows if pv in self.rows]) for name,rows in experts]
+            experts = [(name, rows) for name,rows in experts if rows]
+            if details:
+                experts.insert(0, ('Configured diagnostics', details))
         self._overview_pvs = {pv for _, pv in overview}
         self._expert_pvs = [{pv for _, pv in pairs} for _, pairs in experts]
         self.build_cards(overview)
-        self.build_experts(experts)
+        self._expert_definitions = experts
+        self._expert_built = False
+        self._expert_selector = None
+        self.expert.setWidget(QtWidgets.QLabel('Open Expert to load diagnostics'))
         self._scope_initialized = True
         self._scope_changed(force=True)
 
@@ -233,6 +242,9 @@ class HardwarePanel(QtWidgets.QWidget):
     def _scope_changed(self, *_args, force=False):
         if not self._scope_initialized or self._closed:
             return
+        if self.isVisible() and self.views.currentWidget() is self.expert and not self._expert_built:
+            self._expert_built = True
+            self.build_experts(self._expert_definitions)
         scope = self._visible_scope() if self.isVisible() else set()
         if scope == self._active_scope and not force:
             return
@@ -329,14 +341,17 @@ class HardwarePanel(QtWidgets.QWidget):
         with self._monitor_lock:
             pending, self._monitor_pending = self._monitor_pending, {}
             connected = sum(self._monitor_connected.values())
+        permissions_changed = False
         for pv, (value, error) in pending.items():
             row = self.rows.get(pv)
             if row is None:
                 continue
+            previous = self.table.item(row, 2).text() == 'Read OK'
             self._apply_value(pv, value, error)
+            permissions_changed |= previous != (value is not None)
         if self._write_task is None:
             self.status.setText(f"Live CA monitoring — {connected}/{len(self._monitors)} connected | {len(self._monitors)} subscriptions" + self._options_note)
-        if pending:
+        if permissions_changed:
             self._update_edit_cursors()
 
     def _demo_value(self, pv):
@@ -404,8 +419,9 @@ class HardwarePanel(QtWidgets.QWidget):
         for pv, widgets in self.card_values.items():
             for _, widget in widgets:
                 editable = self._can_write(pv) and not (isinstance(widget, WordValue) and (getattr(widget, 'status_word', False) or pv.endswith('-RB')))
-                widget.setCursor(QtCore.Qt.PointingHandCursor if editable else QtCore.Qt.ArrowCursor)
-                widget.set_editable(editable)
+                if getattr(widget, '_editable', None) != editable:
+                    widget.setCursor(QtCore.Qt.PointingHandCursor if editable else QtCore.Qt.ArrowCursor)
+                    widget.set_editable(editable)
 
     def _value_widget(self, name, pv, primary=False):
         # EL70x1 original panel defines both words as bits 0..15.
@@ -643,8 +659,8 @@ class HardwarePanel(QtWidgets.QWidget):
         grid.setSpacing(4)
         channels = sorted({ch for _, _, ch, _ in signals})
         for index, ch in enumerate(channels):
-            column = index % 8 + 1
-            row = index // 8 * 4
+            column = index % 4 + 1
+            row = index // 4 * 4
             title = QtWidgets.QLabel(f"{ch:02d}")
             title.setAlignment(QtCore.Qt.AlignCenter)
             grid.addWidget(title, row, column)

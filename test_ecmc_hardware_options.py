@@ -26,3 +26,13 @@ class HardwareOptionsTest(unittest.TestCase):
         opts,source=read_options('IOC:', 'EL7062_OPT',2,.1,Epics())
         self.assertEqual(source,'legacy configuration')
         self.assertEqual(opts['01.Mode'],0)
+
+    def test_demo_image(self):
+        from ecmc_hardware_options import demo_options, overview_signal
+        opts = demo_options('EL7062_OPT', 2)
+        self.assertEqual(set(opts), set(legacy_names('EL7062_OPT', 2)))
+        self.assertTrue(allowed_signal('Drv01-Spd','EL7062_OPT',2,opts))
+        self.assertFalse(allowed_signal('Drv01-PosCmd','EL7062_OPT',2,opts))
+        self.assertTrue(allowed_signal('Drv02-PosCmd','EL7062_OPT',2,opts))
+        self.assertFalse(overview_signal('Drv01-Tune-R'))
+        self.assertTrue(overview_signal('Drv01-ErrAlrm'))

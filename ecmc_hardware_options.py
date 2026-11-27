@@ -109,3 +109,38 @@ def allowed_signal(s,key,channels,opts):
     if field in ('InfoData2','BI01','BI02','STO01'):
         return info==0
     return False
+
+
+def demo_options(key, channels):
+    """One realistic, deterministic process image per demo terminal."""
+    opts = {name: 0 for name in legacy_names(key, channels)}
+    if key in STEPPER:
+        opts['Supply'] = 1
+    for i in range(1, channels + 1):
+        ch = f'{i:02d}.'
+        opts[ch+'Mode'] = 0 if i == 1 else 1
+        opts[ch+'TouchProbe'] = int(key not in ('EL7201_OPT', 'ELM7231-0010_OPT'))
+        opts[ch+'Diagnostics'] = 1
+        opts[ch+'FollowingError'] = int(i == 2)
+        if key in STEPPER:
+            opts[ch+'Encoder2'] = 1
+            opts[ch+'Inputs'] = int(key != 'MO7062-0100_OPT')
+            opts[ch+'AutoTune'] = 1
+        else:
+            opts[ch+'EncoderStatus'] = int(key != 'EL7411_OPT')
+    return opts
+
+
+def overview_signal(name):
+    """Keep optional diagnostics and configuration in Expert/All PVs."""
+    if name in ('HWType','PnlTyp','Online','Operational') or name.startswith('Alstate-'):
+        return True
+    m = re.fullmatch(r'(Drv|Enc|Tp)\d\d-(.+)', name)
+    if not m:
+        return False
+    group, signal = m.groups()
+    if group == 'Enc':
+        return signal in ('PosAct','PosAct02','NotValid')
+    if group == 'Tp':
+        return False
+    return signal in ('Cmd','Cmd-RB','Stat','ErrAlrm','WrnAlrm','Spd','Spd-RB','PosCmd','PosCmd-RB','Trq','Trq-RB','DS402State','TrgDS402Ena','TrgDS402Dis','VelAct','PosDiff')
