@@ -2,6 +2,7 @@
 import math
 import time
 from ecmc_demo_model import DemoMotion
+from ecmc_pv_menu import bind_pv_menu
 from ecmc_axis_position import PositionTask, HomeTask, KillTask
 from ecmc_axis_write import AxisWriteTask
 from qt_compat import QtCore, QtWidgets
@@ -82,6 +83,11 @@ class AxisTroubleshooting(QtWidgets.QWidget):
         stop=QtWidgets.QPushButton('STOP selected')
         stop.clicked.connect(self._stop_all)
         bar.addWidget(stop)
+        if self.on_plot:
+            for title,suffix in (('Positions','-PosAct'),('Velocities','-VelAct'),('Following errors','-PosErr')):
+                button=QtWidgets.QPushButton(title)
+                button.clicked.connect(lambda checked=False,s=suffix:self._trend_selected(s))
+                bar.addWidget(button)
         layout.addLayout(bar)
         self.scroll=QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -140,7 +146,7 @@ class AxisTroubleshooting(QtWidgets.QWidget):
             for i,(caption,suffix) in enumerate(FIELDS):
                 label=QtWidgets.QLabel('—')
                 label.setAlignment(QtCore.Qt.AlignRight|QtCore.Qt.AlignVCenter)
-                label.setToolTip(axis['motor']+suffix)
+                bind_pv_menu(label,axis['motor']+suffix,self.on_plot,self._demo_value if self.demo else None,suffix!='-TgtPosCmd.EGU')
                 if i<2:
                     font=label.font()
                     font.setBold(True)
@@ -294,6 +300,10 @@ class AxisTroubleshooting(QtWidgets.QWidget):
                         '-SftLimFwdEna-RB':1,'-SftLimBwdEna-RB':1,'-MsgTxt':'','-IlockTxt':''}
                 return values.get(suffix,0)
         return None
+
+    def _trend_selected(self,suffix):
+        if self.cards and self.on_plot:
+            self.on_plot([a['motor']+suffix for a,_,_,_ in self.cards],demo_value=self._demo_value if self.demo else None)
 
     def _trend(self,axis):
         self.on_plot([axis['motor']+s for s in ('-PosAct','-TgtPosCmd')],

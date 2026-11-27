@@ -175,6 +175,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
             summary_grid.addWidget(label,0,i)
             summary_grid.addWidget(value,1,i)
             summary_grid.setColumnStretch(i,1)
+            value.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+            value.customContextMenuRequested.connect(lambda pos,w=value,pv=self.base+suffix:self._menu(w,pos,pv))
             self._summary_values[suffix] = value
         layout.addWidget(self.position_summary)
         layout.addWidget(self._overview)

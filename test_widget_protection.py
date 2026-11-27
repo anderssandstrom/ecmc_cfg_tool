@@ -16,3 +16,7 @@ class WidgetProtectionTest(unittest.TestCase):
         w.widget_protection.setChecked(False)
         self.assertTrue(panel.arm.isChecked())
         w.close()
+        w.deleteLater()
+        from qt_compat import QtCore
+        QtCore.QCoreApplication.sendPostedEvents(None,QtCore.QEvent.DeferredDelete)
+        app.processEvents()

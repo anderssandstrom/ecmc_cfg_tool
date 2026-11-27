@@ -2,6 +2,7 @@
 import math
 from qt_compat import QtCore, QtGui, QtWidgets
 from ecmc_axis_diagnostics import format_axis_value
+from ecmc_pv_menu import pv_menu
 
 FIELDS=("PosAct","VelAct","Homed","Absolute","Ready","ErrId")
 def encoder_delta(position,primary):
@@ -34,6 +35,8 @@ class EncoderOverview(QtWidgets.QWidget):
         self.table=QtWidgets.QTableWidget(0,9)
         self.table.setHorizontalHeaderLabels(("Encoder","Actual position","Δ primary","Velocity","Homed","Absolute","Ready","Error","Trend"))
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        self.table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._cell_menu)
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Interactive)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -89,6 +92,21 @@ class EncoderOverview(QtWidgets.QWidget):
             self.table.setCellWidget(row,8,button)
         if self.isVisible(): self._connect()
         self._tick()
+
+    def _cell_menu(self,pos):
+        item=self.table.itemAt(pos)
+        if item is None:
+            return
+        i=item.row()+1
+        col=item.column()
+        fields={1:'PosAct',3:'VelAct',4:'Homed',5:'Absolute',6:'Ready',7:'ErrId'}
+        if col in fields:
+            names=[self._name(i,fields[col])]
+        elif col==2 and self.primary is not None:
+            names=[self._name(i,'PosAct'),self._name(self.primary,'PosAct')]
+        else:
+            names=[self._name(i,'PosAct'),self._name(i,'VelAct')]
+        pv_menu(self,self.table.viewport().mapToGlobal(pos),names,self.on_plot,self._demo_value if self.demo else None,item.text())
 
     def _name(self,i,field):
         return f"{self.base}-Enc0{i}-{field}"
