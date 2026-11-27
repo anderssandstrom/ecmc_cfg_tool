@@ -85,3 +85,9 @@ def decode_msta(value):
     except (TypeError, ValueError, OverflowError):
         return {}
     return {label: (word >> bit) & 1 for bit,label in enumerate(MSTA_BITS)}
+
+
+def position_trend_pvs(base, interface):
+    """Compare like coordinates; include instantaneous trajectory setpoint for native axes."""
+    suffixes = ("-PosAct", "-TgtPosCmd", "-PosSet") if interface == "native" else (".RBV", ".VAL")
+    return [base + suffix for suffix in suffixes]

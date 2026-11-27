@@ -173,7 +173,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self._colors[name] = palette[self._color_index % len(palette)]
         self._color_index += 1
         self._visible[name] = True
-        self._axes[name] = 'Left' if len(self._pvs) == 1 else 'Right' if len(self._pvs) == 2 else 'Left'
+        self._axes[name] = 'Left'
         if demo_value is not None:
             self._providers[name] = demo_value
         else:

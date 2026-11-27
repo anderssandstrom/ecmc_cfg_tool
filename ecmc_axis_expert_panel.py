@@ -2,7 +2,7 @@
 import math
 import time
 from qt_compat import QtCore, QtWidgets
-from ecmc_axis_diagnostics import axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value, axis_status_value, decode_msta, MSTA_BITS
+from ecmc_axis_diagnostics import position_trend_pvs, axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value, axis_status_value, decode_msta, MSTA_BITS
 from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
 from ecmc_axis_write import AxisWriteTask
 from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTask, KillTask, EncoderModeTask, SourceModeTask
@@ -66,6 +66,11 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.arm.toggled.connect(self._update_controls)
         self.arm.toggled.connect(lambda on: None if on else self._release_jog())
         controls.addWidget(self.arm)
+        if self.on_plot:
+            trend = QtWidgets.QPushButton("Trend position")
+            trend.setToolTip("Actual and target position on the same plot")
+            trend.clicked.connect(lambda checked=False: self._trend_position())
+            controls.addWidget(trend)
         controls.addStretch()
         precision = QtWidgets.QSpinBox()
         precision.setRange(4,12)
@@ -734,11 +739,20 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self._update_controls()
         (self._stop_pool if stop else QtCore.QThreadPool.globalInstance()).start(task)
 
+    def _trend_position(self):
+        if self.on_plot:
+            self.on_plot(position_trend_pvs(self.base, self.interface.currentData()),
+                         demo_value=self._demo_value if self.demo else None)
+
     def _menu(self,widget,pos,pv):
         menu = QtWidgets.QMenu(self)
         if self.on_plot:
             action = menu.addAction("Trend PV")
             action.triggered.connect(lambda: self.on_plot([pv],demo_value=self._demo_value if self.demo else None))
+            action = menu.addAction("Add PV to existing trend")
+            action.triggered.connect(lambda: self.on_plot([pv], add=True, demo_value=self._demo_value if self.demo else None))
+            action = menu.addAction("Trend actual / target position")
+            action.triggered.connect(self._trend_position)
         action = menu.addAction("Copy PV name")
         action.triggered.connect(lambda: QtWidgets.QApplication.clipboard().setText(pv))
         if hasattr(menu,"exec"):

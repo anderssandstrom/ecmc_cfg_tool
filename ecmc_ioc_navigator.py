@@ -1411,7 +1411,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             diagnostics = pane
             pane = QtWidgets.QTabWidget()
             pane.addTab(diagnostics, "Existing PV diagnostics / trends")
-            pane.addTab(PlcBrowser(prefix, object_id, demo=self._demo), "Compiled source / variables")
+            pane.addTab(PlcBrowser(prefix, object_id, demo=self._demo, on_plot=self._open_hardware_trend), "Compiled source / variables")
         pane._native_diagnostic_key=key
         self._add_tool_tab(pane,kind.replace("_"," ").title()+(" "+str(object_id) if object_id is not None else ""))
 

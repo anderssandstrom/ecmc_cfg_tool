@@ -21,6 +21,7 @@ class PlcBrowser(QtWidgets.QWidget):
     def __init__(self, prefix, index, demo=False, on_plot=None):
         super().__init__()
         self.prefix, self.index, self.demo = prefix, index, demo
+        self.on_plot = on_plot
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.future = None
         self.variables = []
@@ -36,6 +37,12 @@ class PlcBrowser(QtWidgets.QWidget):
         self.source.setFont(QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.FixedFont))
         self.highlighter = PlcHighlighter(self.source.document())
         layout.addWidget(self.source, 2)
+        source_actions = QtWidgets.QHBoxLayout()
+        export = QtWidgets.QPushButton("Export source")
+        export.clicked.connect(self._export_source)
+        source_actions.addWidget(export)
+        source_actions.addStretch()
+        layout.addLayout(source_actions)
         self.search = QtWidgets.QLineEdit()
         self.search.setPlaceholderText('Search variable names or scope')
         self.search.textChanged.connect(self._filter)
@@ -44,6 +51,11 @@ class PlcBrowser(QtWidgets.QWidget):
         self.table.setHorizontalHeaderLabels(('Scope', 'Registered variable'))
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.table.itemSelectionChanged.connect(self._highlight_variable)
+        self.table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._variable_menu)
         layout.addWidget(self.table, 1)
         self.timer = QtCore.QTimer(self)
         self.timer.setInterval(100)
@@ -92,3 +104,56 @@ class PlcBrowser(QtWidgets.QWidget):
         for i, row in enumerate(rows):
             for j, value in enumerate(row):
                 self.table.setItem(i, j, QtWidgets.QTableWidgetItem(value))
+
+    def _selected_variable(self):
+        row = self.table.currentRow()
+        item = self.table.item(row, 1) if row >= 0 else None
+        return item.text() if item is not None else ""
+
+    def _highlight_variable(self):
+        name = self._selected_variable()
+        selections = []
+        if name:
+            pattern = r"(?<![\\w.])" + re.escape(name) + r"(?![\\w.])"
+            for match in re.finditer(pattern, self.source.toPlainText()):
+                cursor = QtGui.QTextCursor(self.source.document())
+                # Qt positions are UTF-16 offsets, unlike Python string offsets.
+                source = self.source.toPlainText()
+                cursor.setPosition(len(source[:match.start()].encode("utf-16-le")) // 2)
+                cursor.setPosition(len(source[:match.end()].encode("utf-16-le")) // 2, QtGui.QTextCursor.KeepAnchor)
+                selection = QtWidgets.QTextEdit.ExtraSelection()
+                selection.cursor = cursor
+                selection.format.setBackground(QtGui.QColor("#e7b94e"))
+                selection.format.setForeground(QtGui.QColor("#202020"))
+                selections.append(selection)
+        self.source.setExtraSelections(selections)
+        if selections:
+            self.source.setTextCursor(selections[0].cursor)
+            self.source.ensureCursorVisible()
+
+    def _export_source(self):
+        from pathlib import Path
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export compiled PLC source", f"PLC{self.index:02d}.plc")
+        if path:
+            try:
+                Path(path).write_text(self.source.toPlainText(), encoding="utf-8")
+            except OSError as exc:
+                QtWidgets.QMessageBox.warning(self, "Export failed", str(exc))
+
+    def _variable_menu(self, pos):
+        name = self._selected_variable()
+        if not name:
+            return
+        menu = QtWidgets.QMenu(self)
+        menu.addAction("Copy variable name", lambda: QtWidgets.QApplication.clipboard().setText(name))
+        if self.on_plot and not self.demo:
+            menu.addAction("Trend existing EPICS PV…", lambda: self._trend_pv(name, False))
+            menu.addAction("Add existing EPICS PV to trend…", lambda: self._trend_pv(name, True))
+        execute = getattr(menu, "exec", None) or menu.exec_
+        execute(self.table.viewport().mapToGlobal(pos))
+
+    def _trend_pv(self, name, add):
+        pv, ok = QtWidgets.QInputDialog.getText(self, "Existing EPICS PV",
+            "Full PV name for " + name + " (no PLC sampling):")
+        if ok and re.fullmatch(r"[A-Za-z0-9_:.\\-]+", pv.strip()):
+            self.on_plot([pv.strip()], add=add)
