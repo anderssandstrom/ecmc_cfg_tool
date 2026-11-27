@@ -2,8 +2,8 @@
 import math
 import time
 from qt_compat import QtCore, QtWidgets
-from ecmc_axis_diagnostics import position_trend_pvs, axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value, axis_status_value, decode_msta, MSTA_BITS
-from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus
+from ecmc_axis_diagnostics import position_trend_pvs, axis_signals, NATIVE_EDIT, MOTOR_EDIT, NATIVE_ACTIONS, MOTOR_ACTIONS, BOOL_COMMANDS, BOOL_STATUS, MOTION_ENUMS, format_axis_value, axis_status_value, decode_msta, MSTA_BITS, axis_alarm_summary
+from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus, AlarmSummary
 from ecmc_axis_write import AxisWriteTask
 from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTask, KillTask, EncoderModeTask, SourceModeTask
 from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
@@ -60,6 +60,8 @@ class AxisExpertPanel(QtWidgets.QWidget):
         layout.addWidget(self.interface)
         self.status = QtWidgets.QLabel("Paused")
         layout.addWidget(self.status)
+        self.alarm_summary = AlarmSummary()
+        layout.addWidget(self.alarm_summary)
         controls = QtWidgets.QHBoxLayout()
         self.arm = QtWidgets.QCheckBox("Enable writes")
         self.arm.setToolTip("Arms motion commands; target writes may initiate motion.")
@@ -818,6 +820,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         if getattr(self,"home_indicators",None) is not None: self.home_indicators.update_samples({})
         if hasattr(self,'_readiness'): self._readiness.update_samples({})
         self.status.setText("Paused")
+        self.alarm_summary.set_summary("unknown", "Monitoring paused")
         self.status.setStyleSheet("")
 
     def _tick(self):
@@ -894,6 +897,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         if self._encoder_overview is not None:
             self._encoder_overview.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"),samples.get("-EncMode-RB"),self.arm.isChecked() and not self._writes and self._jog_native is None and not self._jog_stops and all(samples.get(k)==0 for k in ("-EnaAct","-EnaCmd-RB","-Busy","-Moving")))
         self._readiness.update_samples(samples)
+        self.alarm_summary.set_summary(*axis_alarm_summary(samples, self.interface.currentData() == 'native'))
         self._overview.set_values(samples)
         samples.update({"msta:"+label: bit for label,bit in decode_msta(samples.get(".MSTA")).items()})
         for icon in self._status_icons + self._msta_icons:

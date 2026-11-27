@@ -55,6 +55,7 @@ class EngineeringToolsTests(unittest.TestCase):
         w.close();w.deleteLater()
     def test_plc_search(self):
         w=PlcBrowser('DEMO',0,demo=True);w._load()
-        self.assertIn('counter',w.source.toPlainText());self.assertEqual(w.table.rowCount(),1)
-        w.search.setText('absent');self.assertEqual(w.table.rowCount(),0);w.deleteLater()
+        self.assertIn('counter',w.source.toPlainText());self.assertEqual(w.table.rowCount(),0)
+        w._watch(0);self.assertEqual(w.table.rowCount(),1)
+        w._remove_watch(0);self.assertEqual(w.table.rowCount(),0);w.deleteLater()
 if __name__=='__main__':unittest.main()

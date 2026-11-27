@@ -235,3 +235,22 @@ class BooleanStatus(SignalValue):
         p.drawText(QtCore.QRectF(x+15, 0, max(1,self.width()-x-15), self.height()),
                    QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter, text)
         p.end()
+
+
+class AlarmSummary(QtWidgets.QLabel):
+    """Always-visible status text, independent of control permissions."""
+    def __init__(self):
+        super().__init__()
+        self.setWordWrap(True)
+        self.setTextFormat(QtCore.Qt.PlainText)
+        self._summary = None
+        self.set_summary('unknown', 'Status unavailable')
+
+    def set_summary(self, severity, text):
+        if self._summary == (severity, text):
+            return
+        self._summary = severity, text
+        color = {'fault':'#c43c3c','warning':'#b7791f','ok':'#26804b','unknown':'#78838e'}[severity]
+        title = {'fault':'FAULT','warning':'WARNING','ok':'OK','unknown':'UNKNOWN'}[severity]
+        self.setText(title + ' — ' + text)
+        self.setStyleSheet('QLabel { border: 1px solid '+color+'; border-left: 4px solid '+color+'; padding: 5px; font-weight: bold; }')

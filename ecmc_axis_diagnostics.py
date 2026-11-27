@@ -91,3 +91,48 @@ def position_trend_pvs(base, interface):
     """Compare like coordinates; include instantaneous trajectory setpoint for native axes."""
     suffixes = ("-PosAct", "-TgtPosCmd", "-PosSet") if interface == "native" else (".RBV", ".VAL")
     return [base + suffix for suffix in suffixes]
+
+
+def axis_alarm_summary(samples, native=True):
+    """Summarize only known readbacks; never treat missing status as healthy."""
+    faults, warnings, unknown = [], [], []
+    def flag(key, label, target, expected=1):
+        value = axis_status_value(key, samples.get(key))
+        if value not in (0, 1):
+            unknown.append(label)
+        elif value == expected:
+            target.append(label)
+    if native:
+        for key, label, target in (('-ErrId','Error',faults),('-WrnId','Warning',warnings)):
+            try:
+                raw = samples.get(key)
+                code = int(raw)
+                if code != float(raw):
+                    raise ValueError()
+                if code:
+                    text = samples.get('-MsgTxt') if key == '-ErrId' else ''
+                    target.append(f'{label} 0x{code:X}' + (f': {text}' if isinstance(text,str) and text.strip() else ''))
+            except (TypeError, ValueError, OverflowError):
+                unknown.append(label)
+        for key,label in (('-Blocked','Motion blocked'),('-SumIlockFwd','Forward interlock'),('-SumIlockBwd','Backward interlock')):
+            flag(key,label,faults)
+        for key,label in (('-LimFwd','Forward hard limit'),('-LimBwd','Backward hard limit'),('-SftLimFwdIlock','Forward soft limit'),('-SftLimBwdIlock','Backward soft limit')):
+            flag(key,label,warnings)
+        flag('-InRT','Not in realtime',faults,0)
+        if samples.get('-IlockTxt') and any(samples.get(k)==1 for k in ('-Blocked','-SumIlockFwd','-SumIlockBwd')):
+            faults.append(str(samples['-IlockTxt']))
+    else:
+        bits=decode_msta(samples.get('.MSTA'))
+        if not bits:
+            unknown.append('Motor status')
+        else:
+            for name in ('Problem','Communication error','Slip/stall'):
+                if bits[name]:
+                    faults.append(name)
+        for key,label in (('.LVIO','Software limit violation'),('.HLS','High limit switch'),('.LLS','Low limit switch')):
+            flag(key,label,warnings)
+    severity = 'fault' if faults else 'warning' if warnings else 'unknown' if unknown else 'ok'
+    messages = faults + warnings
+    if unknown:
+        messages.append('Unavailable: ' + ', '.join(unknown))
+    return severity, ' · '.join(messages) if messages else 'No active reported alarms or interlocks'
