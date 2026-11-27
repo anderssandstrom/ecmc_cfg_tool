@@ -37,6 +37,15 @@ class EncoderOverview(QtWidgets.QWidget):
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
         layout.addWidget(self.table)
+        trends = QtWidgets.QHBoxLayout()
+        self.trend_positions = QtWidgets.QPushButton("Trend all positions")
+        self.trend_velocities = QtWidgets.QPushButton("Trend all velocities")
+        for button, field in ((self.trend_positions, "PosAct"), (self.trend_velocities, "VelAct")):
+            button.setEnabled(False)
+            button.clicked.connect(lambda checked=False, field=field: self._trend_all(field))
+            trends.addWidget(button)
+        trends.addStretch()
+        layout.addLayout(trends)
         note=QtWidgets.QLabel("Δ is a direct numerical difference; compare only encoders with matching units and coordinate references. Disable the drive before changing encoder selection mode.")
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -55,6 +64,8 @@ class EncoderOverview(QtWidgets.QWidget):
         except (TypeError,ValueError,OverflowError): self.primary=None
         self.mode_label.setText('Accepted mode: '+('Auto power' if mode==0 else f'Encoder {int(mode)}' if mode in range(1,9) else '—'))
         self.apply.setEnabled(bool(can_select and mode is not None and n and self.on_select))
+        for button in (self.trend_positions, self.trend_velocities):
+            button.setEnabled(bool(self.on_plot and n))
         if n==self.count: return
         self.count=n
         self.mode_select.clear()
@@ -69,12 +80,31 @@ class EncoderOverview(QtWidgets.QWidget):
             button=QtWidgets.QPushButton("Trend")
             button.setEnabled(self.on_plot is not None)
             button.clicked.connect(lambda checked=False,i=row+1:self._trend(i))
+            button.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
+            button.customContextMenuRequested.connect(lambda pos, i=row+1, b=button: self._trend_menu(i, b, pos))
             self.table.setCellWidget(row,8,button)
         if self.isVisible(): self._connect()
         self._tick()
 
     def _name(self,i,field):
         return f"{self.base}-Enc0{i}-{field}"
+
+    def _trend_all(self, field):
+        if self.on_plot and self.count:
+            self.on_plot([self._name(i, field) for i in range(1, self.count+1)],
+                         demo_value=self._demo_value if self.demo else None)
+
+    def _trend_menu(self, i, button, pos):
+        menu = QtWidgets.QMenu(self)
+        for label, fields in (("Add position to existing trend", ("PosAct",)),
+                              ("Add velocity to existing trend", ("VelAct",)),
+                              ("Add position and velocity", ("PosAct", "VelAct"))):
+            action = menu.addAction(label)
+            action.triggered.connect(lambda checked=False, fields=fields: self.on_plot(
+                [self._name(i, f) for f in fields], add=True,
+                demo_value=self._demo_value if self.demo else None))
+        execute = getattr(menu, "exec", None) or menu.exec_
+        execute(button.mapToGlobal(pos))
 
     def _trend(self,i):
         if self.on_plot:
