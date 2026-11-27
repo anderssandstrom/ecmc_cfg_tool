@@ -304,6 +304,63 @@
       "Drv01-VolAct",
       "Drv01-WrnAlrm",
       "Enc01-PosAct"
+    ],
+    "EL5001": [
+      "Enc01-PosAct",
+      "Enc01-Stat",
+      "Enc01-DataAlrm",
+      "Enc01-FrameAlrm",
+      "Enc01-PowerAlrm"
+    ],
+    "EL5002": [
+      "Enc01-PosAct",
+      "Enc01-Stat",
+      "Enc01-DataAlrm",
+      "Enc01-FrameAlrm",
+      "Enc01-PowerAlrm",
+      "Enc02-PosAct",
+      "Enc02-Stat",
+      "Enc02-DataAlrm",
+      "Enc02-FrameAlrm",
+      "Enc02-PowerAlrm"
+    ],
+    "EL5072": [
+      "Enc01-PosAct",
+      "Enc01-LtchPosAct",
+      "Enc01-Stat",
+      "Enc01-Cmd",
+      "Enc01-Cmd-RB",
+      "Enc01-PosCmd",
+      "Enc01-PosCmd-RB",
+      "Enc02-PosAct",
+      "Enc02-LtchPosAct",
+      "Enc02-Stat",
+      "Enc02-Cmd",
+      "Enc02-Cmd-RB",
+      "Enc02-PosCmd",
+      "Enc02-PosCmd-RB"
+    ],
+    "EL5101-0011": [
+      "Enc01-Stat",
+      "Enc01-OpnCrctAlrm",
+      "Enc01-WrnAlrm",
+      "Enc01-SyncErrAlrm",
+      "Enc01-Cmd",
+      "Enc01-Cmd-RB",
+      "Enc01-PosCmd",
+      "Enc01-PosCmd-RB",
+      "Enc01-Time"
+    ],
+    "EL4132": [
+      "AO01",
+      "AO01-RB",
+      "AO02",
+      "AO02-RB"
+    ],
+    "EL4732": [
+      "AO01-CycCnt",
+      "AO02-CycCnt",
+      "Dev-NxtTime"
     ]
   },
   "writable": {
@@ -445,6 +502,63 @@
       "Drv01-VolAct",
       "Drv01-WrnAlrm",
       "Enc01-PosAct"
+    ],
+    "EL5001": [
+      "Enc01-PosAct",
+      "Enc01-Stat",
+      "Enc01-DataAlrm",
+      "Enc01-FrameAlrm",
+      "Enc01-PowerAlrm"
+    ],
+    "EL5002": [
+      "Enc01-PosAct",
+      "Enc01-Stat",
+      "Enc01-DataAlrm",
+      "Enc01-FrameAlrm",
+      "Enc01-PowerAlrm",
+      "Enc02-PosAct",
+      "Enc02-Stat",
+      "Enc02-DataAlrm",
+      "Enc02-FrameAlrm",
+      "Enc02-PowerAlrm"
+    ],
+    "EL5072": [
+      "Enc01-PosAct",
+      "Enc01-LtchPosAct",
+      "Enc01-Stat",
+      "Enc01-Cmd",
+      "Enc01-Cmd-RB",
+      "Enc01-PosCmd",
+      "Enc01-PosCmd-RB",
+      "Enc02-PosAct",
+      "Enc02-LtchPosAct",
+      "Enc02-Stat",
+      "Enc02-Cmd",
+      "Enc02-Cmd-RB",
+      "Enc02-PosCmd",
+      "Enc02-PosCmd-RB"
+    ],
+    "EL5101-0011": [
+      "Enc01-Stat",
+      "Enc01-OpnCrctAlrm",
+      "Enc01-WrnAlrm",
+      "Enc01-SyncErrAlrm",
+      "Enc01-Cmd",
+      "Enc01-Cmd-RB",
+      "Enc01-PosCmd",
+      "Enc01-PosCmd-RB",
+      "Enc01-Time"
+    ],
+    "EL4132": [
+      "AO01",
+      "AO01-RB",
+      "AO02",
+      "AO02-RB"
+    ],
+    "EL4732": [
+      "AO01-CycCnt",
+      "AO02-CycCnt",
+      "Dev-NxtTime"
     ]
   },
   "experts": {
@@ -709,5 +823,65 @@
         "release": 1
       }
     }
-  }
+  },
+  "database": {
+    "EL5001": [
+      "Enc01-PosAct",
+      "Enc01-Stat",
+      "Enc01-DataAlrm",
+      "Enc01-FrameAlrm",
+      "Enc01-PowerAlrm"
+    ],
+    "EL5002": [
+      "Enc01-PosAct",
+      "Enc01-Stat",
+      "Enc01-DataAlrm",
+      "Enc01-FrameAlrm",
+      "Enc01-PowerAlrm",
+      "Enc02-PosAct",
+      "Enc02-Stat",
+      "Enc02-DataAlrm",
+      "Enc02-FrameAlrm",
+      "Enc02-PowerAlrm"
+    ],
+    "EL5072": [
+      "Enc01-PosAct",
+      "Enc01-LtchPosAct",
+      "Enc01-Stat",
+      "Enc01-Cmd",
+      "Enc01-Cmd-RB",
+      "Enc01-PosCmd",
+      "Enc01-PosCmd-RB",
+      "Enc02-PosAct",
+      "Enc02-LtchPosAct",
+      "Enc02-Stat",
+      "Enc02-Cmd",
+      "Enc02-Cmd-RB",
+      "Enc02-PosCmd",
+      "Enc02-PosCmd-RB"
+    ],
+    "EL5101-0011": [
+      "Enc01-Stat",
+      "Enc01-OpnCrctAlrm",
+      "Enc01-WrnAlrm",
+      "Enc01-SyncErrAlrm",
+      "Enc01-Cmd",
+      "Enc01-Cmd-RB",
+      "Enc01-PosCmd",
+      "Enc01-PosCmd-RB",
+      "Enc01-Time"
+    ],
+    "EL4132": [
+      "AO01",
+      "AO01-RB",
+      "AO02",
+      "AO02-RB"
+    ],
+    "EL4732": [
+      "AO01-CycCnt",
+      "AO02-CycCnt",
+      "Dev-NxtTime"
+    ]
+  },
+  "database_expansion_source_commit": "b5ab819ddea57c08a74c8c74e6dc1eb78384b5a0"
 }

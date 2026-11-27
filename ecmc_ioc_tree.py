@@ -292,6 +292,12 @@ def demo_ioc(prefix="DEMO:ECMC") -> dict:
             {"id": "6", "name": "EL4132", "pv_base": "m0s006", "panel": "Ex4xx2"},
             {"id": "7", "name": "EL7201", "pv_base": "m0s007", "panel": "Ex72x1_STD"},
             {"id": "8", "name": "EL7062_OPT", "pv_base": "m0s008", "panel": "EX7062_OPT"},
+            {"id":"9","name":"EL5001","pv_base":"m0s009","panel":"EL5001"},
+            {"id":"10","name":"EL5002","pv_base":"m0s010","panel":"EL5002"},
+            {"id":"11","name":"EL5072","pv_base":"m0s011","panel":"EL5072"},
+            {"id":"12","name":"EL5101-0011","pv_base":"m0s012","panel":"EL5101-0011"},
+            {"id":"13","name":"EL4132","pv_base":"m0s013","panel":"EL4132"},
+            {"id":"14","name":"EL4732","pv_base":"m0s014","panel":"EL4732"},
         ],
         "axes": [
             {"id": "1", "name": "Axis1", "motor": "DEMO:Axis1", "axis_type": "REAL",
