@@ -263,6 +263,7 @@ class IocNavigator(QtWidgets.QMainWindow):
         self.tree = QtWidgets.QTreeWidget()
         self.tree.setHeaderLabels(["Object", "ID", "Type", "PV / Motor", "Health"])
         self.tree.setUniformRowHeights(True)
+        self.tree.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.tree.setIndentation(14)
         self.tree.setTextElideMode(QtCore.Qt.ElideMiddle)
         self.tree.setAlternatingRowColors(True)
@@ -711,6 +712,9 @@ class IocNavigator(QtWidgets.QMainWindow):
         menu = QtWidgets.QMenu(self)
         kind = data.get("kind")
         if kind == "axis":
+            selected = [i.data(0,self.DATA_ROLE) or {} for i in self.tree.selectedItems()]
+            selected = [a for a in selected if a.get("kind")=="axis"] if item.isSelected() else [data]
+            self._menu_action(menu,"Troubleshoot selected axes…",lambda:self._open_axis_troubleshooting(selected))
             self._menu_action(menu,"Native Axis Expert (ECMC)",lambda:self._open_native_axis_expert(data))
             self._menu_action(menu,"Native Axis Expert (Motor Record)",lambda:self._open_native_axis_expert(data,"motor"))
             menu.addSeparator()
@@ -796,6 +800,7 @@ class IocNavigator(QtWidgets.QMainWindow):
             menu.addSeparator()
             self._menu_action(menu.addMenu("caQtDM"), "Axis group panel", lambda: self._open_axis_group_panel(data))
         elif kind == "motion_group":
+            self._menu_action(menu, "Troubleshoot axes…", self._open_axis_troubleshooting)
             self._menu_action(menu, "Native motion overview", lambda:self._open_native_group("axes"))
             self._menu_action(menu.addMenu("caQtDM"), "Motion axes overview", self._open_motion_overview)
         elif kind == "axis_group_group":
@@ -1200,6 +1205,21 @@ class IocNavigator(QtWidgets.QMainWindow):
             self._open_script_no_object("start_rtlog.sh")
         else:
             self._open_script("start_rtlog.sh", axis_id)
+
+    def _open_axis_troubleshooting(self, selected=None):
+        from ecmc_axis_troubleshooting import AxisTroubleshooting, MAX_AXES
+        axes=self._snapshot.get("axes",[])
+        if not axes:
+            self.statusBar().showMessage("No axes discovered",5000)
+            return
+        if selected is not None and len(selected)>MAX_AXES:
+            self.statusBar().showMessage("Select at most 8 axes per troubleshooting view",5000)
+            return
+        pane=AxisTroubleshooting(axes,selected or [],demo=self._demo,
+                                 on_axis=self._open_native_axis_expert,on_plot=self._open_hardware_trend)
+        self._add_tool_tab(pane,"Axis troubleshooting")
+        if not selected:
+            pane._choose()
 
     def _open_native_axis_expert(self, data, interface="native"):
         from ecmc_axis_expert_panel import AxisExpertPanel

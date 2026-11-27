@@ -476,7 +476,7 @@ class HardwarePanel(QtWidgets.QWidget):
         card = QtWidgets.QGroupBox(f'{display} {number}' if display else title)
         card.setMaximumWidth(540)
         outer = QtWidgets.QVBoxLayout(card)
-        outer.setContentsMargins(5, 4, 5, 4)
+        outer.setContentsMargins(4, 2, 4, 2)
         outer.setSpacing(3)
         kind = re.sub(r"\d+$", "", title)
         if kind in ('AI', 'AO'):
@@ -493,7 +493,7 @@ class HardwarePanel(QtWidgets.QWidget):
                 detail = [r for r in detail if r not in dedicated]
         if primary:
             hero = QtWidgets.QHBoxLayout()
-            hero.addWidget(HardwareSymbol(kind))
+            # Values are more useful than a repeated decorative schematic.
             measurements = QtWidgets.QVBoxLayout()
             for name, pv, short in primary:
                 line = QtWidgets.QHBoxLayout()
@@ -697,8 +697,8 @@ class HardwarePanel(QtWidgets.QWidget):
             grid.addWidget(self._value_widget(name,pv,primary=True),1,column)
             grid.setColumnStretch(column,1)
         note = QtWidgets.QLabel('PV units · readback is not necessarily a measured output' if kind=='AO' else 'PV units · history autoscaled')
-        note.setWordWrap(True)
-        grid.addWidget(note,2,0,1,max(1,len(measurements)))
+        root.setToolTip(note.text())
+        note.deleteLater()
         for i,(name,pv,short) in enumerate(r for r in rows if r not in measurements):
             grid.addWidget(QtWidgets.QLabel(signal_caption(short)),3+i,0)
             grid.addWidget(self._value_widget(name,pv),3+i,1)
@@ -707,7 +707,7 @@ class HardwarePanel(QtWidgets.QWidget):
     def _digital_group(self, kind, signals):
         card = QtWidgets.QGroupBox("Digital inputs" if kind == "BI" else "Digital outputs")
         grid = QtWidgets.QGridLayout(card)
-        grid.setSpacing(5)
+        grid.setSpacing(3)
         channels = sorted({ch for _, _, ch, _ in signals})
         for index, ch in enumerate(channels):
             tile = QtWidgets.QGroupBox(f"CH {ch:02d}")
@@ -721,8 +721,11 @@ class HardwarePanel(QtWidgets.QWidget):
                 value = self._value_widget(name,pv)
                 value.setAlignment(QtCore.Qt.AlignCenter)
                 caption = "Readback" if rb else ("Input" if kind == "BI" else "Command")
-                column.addWidget(QtWidgets.QLabel(caption))
-                column.addWidget(value)
+                line = QtWidgets.QHBoxLayout()
+                line.setSpacing(2)
+                line.addWidget(QtWidgets.QLabel("RB" if rb else "IN" if kind=="BI" else "CMD"))
+                line.addWidget(value,1)
+                column.addLayout(line)
                 pair[rb] = pv
             if kind == 'BO' and set(pair) == {False,True}:
                 label = QtWidgets.QLabel('Unknown')
