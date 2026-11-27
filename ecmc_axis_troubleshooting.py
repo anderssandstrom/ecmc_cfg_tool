@@ -167,6 +167,7 @@ class AxisTroubleshooting(QtWidgets.QWidget):
             control.setSpacing(2)
             target=QtWidgets.QLineEdit()
             target.setPlaceholderText('Position')
+            track.on_target=lambda value,t=target: t.setText(format_axis_value(value,9)) if t.isEnabled() else None
             speed=QtWidgets.QLineEdit()
             speed.setPlaceholderText('Velocity')
             control.addWidget(target,0,0)

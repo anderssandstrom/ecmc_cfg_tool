@@ -284,3 +284,34 @@ def signal_caption(name):
         if suffix in labels:
             return prefix+' '+labels[suffix]
     return name
+
+class CompactBit(BooleanStatus):
+    """Small monitor-driven LED; optional command uses the existing checked write path."""
+    def __init__(self, active_color="#26804b", callback=None):
+        super().__init__(active_color)
+        self.callback=callback
+        self.setFixedSize(22,20)
+
+    def set_editable(self, enabled):
+        self._editable=bool(enabled and self.callback)
+        self.update()
+
+    def paintEvent(self,event):
+        p=QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        color=QtGui.QColor(self.active_color if self.value==1 else "#89939e")
+        p.setPen(QtGui.QPen(QtGui.QColor("#287bc0") if self._editable else color,1.2))
+        p.setBrush(color if self.value is not None else QtCore.Qt.NoBrush)
+        p.drawRoundedRect(QtCore.QRectF(5,4,12,12),2,2)
+        if self.callback and self.value==1:
+            p.setPen(QtGui.QPen(QtGui.QColor("white"),1.5))
+            p.drawLine(7,10,10,13)
+            p.drawLine(10,13,15,7)
+        p.end()
+
+    def mouseReleaseEvent(self,event):
+        if event.button()==QtCore.Qt.LeftButton and self._editable and self.value is not None:
+            self.callback(self.value,1-self.value)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)

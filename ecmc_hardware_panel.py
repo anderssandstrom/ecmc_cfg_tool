@@ -8,7 +8,7 @@ from ecmc_hardware_options import variant, read_options, allowed_signal, demo_op
 from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
 from ecmc_waveform_widget import WaveformValue, waveform_summary
-from ecmc_hardware_widgets import HardwareSymbol, SignalValue, WordValue, BooleanValue, BooleanStatus, AnalogValue, boolean_value, signal_role, AlarmSummary, signal_caption, digital_pair_status
+from ecmc_hardware_widgets import HardwareSymbol, CompactBit, SignalValue, WordValue, BooleanValue, BooleanStatus, AnalogValue, boolean_value, signal_role, AlarmSummary, signal_caption, digital_pair_status
 from ecmc_ds402_widget import DS402Status, DS402Word, DS402StateMap, controlword_dialog
 from ecmc_ds402 import word_number
 
@@ -624,7 +624,7 @@ class HardwarePanel(QtWidgets.QWidget):
                 item.widget().deleteLater()
         channels, other, digital = {}, [], {'BI': [], 'BO': []}
         for name, pv in pairs:
-            if name.endswith('Alrm') or name.endswith('-NotValid') or name in ('Online', 'Operational'):
+            if name.endswith('Alrm') or name.endswith(('-NotValid','-OvrLoad')) or name in ('Online', 'Operational'):
                 self._alarm_values[pv] = (name, None)
             if name == "PnlTyp":
                 continue
@@ -634,9 +634,9 @@ class HardwarePanel(QtWidgets.QWidget):
                 header.addWidget(label)
                 self.device_values[pv] = (name, label)
                 continue
-            io = re.fullmatch(r"(BI|BO)(\d+)(-RB)?", name)
+            io = re.fullmatch(r"(BI|BO)(\d+)(.*)", name)
             if io:
-                digital[io[1]].append((name, pv, int(io[2]), bool(io[3])))
+                digital[io[1]].append((name, pv, int(io[2]), io[3]))
                 continue
             m = re.fullmatch(r"(Drv|Enc|Tp|AI|AO|BI|BO)(\d+)(?:-?(.*))", name)
             if m:
@@ -719,31 +719,40 @@ class HardwarePanel(QtWidgets.QWidget):
     def _digital_group(self, kind, signals):
         card = QtWidgets.QGroupBox("Digital inputs" if kind == "BI" else "Digital outputs")
         grid = QtWidgets.QGridLayout(card)
+        grid.setContentsMargins(5,3,5,3)
         grid.setSpacing(3)
-        channels = sorted({ch for _, _, ch, _ in signals})
-        for index, ch in enumerate(channels):
-            tile = QtWidgets.QGroupBox(f"CH {ch:02d}")
-            column = QtWidgets.QVBoxLayout(tile)
-            column.setContentsMargins(4,4,4,4)
-            column.setSpacing(2)
-            pair = {}
-            for name,pv,number,rb in sorted(signals,key=lambda s:s[3]):
-                if number != ch:
-                    continue
-                value = self._value_widget(name,pv)
-                value.setAlignment(QtCore.Qt.AlignCenter)
-                caption = "Readback" if rb else ("Input" if kind == "BI" else "Command")
-                line = QtWidgets.QHBoxLayout()
-                line.setSpacing(2)
-                line.addWidget(QtWidgets.QLabel("RB" if rb else "IN" if kind=="BI" else "CMD"))
-                line.addWidget(value,1)
-                column.addLayout(line)
-                pair[rb] = pv
-            if kind == 'BO' and set(pair) == {False,True}:
-                label = QtWidgets.QLabel('Unknown')
-                column.addWidget(label)
-                self._digital_pairs.append((pair[False],pair[True],label))
-            grid.addWidget(tile,index//4,index%4)
+        columns = {"": "IN" if kind=="BI" else "Cmd", "-RB":"RB",
+                   "-OvrTmpAlrm":"Temp", "-OpnLdAlrm":"Load",
+                   "-OvrCurrAlrm":"Curr", "-ShrtCircAlrm":"Short",
+                   "-OvrLoad":"Overload", "-Stat":"Status"}
+        channels=sorted({ch for _,_,ch,_ in signals})
+        by_channel={}
+        for name,pv,ch,suffix in signals:
+            by_channel.setdefault(ch,{})[suffix]=(name,pv)
+        suffixes=[s for s in columns if any(s in row for row in by_channel.values())]
+        suffixes+=sorted({s for row in by_channel.values() for s in row if s not in columns})
+        for bank,start in enumerate(range(0,len(channels),8)):
+            offset=bank*(len(suffixes)+2)
+            grid.addWidget(QtWidgets.QLabel("CH"),0,offset)
+            for j,suffix in enumerate(suffixes,1):
+                heading=QtWidgets.QLabel(columns.get(suffix,signal_caption(suffix.lstrip("-"))))
+                heading.setAlignment(QtCore.Qt.AlignCenter)
+                grid.addWidget(heading,0,offset+j)
+            for row,ch in enumerate(channels[start:start+8],1):
+                grid.addWidget(QtWidgets.QLabel(f"{ch:02d}"),row,offset)
+                entries=by_channel[ch]
+                for j,suffix in enumerate(suffixes,1):
+                    if suffix not in entries:
+                        continue
+                    name,pv=entries[suffix]
+                    if suffix in ("","-RB","-OvrLoad") or suffix.endswith("Alrm"):
+                        callback=(lambda old,new,pv=pv:self._direct_boolean(pv,old,new)) if self.writable.get(pv)=="caToggleButton" else None
+                        value=CompactBit("#c43c3c" if suffix.endswith("Alrm") or suffix=="-OvrLoad" else "#26804b",callback)
+                        self._bind(value,pv)
+                        self.card_values.setdefault(pv,[]).append((name,value))
+                    else:
+                        value=self._value_widget(name,pv)
+                    grid.addWidget(value,row,offset+j,QtCore.Qt.AlignCenter)
         return card
 
     def _update_summary(self):

@@ -1,24 +1,33 @@
 """Bounded, read-only waveform summaries; sample index, never assumed time or voltage."""
-import numpy as np
+import math
 from qt_compat import QtCore, QtGui, QtWidgets
 
 def waveform_summary(value):
     if value is None:
         return None
     try:
-        a=np.asarray(value,dtype=float)
-        if a.ndim==0:
-            a=a.reshape(1)
-        if a.ndim!=1 or not a.size:
+        try:
+            count=len(value)
+            if not count:
+                return None
+            values=value
+        except TypeError:
+            values=(value,)
+            count=1
+        if isinstance(values,(str,bytes)):
             return None
-        finite=np.isfinite(a)
-        if not finite.any():
+        lo,hi,total,n=math.inf,-math.inf,0.,0
+        for sample in values:
+            v=float(sample)
+            if math.isfinite(v):
+                lo,hi=min(lo,v),max(hi,v)
+                total+=v
+                n+=1
+        if not n:
             return None
-        valid=a[finite]
-        # Preserve the original sample order; limit preview drawing to 512 points.
-        idx=np.linspace(0,len(a)-1,min(len(a),512),dtype=int)
-        points=tuple(float(v) for v in a[idx])
-        return len(a),float(a[-1]),float(valid.min()),float(valid.max()),float(valid.mean()),points
+        size=min(count,512)
+        points=tuple(float(values[i*(count-1)//max(1,size-1)]) for i in range(size))
+        return count,float(values[-1]),lo,hi,total/n,points
     except (ValueError,TypeError,OverflowError):
         return None
 
@@ -57,7 +66,7 @@ class WaveformValue(QtWidgets.QLabel):
         path=QtGui.QPainterPath()
         started=False
         for i,v in enumerate(points):
-            if not np.isfinite(v):
+            if not math.isfinite(v):
                 started=False
                 continue
             x=3+(self.width()-6)*i/max(1,len(points)-1)
