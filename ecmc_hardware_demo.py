@@ -45,7 +45,7 @@ class HardwareDemo:
 
     def value(self, pv, hardware="", panel=""):
         drive_match = re.fullmatch(r"(.+-Drv\d+)-(Cmd|Cmd-RB|Stat|ErrAlrm|Spd-RB|TrgDS402Ena|TrgDS402Dis)", pv)
-        if drive_match and (panel in ("EL7062", "EL7062_CSP", "Ex72x1_STD") or drive_match[1] in self.ds402):
+        if drive_match and (panel in ("EL7062", "EL7062_CSP", "Ex72x1_STD") or panel in ("EX7062_OPT", "EL7062_OPT") or drive_match[1] in self.ds402):
             drive, signal = drive_match.groups()
             control, status = self.ds402.get(drive, (15, 39))
             if signal in ("Cmd", "Cmd-RB"):

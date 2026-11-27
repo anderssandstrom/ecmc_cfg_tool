@@ -356,6 +356,18 @@ class HardwarePanel(QtWidgets.QWidget):
 
     def _demo_value(self, pv):
         slave = self.selector.currentData() or {}
+        from ecmc_hardware_options import legacy_names
+        candidates = list(slave.get("panels") or []) + [slave.get("panel"), slave.get("name")]
+        key, channels = variant(candidates)
+        if key:
+            suffix = pv.rsplit(":", 1)[-1].split("-", 1)[-1]
+            if suffix.startswith("Cfg"):
+                if suffix == "CfgChannels":
+                    return channels
+                opts = demo_options(key, channels)
+                for name, record in legacy_names(key, channels).items():
+                    if suffix == record:
+                        return opts[name]
         return self._demo_model.value(pv, slave.get("name", ""), slave.get("panel", ""))
 
     def _demo_tick(self):

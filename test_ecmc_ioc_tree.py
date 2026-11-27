@@ -16,6 +16,7 @@ class FakeClient:
 class IocTreeTests(unittest.TestCase):
     def test_demo_contains_every_navigator_category(self):
         demo = demo_ioc()
+        self.assertIn(("EL7062_OPT", "EX7062_OPT"), [(s["name"], s["panel"]) for s in demo["hardware"]])
         for key in ("hardware", "axes", "plcs", "plugins", "data_storages", "cpp_logic", "safety_plugins"):
             self.assertTrue(demo[key], key)
 
