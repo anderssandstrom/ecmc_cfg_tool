@@ -89,3 +89,21 @@ def parse_values(payload, token, page):
     if magic!='ECMCPLCV1' or int(received)!=token or int(start)!=page*32 or not 0<size<=32 or len(lines)!=size:
         raise ValueError('Invalid or replaced PLC snapshot')
     return {page*32+i:float(line) for i,line in enumerate(lines)}
+
+
+def registered_index_at(line, offset, variables):
+    """Resolve an exact registered name at a Python character offset."""
+    import re
+    # Do not interpret names in comments.
+    code = re.split(r'//|#', line, maxsplit=1)[0]
+    matches = []
+    for index, (_, name) in enumerate(variables):
+        for match in re.finditer(r'(?<![\w.])'+re.escape(name)+r'(?![\w.])', code):
+            if match.start() <= offset < match.end():
+                matches.append((len(name), index))
+    if not matches:
+        return None
+    matches.sort(reverse=True)
+    if len(matches)>1 and matches[0][0]==matches[1][0]:
+        return None
+    return matches[0][1]
