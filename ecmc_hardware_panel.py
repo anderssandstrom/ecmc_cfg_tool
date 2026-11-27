@@ -1,5 +1,6 @@
 """Native EtherCAT process signal browser with explicit write controls."""
 import re
+from ecmc_compact_layout import column_count
 from threading import Lock
 from qt_compat import QtCore, QtWidgets
 from ecmc_epics import EpicsClient
@@ -654,6 +655,8 @@ class HardwarePanel(QtWidgets.QWidget):
         self._channel_columns = 0
         for i, (ch, groups) in enumerate(sorted(channels.items())):
             col = QtWidgets.QWidget()
+            col.setMaximumWidth(360)
+            col.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Maximum)
             stack = QtWidgets.QVBoxLayout(col)
             stack.setContentsMargins(0, 0, 0, 0)
             stack.setSpacing(3)
@@ -665,13 +668,15 @@ class HardwarePanel(QtWidgets.QWidget):
             stack.addStretch(1)
             self._channel_widgets.append(col)
             grid.addWidget(col, i, 0, QtCore.Qt.AlignTop)
-        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(0, 0)
         layout.addLayout(grid)
+        grid.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
         if other:
             layout.addWidget(self._group("Other signals", other))
         layout.addStretch(1)
         self.cards.setWidget(root)
         self._reflow_channels()
+        QtCore.QTimer.singleShot(0, self._reflow_channels)
 
     def eventFilter(self, watched, event):
         if watched is self.cards.viewport() and event.type() == QtCore.QEvent.Resize:
@@ -682,7 +687,8 @@ class HardwarePanel(QtWidgets.QWidget):
         if self._closed or self._channel_grid is None or not self._channel_widgets:
             return
         required = max(w.minimumSizeHint().width() for w in self._channel_widgets)
-        columns = 2 if len(self._channel_widgets) > 1 and self.cards.viewport().width() >= 2*max(270, required)+20 else 1
+        preferred = max(300, min(360, required))
+        columns = column_count(self.cards.viewport().width()-12, len(self._channel_widgets), preferred)
         if columns == self._channel_columns:
             return
         self._channel_columns = columns
@@ -691,8 +697,9 @@ class HardwarePanel(QtWidgets.QWidget):
             grid.removeWidget(w)
         for i, w in enumerate(self._channel_widgets):
             grid.addWidget(w, i//columns, i%columns, QtCore.Qt.AlignTop)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1 if columns == 2 else 0)
+        for i in range(grid.columnCount()):
+            grid.setColumnStretch(i, 0)
+        grid.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop)
 
     def _analog_channel(self, kind, rows):
         root = QtWidgets.QWidget()

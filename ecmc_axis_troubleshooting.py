@@ -1,5 +1,6 @@
 """Compact side-by-side native axis troubleshooting and control."""
 import math
+from ecmc_compact_layout import column_count
 import time
 from ecmc_demo_model import DemoMotion
 from ecmc_pv_menu import bind_pv_menu
@@ -91,6 +92,10 @@ class AxisTroubleshooting(QtWidgets.QWidget):
         layout.addLayout(bar)
         self.scroll=QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.viewport().installEventFilter(self)
+        self._axis_grid=None
+        self._axis_widgets=[]
+        self._axis_columns=0
         layout.addWidget(self.scroll,1)
         self.timer=QtCore.QTimer(self)
         self.timer.setInterval(400)
@@ -127,7 +132,11 @@ class AxisTroubleshooting(QtWidgets.QWidget):
         self.cards=[]
         self.controls={}
         root=QtWidgets.QWidget()
-        row=QtWidgets.QHBoxLayout(root)
+        row=QtWidgets.QGridLayout(root)
+        row.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
+        self._axis_grid=row
+        self._axis_widgets=[]
+        self._axis_columns=0
         row.setContentsMargins(2,2,2,2)
         row.setSpacing(4)
         for axis in selected_axes(axes)[:MAX_AXES]:
@@ -135,6 +144,7 @@ class AxisTroubleshooting(QtWidgets.QWidget):
             card.setToolTip(axis['motor'])
             card.setMinimumWidth(215)
             card.setMaximumWidth(300)
+            card.setSizePolicy(QtWidgets.QSizePolicy.Preferred,QtWidgets.QSizePolicy.Maximum)
             col=QtWidgets.QVBoxLayout(card)
             col.setContentsMargins(5,5,5,5)
             col.setSpacing(2)
@@ -200,13 +210,33 @@ class AxisTroubleshooting(QtWidgets.QWidget):
                 actions.addWidget(button)
             col.addLayout(actions)
             col.addStretch()
-            row.addWidget(card,0,QtCore.Qt.AlignTop)
+            self._axis_widgets.append(card)
+            row.addWidget(card,len(self._axis_widgets)-1,0,QtCore.Qt.AlignTop)
             self.cards.append((axis,labels,alarm,track))
-        row.addStretch()
         self.scroll.setWidget(root)
+        self._reflow_axes()
+        QtCore.QTimer.singleShot(0,self._reflow_axes)
         self._update_controls()
         if self.isVisible():
             self._start()
+
+    def eventFilter(self, watched, event):
+        if watched is self.scroll.viewport() and event.type()==QtCore.QEvent.Resize:
+            QtCore.QTimer.singleShot(0,self._reflow_axes)
+        return super().eventFilter(watched,event)
+
+    def _reflow_axes(self):
+        if self.closed or self._axis_grid is None or not self._axis_widgets:
+            return
+        required=max(w.minimumSizeHint().width() for w in self._axis_widgets)
+        columns=column_count(self.scroll.viewport().width()-12,len(self._axis_widgets),max(260,min(300,required)))
+        if columns==self._axis_columns:
+            return
+        self._axis_columns=columns
+        for w in self._axis_widgets:
+            self._axis_grid.removeWidget(w)
+        for i,w in enumerate(self._axis_widgets):
+            self._axis_grid.addWidget(w,i//columns,i%columns,QtCore.Qt.AlignTop)
 
     def set_write_protected(self, protected):
         self.protected=bool(protected)
