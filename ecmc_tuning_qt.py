@@ -24,6 +24,9 @@ def next_step(index, direction, count, snake):
     return 1, 1
 
 
+from ecmc_trend_hold import held_points
+
+
 class Trend(QtWidgets.QWidget):
     def __init__(self, series):
         super().__init__()
@@ -40,6 +43,7 @@ class Trend(QtWidgets.QWidget):
         self.right_fixed_range = None
         self.right_include_zero = False
         self.limit = None
+        self.sample_hold = False
         self.setMinimumHeight(145)
 
     def append(self, key, stamp, value):
@@ -66,11 +70,10 @@ class Trend(QtWidgets.QWidget):
             return
         now, source = self.frozen if self.frozen is not None else (time.monotonic(),self.samples)
         start = now-self.history
-        data = {}
-        for key, _, _ in self.series:
-            q = source.get(key, ())
-            # Preserve the last sample before the visible window for held values.
-            data[key] = [(t,v) for t,v in q if start<=t<=now and v is not None]
+        curves = {key: held_points(source.get(key, ()), start, now) if self.sample_hold
+                  else [(t,v) for t,v in source.get(key, ()) if start<=t<=now]
+                  for key, _, _ in self.series}
+        data = {key: [(t,v) for t,v in seq if v is not None] for key,seq in curves.items()}
         values = [v for a in data.values() for _,v in a]
         p.setPen(QtGui.QColor('#465565'))
         x = margin + 2
@@ -119,7 +122,7 @@ class Trend(QtWidgets.QWidget):
             low, high = (rlo, rhi) if self.dual_axis and key in self.right_keys else (lo, hi)
             path = QtGui.QPainterPath()
             started = False
-            for stamp,v in source.get(key, ()):
+            for stamp,v in curves[key]:
                 if v is None:
                     started=False
                     continue

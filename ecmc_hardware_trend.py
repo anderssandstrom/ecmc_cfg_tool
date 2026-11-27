@@ -6,6 +6,7 @@ from threading import Lock
 from ecmc_acquisition import bounded_series, export_event_csv
 from qt_compat import QtCore, QtGui, QtWidgets
 from ecmc_tuning_qt import Trend
+from ecmc_trend_hold import held_points
 from ecmc_native_motion import numeric_readback
 
 
@@ -57,6 +58,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         layout.addLayout(controls)
         self.trend = Trend([])
         self.trend.samples = {}
+        self.trend.sample_hold = True
         self.trend.include_zero = False
         self.trend.axis_precision = 12
         self.trend.show_legend = False
@@ -267,7 +269,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         if manual:
             now, source = self.trend.frozen if self.trend.frozen is not None else (time.monotonic(), self.trend.samples)
             values = [v for key, q in source.items() if self._visible.get(key) and self._axes.get(key) == "Right"
-                      for t, v in q if now-self.trend.history <= t <= now and v is not None]
+                      for t, v in held_points(q, now-self.trend.history, now) if v is not None]
             if values:
                 lo, hi = min(values), max(values)
                 pad = (hi-lo)*.05 or max(abs(hi)*1e-6, 1e-9)
@@ -318,6 +320,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
                 name = entry[0]
                 plot = Trend([entry])
                 plot.include_zero = False
+                plot.sample_hold = self.trend.sample_hold
                 plot.axis_precision = 12
                 plot.history = self.trend.history
                 plot.samples = {name: self.trend.samples[name]}
@@ -353,8 +356,7 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         self.apply_scale.setEnabled(manual)
         if manual:
             now, source = self.trend.frozen if self.trend.frozen is not None else (time.monotonic(), self.trend.samples)
-            values = [v for key, q in source.items() if self._visible.get(key) and (not self.trend.dual_axis or self._axes.get(key) == 'Left') for t, v in q
-                      if now - self.trend.history <= t <= now and v is not None]
+            values = [v for key, q in source.items() if self._visible.get(key) and (not self.trend.dual_axis or self._axes.get(key) == 'Left') for t, v in held_points(q, now-self.trend.history, now) if v is not None]
             if values:
                 lo, hi = min(values), max(values)
                 pad = (hi - lo) * .05 or max(abs(hi) * 1e-6, 1e-9)
