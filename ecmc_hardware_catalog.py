@@ -1,5 +1,6 @@
 """Read-only hardware PV catalog, independent of caQtDM at runtime."""
 import json
+from ecmc_generated_catalog import merge_generated, demo_definitions
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -13,6 +14,9 @@ GENERIC = ("HWType", "PnlTyp", "Online", "Operational", "Alstate-Init",
 def _load_catalog(path):
     catalog = json.loads(Path(path).read_text(encoding="utf-8"))
     if Path(path).resolve() == CATALOG.resolve():
+        snapshot=CATALOG.with_name("ecmc_hardware_generated.json")
+        if snapshot.is_file():
+            merge_generated(catalog,json.loads(snapshot.read_text(encoding="utf-8")))
         extra = json.loads(CATALOG.with_name("ecmc_hardware_variants.json").read_text(encoding="utf-8"))
         for key, signals in extra["panels"].items():
             catalog["panels"][key] = sorted(set(catalog["panels"].get(key, [])) | set(signals))

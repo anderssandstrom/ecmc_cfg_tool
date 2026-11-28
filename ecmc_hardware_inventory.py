@@ -5,22 +5,46 @@ from pathlib import Path
 SETTING = re.compile(r'\bepicsEnvSet\s*\(\s*"(?P<key>ECMC_EC_HWTYPE|ECMC_HW_PANEL)"\s*,?\s*"(?P<value>[^"]+)"\s*\)')
 LITERAL = re.compile(r'[A-Za-z0-9_.+\-]+')
 
+INCLUDE = re.compile(r'\$\{SCRIPTEXEC\}\s+\$\{ecmccfg_DIR\}(ecmc[A-Za-z0-9_.+\-]+\.cmd)\b')
+
 def inventory(root):
     root=Path(root)
-    entries=[]
-    for path in sorted((root/'hardware').rglob('ecmc*.cmd')):
+    paths=sorted((root/'hardware').rglob('ecmc*.cmd'))
+    by_name={}
+    for path in paths:
+        by_name.setdefault(path.name,[]).append(path)
+    def local(path):
         values={}
+        includes=[]
         for line in path.read_text(encoding='utf-8',errors='replace').splitlines():
             if line.lstrip().startswith('#'):
                 continue
             for m in SETTING.finditer(line):
                 values.setdefault(m['key'],set()).add(m['value'])
+            for m in INCLUDE.finditer(line):
+                matches=by_name.get(m[1],[])
+                if len(matches)==1:
+                    includes.append(matches[0])
+        return values,includes
+    parsed={path:local(path) for path in paths}
+    def inherited(path,trail=()):
+        if path in trail or len(trail)>=20:
+            return set()
+        values,includes=parsed[path]
+        result=set(values.get('ECMC_HW_PANEL',()))
+        for child in includes:
+            result.update(inherited(child,trail+(path,)))
+        return result
+    entries=[]
+    for path in paths:
+        values,_=parsed[path]
         if not values:
             continue
         types=sorted(values.get('ECMC_EC_HWTYPE',()))
-        panels=sorted(values.get('ECMC_HW_PANEL',()))
+        panels=sorted(inherited(path))
         entries.append({'file':str(path.relative_to(root)), 'definition':path.stem.removeprefix('ecmc'),
-                        'types':types,'panels':panels})
+                        'types':types,'panels':panels,
+                        'panel_source':'explicit' if values.get('ECMC_HW_PANEL') else 'inherited' if panels else 'unknown'})
     return entries
 
 def augment_catalog(catalog,root):

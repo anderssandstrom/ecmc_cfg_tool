@@ -6,6 +6,7 @@ on:
       - 'build_hardware_catalog.py'
       - 'ecmc_hardware_inventory.py'
       - 'ecmc_hardware_database.py'
+      - 'ecmc_generated_catalog.py'
       - '.github/workflows/hardware-inventory.yml'
   workflow_dispatch:
 permissions:
@@ -22,6 +23,20 @@ jobs:
           path: upstream-cfg
       - name: Generate catalog
         run: python build_hardware_catalog.py upstream-cfg --source "ecmccfg v11.2.1_RC1" --source-commit b5ab819ddea57c08a74c8c74e6dc1eb78384b5a0 --output generated-hardware.json
+      - name: Validate generated runtime catalogue
+        run: |
+          python - <<'PY'
+          import json
+          from ecmc_generated_catalog import merge_generated
+          with open('ecmc_hardware_catalog.json') as f: curated=json.load(f)
+          with open('generated-hardware.json') as f: generated=json.load(f)
+          merged=merge_generated(curated,generated)
+          assert len(merged['panels']) >= 250
+          assert len(merged['writable']['EL2068']) == 8
+          assert len(merged['writable']['EL2819']) == 16
+          print('Integrated entries:',len(merged['panels']))
+          print('Additional entries:',len(merged['generated_keys']))
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: generated-hardware-catalog

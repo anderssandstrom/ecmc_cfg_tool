@@ -322,5 +322,13 @@ def demo_ioc(prefix="DEMO:ECMC") -> dict:
         "cpp_logic": [{"id": "0", "name": "CppLogic 0", "rate_ms": "1.0"}],
         "safety_plugins": [{"id": "0", "name": "SafetyPlugin", "loaded": "1", "group_count": "2"}],
     }
+    from ecmc_hardware_catalog import load_catalog, demo_definitions
+    existing={slave['name'] for slave in snapshot['hardware']}
+    for key in demo_definitions(load_catalog()):
+        if key not in existing:
+            i=len(snapshot['hardware'])
+            snapshot['hardware'].append({'id':str(i),'name':key,'pv_base':f'm0s{i:03d}','panel':key})
+            existing.add(key)
+    snapshot['ec_rows']=str(len(snapshot['hardware']))
     update_object_counts(snapshot)
     return snapshot
