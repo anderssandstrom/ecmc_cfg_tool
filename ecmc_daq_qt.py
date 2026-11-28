@@ -757,7 +757,15 @@ class DaqWindow(QtWidgets.QMainWindow):
         file_row.addWidget(save_time_plot_btn)
         file_row.addWidget(save_fft_plot_btn)
         file_row.addStretch(1)
-        layout.addLayout(file_row)
+        files = QtWidgets.QGroupBox("Session / export")
+        files.setCheckable(True)
+        files.setChecked(False)
+        files_body = QtWidgets.QWidget()
+        files_body.setLayout(file_row)
+        QtWidgets.QVBoxLayout(files).addWidget(files_body)
+        files_body.hide()
+        files.toggled.connect(files_body.setVisible)
+        layout.addWidget(files)
 
         pv_row = QtWidgets.QHBoxLayout()
         self.pv_edit = QtWidgets.QLineEdit()
@@ -768,7 +776,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         start_btn = QtWidgets.QPushButton("Start Capture")
         stop_btn = QtWidgets.QPushButton("Stop")
         clear_samples_btn = QtWidgets.QPushButton("Clear Samples")
-        show_freq_btn = QtWidgets.QPushButton("Show FFT Window")
+        show_freq_btn = QtWidgets.QPushButton("FFT")
         for btn in (add_btn, remove_btn, clear_pvs_btn, start_btn, stop_btn, clear_samples_btn, show_freq_btn):
             btn.setAutoDefault(False)
             btn.setDefault(False)
@@ -778,13 +786,12 @@ class DaqWindow(QtWidgets.QMainWindow):
         pv_row.addWidget(QtWidgets.QLabel("PV"))
         pv_row.addWidget(self.pv_edit, 1)
         pv_row.addWidget(add_btn)
-        pv_row.addWidget(remove_btn)
-        pv_row.addWidget(clear_pvs_btn)
+
         pv_row.addSpacing(12)
         pv_row.addWidget(start_btn)
         pv_row.addWidget(stop_btn)
         pv_row.addWidget(clear_samples_btn)
-        pv_row.addWidget(show_freq_btn)
+        show_freq_btn.hide()
         frf_btn = QtWidgets.QPushButton("FRF / PSD")
         frf_btn.clicked.connect(self._show_frf)
         pv_row.addWidget(frf_btn)
@@ -813,7 +820,15 @@ class DaqWindow(QtWidgets.QMainWindow):
         trigger_row.addWidget(self.trigger_pre)
         trigger_row.addWidget(QtWidgets.QLabel('Post'))
         trigger_row.addWidget(self.trigger_post)
-        layout.addLayout(trigger_row)
+        trigger_group = QtWidgets.QGroupBox("Trigger settings")
+        trigger_group.setCheckable(True)
+        trigger_group.setChecked(False)
+        trigger_body = QtWidgets.QWidget()
+        trigger_body.setLayout(trigger_row)
+        QtWidgets.QVBoxLayout(trigger_group).addWidget(trigger_body)
+        trigger_body.hide()
+        trigger_group.toggled.connect(trigger_body.setVisible)
+        layout.addWidget(trigger_group)
         self.trigger_controls=(self.trigger_enabled,self.trigger_pv,self.trigger_edge,self.trigger_threshold,self.trigger_pre,self.trigger_post)
         self.capture_edit_buttons=(add_btn,remove_btn,clear_pvs_btn,clear_samples_btn,load_session_btn)
 
@@ -835,6 +850,12 @@ class DaqWindow(QtWidgets.QMainWindow):
         self.pv_list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.pv_list.setAlternatingRowColors(True)
         left_layout.addWidget(self.pv_list, 1)
+        signal_actions = QtWidgets.QHBoxLayout()
+        remove_btn.setText("Remove")
+        clear_pvs_btn.setText("Clear")
+        signal_actions.addWidget(remove_btn)
+        signal_actions.addWidget(clear_pvs_btn)
+        left_layout.addLayout(signal_actions)
 
         note = QtWidgets.QLabel(
             "FFT uses the captured timestamps to estimate the effective sample rate per PV. "
@@ -860,7 +881,10 @@ class DaqWindow(QtWidgets.QMainWindow):
         )
         self.time_plot.set_x_floor(0.0)
         self.time_plot.set_selection_enabled(True)
-        upper_layout.addWidget(self.time_plot, 1)
+        self.analysis_tabs = QtWidgets.QTabWidget()
+        self.analysis_tabs.addTab(self.time_plot, "Time domain")
+        self.analysis_tabs.addTab(self.spectrum_window.plot_widget, "FFT")
+        upper_layout.addWidget(self.analysis_tabs, 1)
         splitter.addWidget(upper)
 
         lower = QtWidgets.QWidget()
@@ -925,9 +949,7 @@ class DaqWindow(QtWidgets.QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if not self._spectrum_window_shown_once:
-            self._spectrum_window_shown_once = True
-            self._show_spectrum_window()
+        self._refresh_views()
 
     def closeEvent(self, event):
         self.stop_capture()
@@ -1299,6 +1321,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         pvs = self._selected_pvs()
         if not pvs:
             self._log("No PVs selected")
+            QtWidgets.QMessageBox.information(self, "Capture", "Add at least one PV first.")
             return
         self._capture_goal = int(self.sample_count_spin.value())
         self._trigger = None
@@ -1311,6 +1334,7 @@ class DaqWindow(QtWidgets.QMainWindow):
             self._trigger=TriggerCapture(pvs,trigger_pv,self.trigger_edge.currentIndex(),self.trigger_threshold.value(),self.trigger_pre.value(),self.trigger_post.value(),self._capture_goal)
         self._capture_start_ts = None
         self._capture_active = True
+        self.analysis_tabs.setCurrentIndex(0)
         self._analysis_range_auto = True
         self._refresh_timer.start()
         for name in pvs:
@@ -1345,12 +1369,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         execute()
 
     def _show_spectrum_window(self):
-        if self.spectrum_window.isHidden():
-            geo = self.geometry()
-            self.spectrum_window.move(geo.right() + 24, geo.top())
-        self.spectrum_window.show()
-        self.spectrum_window.raise_()
-        self.spectrum_window.activateWindow()
+        self.analysis_tabs.setCurrentIndex(1)
 
     def _on_sample_ready(self, pv_name, timestamp_s, value):
         name = str(pv_name or "").strip()
