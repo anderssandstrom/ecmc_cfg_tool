@@ -45,6 +45,8 @@ class SignalValue(QtWidgets.QLabel):
         self._editable = enabled
         self.setFrameShape(QtWidgets.QFrame.Box if enabled else QtWidgets.QFrame.NoFrame)
         self.setFrameShadow(QtWidgets.QFrame.Plain)
+        if type(self) is SignalValue:
+            self.setStyleSheet('background-color: white; color: #202020;' if enabled else '')
         self.update()
 
     def mouseReleaseEvent(self, event):
@@ -142,23 +144,22 @@ class BooleanValue(SignalValue):
             self.value = new
             self.update()
 
-    def paintEvent(self, event):
-        p = QtGui.QPainter(self)
+    def paintEvent(self,event):
+        p=QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
-        width = min(62, max(1, self.width()-4))
-        x = (self.width()-width)/2
-        rect = QtCore.QRectF(x, 3, width, 18)
-        color = "#26804b" if self.value == 1 else "#737d87" if self.value == 0 else "#aab0b5"
-        p.setPen(QtGui.QPen(QtGui.QColor("#287bc0" if self._editable else color), 1.5))
-        p.setBrush(QtGui.QColor(color))
-        p.drawRoundedRect(rect, 9, 9)
-        p.setPen(QtCore.Qt.NoPen)
-        p.setBrush(QtGui.QColor("white"))
-        if self.value is not None:
-            p.drawEllipse(QtCore.QRectF(x+width-17 if self.value else x+3, 6, 12, 12))
-        p.setPen(QtGui.QColor("white"))
-        p.drawText(QtCore.QRectF(x+3 if self.value else x+17, 3, max(1,width-20), 18),
-                   QtCore.Qt.AlignCenter, "ON" if self.value == 1 else "OFF" if self.value == 0 else "—")
+        rect=QtCore.QRectF(4,(self.height()-15)/2,15,15)
+        active=self.value==1
+        color=QtGui.QColor('#26804b' if active else '#89939e')
+        editable=self._editable and self.value is not None
+        p.setPen(QtGui.QPen(QtGui.QColor('#287bc0') if editable else color,1.3))
+        p.setBrush(QtGui.QColor('white') if editable else color if self.value is not None else QtCore.Qt.NoBrush)
+        p.drawRoundedRect(rect,2,2)
+        if active:
+            p.setPen(QtGui.QPen(QtGui.QColor('#26804b' if editable else 'white'),1.6))
+            p.drawLine(QtCore.QPointF(rect.left()+3,rect.center().y()),QtCore.QPointF(rect.center().x()-1,rect.bottom()-4))
+            p.drawLine(QtCore.QPointF(rect.center().x()-1,rect.bottom()-4),QtCore.QPointF(rect.right()-3,rect.top()+3))
+        p.setPen(self.palette().color(QtGui.QPalette.Text))
+        p.drawText(QtCore.QRectF(24,0,max(1,self.width()-24),self.height()),QtCore.Qt.AlignVCenter|QtCore.Qt.AlignLeft,'ON' if active else 'OFF' if self.value==0 else '—')
         p.end()
 
     def mouseReleaseEvent(self, event):
@@ -194,6 +195,8 @@ class AnalogValue(SignalValue):
     def paintEvent(self, event):
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
+        if self._editable:
+            p.fillRect(QtCore.QRectF(1,1,self.width()-2,25),QtGui.QColor('white'))
         p.setPen(QtGui.QColor("#26804b" if self.command else "#287bc0") if self.value is not None else self.palette().color(QtGui.QPalette.Text))
         font = p.font()
         font.setBold(True)

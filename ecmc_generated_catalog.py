@@ -16,6 +16,7 @@ def merge_generated(curated,generated):
     existing=set(panels)
     database=generated.get('database',{})
     generated_keys=[]
+    output_records=generated.get('database_outputs',{})
     for key,signals in sorted(generated.get('panels',{}).items()):
         if not valid_signal(key):
             continue
@@ -28,13 +29,25 @@ def merge_generated(curated,generated):
         db={s for s in database.get(key,()) if valid_signal(s)}
         proposed=set(generated.get('overview',{}).get(key,signals)) & signals
         overview.setdefault(key,sorted((proposed & db) or proposed or signals))
+        # Verified output records may be missing from the curated overview.
+        # Add only those exact records and matching database-backed readbacks.
+        if '_OPT' not in key:
+            outputs={s:kind for s,kind in output_records.get(key,{}).items()
+                     if s in db and ((re.fullmatch(r'BO\d+',s) and kind=='caToggleButton')
+                                  or (re.fullmatch(r'BO\d+-Arr',s) and kind=='caByteController'))}
+            if outputs:
+                visible=set(outputs)|{s+'-RB' for s in outputs if s+'-RB' in db}
+                panels[key]=sorted(set(panels[key])|visible)
+                overview[key]=sorted(set(overview[key])|visible)
+                writes.setdefault(key,{}).update(outputs)
         # Explicit UI controls backed by the exact device database only.
         # Preserve specialized controls and never generate raw drive-word writes.
         if '_OPT' not in key:
             permitted={s:kind for s,kind in generated.get('writable',{}).get(key,{}).items()
                        if s in db and s in panels[key] and (
                            (re.fullmatch(r'BO\d+',s) and kind=='caToggleButton') or
-                           (re.fullmatch(r'AO\d+',s) and kind in ('caTextEntry','caNumeric','caSpinbox')))}
+                           (re.fullmatch(r'AO\d+',s) and kind in ('caTextEntry','caNumeric','caSpinbox')) or
+                           (re.fullmatch(r'BO\d+-Arr',s) and kind=='caByteController'))}
             for s,kind in permitted.items():
                 writes.setdefault(key,{}).setdefault(s,kind)
             # Only explicit DS402 trigger records, not arbitrary controlword

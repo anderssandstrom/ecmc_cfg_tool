@@ -411,7 +411,7 @@ class HardwarePanel(QtWidgets.QWidget):
         is_waveform = pv.endswith("-Arr") and not is_bit_array(pv)
         summary = waveform_summary(value) if is_waveform else None
         text = (f"{summary[0]} samples · last {summary[1]:.6g}" if summary else "—") if is_waveform else str(value) if value is not None else "—"
-        state = "Simulated" if simulated else "Read OK" if value is not None else "Unavailable"
+        state = "Simulated" if simulated and value is not None else "Read OK" if value is not None else "Unavailable"
         item = self.table.item(row, 2)
         if not is_waveform and self.table.item(row, 1).text() == text and item.text() == state and item.toolTip() == error:
             return
@@ -868,7 +868,7 @@ class HardwarePanel(QtWidgets.QWidget):
         grid = QtWidgets.QGridLayout(card)
         grid.setContentsMargins(5,3,5,3)
         grid.setSpacing(3)
-        columns = {"": "IN" if kind=="BI" else "Cmd", "-RB":"RB",
+        columns = {"": "IN" if kind=="BI" else "Cmd", "-RB":"RB", "-Arr":"Bits" if kind=="BI" else "Cmd bits", "-Arr-RB":"RB bits",
                    "-OvrTmpAlrm":"Temp", "-OpnLdAlrm":"Load",
                    "-OvrCurrAlrm":"Curr", "-ShrtCircAlrm":"Short",
                    "-OvrLoad":"Overload", "-Stat":"Status"}

@@ -75,22 +75,34 @@ def merge_database(catalog, root):
     panels = catalog['panels']
     overview = catalog.setdefault('overview', {})
     database = {}
+    output_records = {}
     warnings = []
     for path in sorted(db.rglob('ecmc*.substitutions')):
         if path.parent.name in ('core', 'generic', 'legacy', 'sequencer'):
             continue
         key = path.stem.removeprefix('ecmc')
         signals = set()
+        outputs = {}
         try:
             for template, env in substitution_rows(path.read_text(encoding='utf-8')):
                 matches = templates.get(template, [])
                 if len(matches) != 1:
                     warnings.append(f'{path.relative_to(root)}: missing/ambiguous {template}')
                     continue
-                signals.update(record_suffixes(matches[0].read_text(encoding='utf-8'), env))
+                source=matches[0].read_text(encoding='utf-8')
+                suffixes=set(record_suffixes(source,env))
+                signals.update(suffixes)
+                # Only the verified generic hardware output templates.
+                if template in ('ecmc_binaryOutput-chX.template','ecmc_binaryOutputArray-chX.template'):
+                    for s in suffixes:
+                        if template=='ecmc_binaryOutput-chX.template' and re.fullmatch(r'BO\d+',s):
+                            outputs[s]='caToggleButton'
+                        elif template=='ecmc_binaryOutputArray-chX.template' and re.fullmatch(r'BO\d+-Arr',s):
+                            outputs[s]='caByteController'
         except (ValueError, UnicodeError) as exc:
             warnings.append(f'{path.relative_to(root)}: {exc}')
         database.setdefault(key, set()).update(signals)
+        output_records.setdefault(key,{}).update(outputs)
     for key, signals in database.items():
         existing = set(panels.get(key, []))
         panels[key] = sorted(existing | signals)
@@ -119,5 +131,6 @@ def merge_database(catalog, root):
             overview[key] = sorted(set(overview.get(key, [])) | variant_signals)
             database[key] = variant_signals
     catalog['database'] = {k: sorted(v) for k,v in sorted(database.items())}
+    catalog['database_outputs'] = {k:v for k,v in sorted(output_records.items()) if v}
     catalog['database_warnings'] = warnings
     return catalog
