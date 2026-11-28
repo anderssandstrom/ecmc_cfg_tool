@@ -63023,6 +63023,210 @@
       "Enc02-PosAct"
     ]
   },
+  "database_outputs": {
+    "EL1859": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton",
+      "BO08": "caToggleButton"
+    },
+    "EL2004": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton"
+    },
+    "EL2008": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton",
+      "BO08": "caToggleButton"
+    },
+    "EL2014": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton"
+    },
+    "EL2024": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton"
+    },
+    "EL2068": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton",
+      "BO08": "caToggleButton"
+    },
+    "EL2084": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton"
+    },
+    "EL2124": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton"
+    },
+    "EL2252": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton"
+    },
+    "EL2602": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton"
+    },
+    "EL2612": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton"
+    },
+    "EL2624": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton"
+    },
+    "EL2634": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton"
+    },
+    "EL2788": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton",
+      "BO08": "caToggleButton"
+    },
+    "EL2794": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton"
+    },
+    "EL2808": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton",
+      "BO08": "caToggleButton"
+    },
+    "EL2819": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton",
+      "BO08": "caToggleButton",
+      "BO09": "caToggleButton",
+      "BO10": "caToggleButton",
+      "BO11": "caToggleButton",
+      "BO12": "caToggleButton",
+      "BO13": "caToggleButton",
+      "BO14": "caToggleButton",
+      "BO15": "caToggleButton",
+      "BO16": "caToggleButton"
+    },
+    "EL2828": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton",
+      "BO08": "caToggleButton"
+    },
+    "EP2008": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton",
+      "BO08": "caToggleButton"
+    },
+    "EP2308": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton"
+    },
+    "EP2624": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton"
+    },
+    "EPP2008": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton",
+      "BO08": "caToggleButton"
+    },
+    "EPP2038": {
+      "BO01": "caToggleButton",
+      "BO02": "caToggleButton",
+      "BO03": "caToggleButton",
+      "BO04": "caToggleButton",
+      "BO05": "caToggleButton",
+      "BO06": "caToggleButton",
+      "BO07": "caToggleButton",
+      "BO08": "caToggleButton"
+    },
+    "Festo": {
+      "BO01-Arr": "caByteController",
+      "BO02-Arr": "caByteController"
+    },
+    "iPOS4808": {
+      "BO01-Arr": "caByteController"
+    },
+    "iPOS4808BX": {
+      "BO01-Arr": "caByteController"
+    },
+    "iPOS4808BX_2": {
+      "BO01-Arr": "caByteController"
+    },
+    "iPOS4808BX_VOLT": {
+      "BO01-Arr": "caByteController"
+    },
+    "iPOS8020": {
+      "BO01-Arr": "caByteController"
+    },
+    "iPOS8020BX_VOLT": {
+      "BO01-Arr": "caByteController"
+    }
+  },
   "database_warnings": [],
   "hardware_inventory": [
     {
