@@ -886,6 +886,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         self.pv_list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.pv_list.setAlternatingRowColors(True)
         self.pv_list.itemChanged.connect(lambda *_: self._visibility_changed())
+        self.pv_list.currentItemChanged.connect(lambda *_: self._update_cursor_readout())
         left_layout.addWidget(self.pv_list, 1)
         signal_actions = QtWidgets.QHBoxLayout()
         remove_btn.setText("Remove")
@@ -897,6 +898,10 @@ class DaqWindow(QtWidgets.QMainWindow):
         self.normalize_plot.setToolTip("Scale each visible time-domain signal independently to 0–1. Raw samples and FFT are unchanged.")
         self.normalize_plot.toggled.connect(lambda *_: self._visibility_changed())
         left_layout.addWidget(self.normalize_plot)
+        self.cursor_readout=QtWidgets.QLabel("Drag time markers to measure")
+        self.cursor_readout.setWordWrap(True)
+        self.cursor_readout.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        left_layout.addWidget(self.cursor_readout)
 
         note = QtWidgets.QLabel(
             "FFT uses the captured timestamps to estimate the effective sample rate per PV. "
@@ -1585,7 +1590,37 @@ class DaqWindow(QtWidgets.QMainWindow):
         else:
             self.spectrum_window.plot_widget.set_series({})
         self._reload_stats_table(selected)
+        self._update_cursor_readout()
         self._update_capture_status()
+
+    def _update_cursor_readout(self):
+        if not hasattr(self,"cursor_readout") or not hasattr(self,"time_plot"):
+            return
+        from bisect import bisect_left
+        a,b=self._analysis_start_s,self._analysis_end_s
+        dt=b-a
+        text=f"Δt: {dt:.6g} s"
+        if dt>0:
+            text+=f"  |  1/Δt: {1/dt:.6g} Hz"
+        item=self.pv_list.currentItem()
+        name=item.text() if item is not None else next(iter(self._selected_pvs()),None)
+        origin=self._capture_start_ts
+        if name and origin is not None:
+            rows=_sanitize_samples(self._samples_by_pv.get(name,[]))
+            stamps=[t for t,_ in rows]
+            def at(relative):
+                t=origin+relative
+                i=bisect_left(stamps,t)
+                if i<len(rows) and stamps[i]==t: return rows[i][1]
+                if i==0 or i==len(rows): return None
+                x0,y0=rows[i-1]
+                x1,y1=rows[i]
+                return y0+(y1-y0)*(t-x0)/(x1-x0)
+            va,vb=at(a),at(b)
+            text+="\n"+name+"\n"
+            text+=f"ΔY: {vb-va:.6g}" if va is not None and vb is not None else "ΔY: — (outside samples)"
+        self.cursor_readout.setText(text)
+        self.cursor_readout.setToolTip("ΔY uses raw values of the selected PV, linearly interpolated at the time markers. 1/Δt is reciprocal interval, not a detected frequency.")
 
     def _reload_stats_table(self, pvs):
         self.stats_table.setRowCount(len(pvs))
