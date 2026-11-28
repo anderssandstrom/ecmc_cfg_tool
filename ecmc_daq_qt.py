@@ -63,6 +63,26 @@ def _median(values):
     return 0.5 * (vals[mid - 1] + vals[mid])
 
 
+def motion_sample_metrics(samples):
+    """Raw selected event statistics; no interpolation or inferred missing samples."""
+    clean=_sanitize_samples(samples)
+    if not clean:
+        return {}
+    values=[v for _,v in clean]
+    mean=math.fsum(values)/len(values)
+    result={"mean":mean,"std":math.sqrt(math.fsum((v-mean)**2 for v in values)/len(values)),
+            "rms":math.sqrt(math.fsum(v*v for v in values)/len(values)),
+            "pp":max(values)-min(values),"count":len(values)}
+    if len(clean)>1:
+        intervals=[b[0]-a[0] for a,b in zip(clean,clean[1:]) if b[0]>a[0]]
+        if intervals:
+            dt=_median(intervals)
+            result.update(rate=1/dt,event_rate=len(intervals)/math.fsum(intervals),
+                jitter_ms=1000*math.sqrt(math.fsum((d-dt)**2 for d in intervals)/len(intervals)),
+                gaps=sum(d>2*dt for d in intervals),max_gap_ms=1000*max(intervals))
+    return result
+
+
 def _largest_power_of_two_leq(value):
     n = int(value or 0)
     if n < 1:
@@ -902,6 +922,10 @@ class DaqWindow(QtWidgets.QMainWindow):
         self.cursor_readout.setWordWrap(True)
         self.cursor_readout.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         left_layout.addWidget(self.cursor_readout)
+        self.motion_metrics=QtWidgets.QLabel("Select a signal to inspect noise and sampling")
+        self.motion_metrics.setWordWrap(True)
+        self.motion_metrics.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        left_layout.addWidget(self.motion_metrics)
 
         note = QtWidgets.QLabel(
             "FFT uses the captured timestamps to estimate the effective sample rate per PV. "
@@ -1620,7 +1644,29 @@ class DaqWindow(QtWidgets.QMainWindow):
             text+="\n"+name+"\n"
             text+=f"ΔY: {vb-va:.6g}" if va is not None and vb is not None else "ΔY: — (outside samples)"
         self.cursor_readout.setText(text)
+        self._update_motion_metrics(name,origin,a,b)
         self.cursor_readout.setToolTip("ΔY uses raw values of the selected PV, linearly interpolated at the time markers. 1/Δt is reciprocal interval, not a detected frequency.")
+
+    def _update_motion_metrics(self,name,origin,a,b):
+        if not hasattr(self,"motion_metrics"):
+            return
+        if self._capture_active:
+            self.motion_metrics.setText("Stop capture for noise and sampling statistics.")
+            return
+        rows=_slice_samples_by_relative_time(self._samples_by_pv.get(name,[]),origin,a,b) if name and origin is not None else []
+        m=motion_sample_metrics(rows)
+        if not m:
+            self.motion_metrics.setText("No samples in selected range")
+            return
+        lines=[f"Mean: {m['mean']:.6g}",f"Noise σ: {m['std']:.6g}  |  P-P: {m['pp']:.6g}",f"RMS: {m['rms']:.6g}"]
+        if "rate" in m:
+            lines.extend([f"Median Fs: {m['rate']:.4g} Hz  |  Events: {m['event_rate']:.4g}/s",
+                f"Interval jitter: {m['jitter_ms']:.3g} ms",
+                f"Long intervals: {m['gaps']}  |  Max: {m['max_gap_ms']:.3g} ms"])
+            if m["gaps"] or m["jitter_ms"]*m["rate"]>100:
+                lines.append("Irregular sampling — interpret FFT carefully")
+        self.motion_metrics.setText("\n".join(lines))
+        self.motion_metrics.setToolTip("Statistics use raw events within the time markers. Noise σ includes any motion or drift. Jitter is RMS deviation from median sample interval. Long intervals exceed twice the median; they do not prove lost samples.")
 
     def _reload_stats_table(self, pvs):
         self.stats_table.setRowCount(len(pvs))
