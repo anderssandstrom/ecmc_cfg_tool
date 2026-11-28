@@ -601,7 +601,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         self._trigger = None
         self._trigger_deadline = None
         self._capture_start_ts = None
-        self._capture_goal = 2048
+        self._capture_goal = 8192
         self._samples_by_pv = {}
         self._analysis_by_pv = {}
         self._default_prefix = str(default_prefix or "").strip()
@@ -675,7 +675,11 @@ class DaqWindow(QtWidgets.QMainWindow):
         top_row.addWidget(QtWidgets.QLabel("Timeout [s]"))
         top_row.addWidget(self.timeout_spin)
         top_row.addSpacing(8)
-        top_row.addWidget(QtWidgets.QLabel("Samples / PV"))
+        self.continuous = QtWidgets.QCheckBox("Continuous")
+        self.continuous.setChecked(True)
+        self.continuous.setToolTip("Keep latest samples per PV until Stop; bounded by buffer size.")
+        top_row.addWidget(self.continuous)
+        top_row.addWidget(QtWidgets.QLabel("Buffer / PV"))
         top_row.addWidget(self.sample_count_spin)
         top_row.addSpacing(8)
         top_row.addWidget(QtWidgets.QLabel("Fallback Poll"))
@@ -849,6 +853,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         self.pv_list = QtWidgets.QListWidget()
         self.pv_list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.pv_list.setAlternatingRowColors(True)
+        self.pv_list.itemChanged.connect(lambda *_: self._visibility_changed())
         left_layout.addWidget(self.pv_list, 1)
         signal_actions = QtWidgets.QHBoxLayout()
         remove_btn.setText("Remove")
@@ -1120,6 +1125,21 @@ class DaqWindow(QtWidgets.QMainWindow):
             return _join_prefix_pv(prefix, raw)
         return raw
 
+    def _visibility_changed(self):
+        self._pending_refresh = True
+        if not self._capture_active:
+            self._refresh_views()
+
+    def _visible_pvs(self):
+        return {self.pv_list.item(i).text().strip() for i in range(self.pv_list.count())
+                if self.pv_list.item(i).checkState() == QtCore.Qt.Checked}
+
+    def _add_signal_item(self, name):
+        item = QtWidgets.QListWidgetItem(name)
+        item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+        item.setCheckState(QtCore.Qt.Checked)
+        self.pv_list.addItem(item)
+
     def _selected_pvs(self):
         return [self.pv_list.item(idx).text().strip() for idx in range(self.pv_list.count()) if self.pv_list.item(idx).text().strip()]
 
@@ -1185,7 +1205,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         self._samples_by_pv = {}
         self._analysis_by_pv = {}
         for pv in pvs:
-            self.pv_list.addItem(pv)
+            self._add_signal_item(pv)
             rows = []
             for pair in samples_by_pv.get(pv, []) or []:
                 try:
@@ -1273,7 +1293,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         existing = {self.pv_list.item(idx).text().strip() for idx in range(self.pv_list.count())}
         if name in existing:
             return
-        self.pv_list.addItem(name)
+        self._add_signal_item(name)
         self._samples_by_pv.setdefault(name, [])
         self._analysis_by_pv.setdefault(name, {})
         if log:
@@ -1334,11 +1354,12 @@ class DaqWindow(QtWidgets.QMainWindow):
             self._trigger=TriggerCapture(pvs,trigger_pv,self.trigger_edge.currentIndex(),self.trigger_threshold.value(),self.trigger_pre.value(),self.trigger_post.value(),self._capture_goal)
         self._capture_start_ts = None
         self._capture_active = True
+        self._rolling_capture = self.continuous.isChecked() and self._trigger is None
         self.analysis_tabs.setCurrentIndex(0)
         self._analysis_range_auto = True
         self._refresh_timer.start()
         for name in pvs:
-            self._samples_by_pv[name] = []
+            self._samples_by_pv[name] = deque(maxlen=self._capture_goal) if self._rolling_capture else []
             self._analysis_by_pv[name] = {}
         sources=list(pvs)
         if self._trigger is not None and self._trigger.trigger_pv not in sources:
@@ -1388,7 +1409,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         if name not in self._samples_by_pv:
             return
         samples = self._samples_by_pv.setdefault(name, [])
-        if len(samples) >= self._capture_goal:
+        if not self._rolling_capture and len(samples) >= self._capture_goal:
             return
         ts = float(timestamp_s)
         if not math.isfinite(ts):
@@ -1400,7 +1421,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         if self._capture_start_ts is None:
             self._capture_start_ts = ts
         self._pending_refresh = True
-        if all(len(self._samples_by_pv.get(pv, [])) >= self._capture_goal for pv in self._selected_pvs()):
+        if not self._rolling_capture and all(len(self._samples_by_pv.get(pv, [])) >= self._capture_goal for pv in self._selected_pvs()):
             self._log("Capture completed")
             self.stop_capture()
 
@@ -1443,8 +1464,9 @@ class DaqWindow(QtWidgets.QMainWindow):
                     f"{pv}: peak {compact_float_text(analysis['peak_freq_hz'])} Hz @ {compact_float_text(analysis['peak_amplitude'])}"
                 )
 
-        self.time_plot.set_series(time_series)
-        self.spectrum_window.set_plots(time_series, freq_series, " | ".join(summary_parts))
+        visible = self._visible_pvs()
+        self.time_plot.set_series({k:v for k,v in time_series.items() if k in visible})
+        self.spectrum_window.set_plots({}, {k:v for k,v in freq_series.items() if k in visible}, " | ".join(summary_parts))
         self._reload_stats_table(selected)
         self._update_capture_status()
 
@@ -1491,11 +1513,13 @@ class DaqWindow(QtWidgets.QMainWindow):
             self.capture_status.setText(
                 f"Idle: min {min(counts)} / {self._capture_goal}, max {max(counts)} / {self._capture_goal}"
             )
+        if self._capture_active and self._rolling_capture:
+            self.capture_status.setText(f"Continuous capture · {min(counts)}–{max(counts)} buffered / PV · Stop to analyze")
         if self._capture_active and self._trigger is not None:
             self.capture_status.setText('Triggered — collecting post-trigger data' if self._trigger.fired else 'Armed — waiting for threshold crossing')
         self.start_btn.setEnabled(not self._capture_active)
         self.stop_btn.setEnabled(self._capture_active)
-        for w in (*self.trigger_controls,*self.capture_edit_buttons,self.sample_count_spin):
+        for w in (*self.trigger_controls,*self.capture_edit_buttons,self.sample_count_spin,self.continuous):
             w.setEnabled(not self._capture_active)
 
     def _log(self, message):
