@@ -54,6 +54,11 @@ class HardwareTrendWindow(QtWidgets.QDialog):
         export = QtWidgets.QPushButton("Export CSV")
         export.clicked.connect(self._export)
         controls.addWidget(export)
+        analyze=QtWidgets.QPushButton("Analyze in DAQ")
+        analyze.setToolTip("Analyze buffered numeric PV samples without acquiring again")
+        analyze.clicked.connect(self._analyze_daq)
+        controls.addWidget(analyze)
+        self._daq_windows=[]
         controls.addStretch(1)
         layout.addLayout(controls)
         self.trend = Trend([])
@@ -339,6 +344,26 @@ class HardwareTrendWindow(QtWidgets.QDialog):
     def _freeze(self, checked):
         self.trend.freeze(checked)
         self._sync_plots()
+
+    def _analyze_daq(self):
+        from ecmc_acquisition import sanitize_samples
+        from ecmc_daq_qt import DaqWindow
+        source=self.trend.frozen[1] if self.trend.frozen is not None else self.trend.samples
+        series={name:sanitize_samples(source.get(name,())) for name in self._pvs if self._visible.get(name)}
+        series={name:rows for name,rows in series.items() if rows}
+        if not series:
+            self.status.setText("No visible numeric samples to analyze")
+            return
+        origin=min(rows[0][0] for rows in series.values())
+        window=DaqWindow()
+        window._apply_session_payload({"version":1,"pvs":list(series),"samples_by_pv":series,
+            "capture_start_ts":origin,"analysis":{"range_auto":True}})
+        window.setWindowTitle("Hardware trend analysis"+(" [DEMO]" if self._demo_value is not None else ""))
+        window.setAttribute(QtCore.Qt.WA_DeleteOnClose,True)
+        self._daq_windows.append(window)
+        window.destroyed.connect(lambda *_: self._daq_windows.remove(window) if window in self._daq_windows else None)
+        window.show()
+        window.analysis_tabs.setCurrentIndex(1)
 
     def _export(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "Export acquired samples",
