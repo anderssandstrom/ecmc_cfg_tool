@@ -39,13 +39,26 @@ def hardware_pvs(prefix, master, slave, candidates, catalog=None):
     return [(s, f"{base}-{s}") for s in dict.fromkeys(suffixes)
             if re.fullmatch(r"[A-Za-z0-9_.:-]+", s)]
 
+def _ordered_keys(candidates,catalog):
+    known=list(dict.fromkeys(str(c or "").removesuffix(".ui").removeprefix("ecmc") for c in candidates))
+    known=[k for k in known if k in catalog["panels"]]
+    if known:
+        # Use an exact device mapping only where inventory confirms that its
+        # panel is the one reported by the IOC. Never guess a variant.
+        first=known[0]
+        exact={e["definition"] for e in catalog.get("hardware_inventory",[])
+               if e.get("resolved_panel")==first}
+        matches=[k for k in known[1:] if k in exact and k in catalog.get("generated_database",{})]
+        if matches:
+            return matches+[k for k in known if k not in matches]
+    return known
+
 def hardware_writable_pvs(prefix, master, slave, candidates, catalog=None):
     """Only channels explicitly associated with supported write widgets."""
     if catalog is None:
         catalog = load_catalog()
     base = f"{prefix.rstrip(':')}:m{int(master)}s{int(slave):03d}"
-    for candidate in candidates:
-        key = str(candidate or "").removesuffix(".ui").removeprefix("ecmc")
+    for key in _ordered_keys(candidates,catalog):
         if key in catalog["panels"]:
             return {f"{base}-{suffix}": kind for suffix, kind in
                     catalog.get("writable", {}).get(key, {}).items()
@@ -59,8 +72,7 @@ def hardware_views(prefix, master, slave, candidates, catalog=None):
         catalog = load_catalog()
     pairs = hardware_pvs(prefix, master, slave, candidates, catalog)
     by_name = dict(pairs)
-    for candidate in candidates:
-        key = str(candidate or "").removesuffix(".ui").removeprefix("ecmc")
+    for key in _ordered_keys(candidates,catalog):
         if key not in catalog["panels"]:
             continue
         overview = set(catalog.get("overview", {}).get(key, catalog["panels"][key])) | set(GENERIC)
@@ -80,8 +92,7 @@ def hardware_commands(prefix, master, slave, candidates, catalog=None):
     if catalog is None:
         catalog = load_catalog()
     base = f"{prefix.rstrip(':')}:m{int(master)}s{int(slave):03d}"
-    for candidate in candidates:
-        key = str(candidate or "").removesuffix(".ui").removeprefix("ecmc")
+    for key in _ordered_keys(candidates,catalog):
         if key in catalog["panels"]:
             return {f"{base}-{suffix}": cmd for suffix, cmd in catalog.get("commands", {}).get(key, {}).items()
                     if suffix in catalog["panels"][key] and re.fullmatch(r"[A-Za-z0-9_.:-]+", suffix)}

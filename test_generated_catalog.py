@@ -19,6 +19,19 @@ class GeneratedCatalogTests(unittest.TestCase):
         self.assertEqual(result['writable']['EL2068'],{'BO01':'caToggleButton'})
         self.assertEqual(result['writable']['EL9999'],{'BO01':'caToggleButton'})
         self.assertEqual(list(demo_definitions(result)),['EL9999'])
+        from ecmc_hardware_catalog import hardware_writable_pvs
+        result['panels']['Ex9999']=['BO01','BO02']
+        self.assertEqual(hardware_writable_pvs('IOC',0,1,['Ex9999','EL9999'],result),
+                         {'IOC:m0s001-BO01':'caToggleButton'})
+
+    def test_scalar_analog_and_explicit_trigger(self):
+        generated={'panels':{'Device':['AO01','AO01-RB','Drv01-Cmd','Drv01-TrgDS402Ena']},
+                   'database':{'Device':['AO01','AO01-RB','Drv01-Cmd','Drv01-TrgDS402Ena']},
+                   'writable':{'Device':{'AO01':'caTextEntry','AO01-RB':'caTextEntry','Drv01-Cmd':'caByteController'}},
+                   'commands':{'Device':{'Drv01-Cmd':{'release':128},'Drv01-TrgDS402Ena':{'release':1}}}}
+        result=merge_generated({'panels':{}},generated)
+        self.assertEqual(result['writable']['Device'],{'AO01':'caTextEntry'})
+        self.assertEqual(list(result['commands']['Device']),['Drv01-TrgDS402Ena'])
 
     def test_static_inherited_panel(self):
         with tempfile.TemporaryDirectory() as d:
