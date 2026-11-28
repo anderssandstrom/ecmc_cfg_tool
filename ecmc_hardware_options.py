@@ -144,3 +144,36 @@ def overview_signal(name):
     if group == 'Tp':
         return False
     return signal in ('Cmd','Cmd-RB','Stat','ErrAlrm','WrnAlrm','Spd','Spd-RB','PosCmd','PosCmd-RB','Trq','Trq-RB','DS402State','TrgDS402Ena','TrgDS402Dis','VelAct','PosDiff')
+
+
+def option_tab(name):
+    """Classify already-filtered OPT records; never infer enabled options."""
+    if name in ('HWType','PnlTyp','Online','Operational') or name.startswith('Alstate-'):
+        return 'Common'
+    if name.startswith('Cfg'):
+        return 'Config'
+    m=re.fullmatch(r'(Drv|Enc|Tp)\d\d-(.+)',name)
+    if not m:
+        return 'Diagnostics'
+    group,signal=m.groups()
+    if group=='Tp':
+        return 'TP'
+    if group=='Enc':
+        return 'Drive / encoder' if signal in ('PosAct','PosAct02','NotValid') else 'Diagnostics'
+    if signal.startswith('Tune'):
+        return 'Tune'
+    if signal.startswith('BI') or signal=='STO01':
+        return 'Inputs'
+    if signal in ('TrqOff','TrqOff-RB','ComAngle','ComAngle-RB'):
+        return 'Options'
+    return 'Drive / encoder' if overview_signal(name) else 'Diagnostics'
+
+OPTION_TABS=('Drive / encoder','TP','Inputs','Diagnostics','Tune','Options','Config')
+
+def option_pages(pairs):
+    pages={name:[] for name in OPTION_TABS}
+    for signal,pv in pairs:
+        name=option_tab(signal)
+        if name!='Common':
+            pages[name].append((signal,pv))
+    return [(name,rows) for name,rows in pages.items() if rows]

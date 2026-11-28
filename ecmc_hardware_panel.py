@@ -5,7 +5,7 @@ from threading import Lock
 from qt_compat import QtCore, QtWidgets
 from ecmc_epics import EpicsClient
 from ecmc_hardware_catalog import hardware_pvs, hardware_writable_pvs, hardware_views, hardware_commands
-from ecmc_hardware_options import variant, read_options, allowed_signal, demo_options, overview_signal
+from ecmc_hardware_options import variant, read_options, allowed_signal, demo_options, overview_signal, option_pages, option_tab
 from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
 from ecmc_waveform_widget import WaveformValue, waveform_summary
@@ -74,6 +74,9 @@ class HardwarePanel(QtWidgets.QWidget):
         self._monitor_generation = 0
         self._active_scope = set()
         self._overview_pvs = set()
+        self._option_tabs = None
+        self._option_page_pvs = []
+        self._option_grids = []
         self._expert_pvs = []
         self._expert_selector = None
         self._scope_initialized = False
@@ -227,7 +230,7 @@ class HardwarePanel(QtWidgets.QWidget):
                 experts.insert(0, ('Configured diagnostics', details))
         self._overview_pvs = {pv for _, pv in overview}
         self._expert_pvs = [{pv for _, pv in pairs} for _, pairs in experts]
-        self.build_cards(overview)
+        self.build_cards(pairs if key else overview, opt=bool(key))
         self._expert_definitions = experts
         self._expert_built = False
         self._expert_selector = None
@@ -242,6 +245,10 @@ class HardwarePanel(QtWidgets.QWidget):
             index = self._expert_selector.currentIndex() if self._expert_selector is not None else -1
             selected = self._expert_pvs[index] if 0 <= index < len(self._expert_pvs) else set()
             return set(self.device_values) | selected
+        if self._option_tabs is not None:
+            index=self._option_tabs.currentIndex()
+            selected=self._option_page_pvs[index] if 0 <= index < len(self._option_page_pvs) else set()
+            return set(self.device_values) | selected | set(self._alarm_values)
         return set(self.device_values) | self._overview_pvs
 
     def _invalidate_scope(self):
@@ -680,7 +687,7 @@ class HardwarePanel(QtWidgets.QWidget):
         layout.addWidget(pane)
         return group
 
-    def build_cards(self, pairs):
+    def build_cards(self, pairs, opt=False):
         root = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(root)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -698,8 +705,11 @@ class HardwarePanel(QtWidgets.QWidget):
             item = header.takeAt(0)
             if item.widget() is not None:
                 item.widget().deleteLater()
-        channels, other, digital = {}, [], {'BI': [], 'BO': []}
-        for name, pv in pairs:
+        self._option_tabs=None
+        self._option_page_pvs=[]
+        self._option_grids=[]
+        content=[]
+        for name,pv in pairs:
             if name.endswith('Alrm') or name.endswith(('-NotValid','-OvrLoad')) or name in ('Online', 'Operational'):
                 self._alarm_values[pv] = (name, None)
             if name == "PnlTyp":
@@ -710,6 +720,59 @@ class HardwarePanel(QtWidgets.QWidget):
                 header.addWidget(label)
                 self.device_values[pv] = (name, label)
                 continue
+            content.append((name,pv))
+        header.addStretch(1)
+        if opt:
+            tabs=BoundedTabWidget()
+            tabs.setUsesScrollButtons(True)
+            tabs.setSizePolicy(QtWidgets.QSizePolicy.Ignored,QtWidgets.QSizePolicy.Expanding)
+            self._option_tabs=tabs
+            for title,rows in option_pages(content):
+                page=QtWidgets.QWidget()
+                page_layout=QtWidgets.QVBoxLayout(page)
+                page_layout.setContentsMargins(3,3,3,3)
+                page_layout.setSpacing(3)
+                grid,widgets=self._build_channel_page(page_layout,rows)
+                scroll=QtWidgets.QScrollArea()
+                scroll.setWidgetResizable(True)
+                scroll.setWidget(page)
+                scroll.viewport().installEventFilter(self)
+                tabs.addTab(scroll,title)
+                self._option_grids.append((grid,widgets))
+                self._option_page_pvs.append({pv for _,pv in rows})
+            layout.addWidget(tabs,1)
+            tabs.currentChanged.connect(self._option_page_changed)
+            self._channel_grid=None
+            self._channel_widgets=[]
+            self._channel_columns=0
+        else:
+            self._channel_grid,self._channel_widgets=self._build_channel_page(layout,content)
+            self._channel_columns=0
+        self.cards.setWidget(root)
+        if opt:
+            self._select_option_grid()
+        self._reflow_channels()
+        QtCore.QTimer.singleShot(0,self._reflow_channels)
+
+    def _select_option_grid(self):
+        if self._option_tabs is None:
+            return
+        index=self._option_tabs.currentIndex()
+        if 0<=index<len(self._option_grids):
+            self._channel_grid,self._channel_widgets=self._option_grids[index]
+            self._channel_columns=0
+
+    def _option_page_changed(self,*_):
+        if isinstance(self._write_task,StateTask):
+            self._write_task.cancelled.set()
+        self._select_option_grid()
+        self._reflow_channels()
+        QtCore.QTimer.singleShot(0,self._reflow_channels)
+        self._scope_changed()
+
+    def _build_channel_page(self,layout,pairs):
+        channels, other, digital = {}, [], {'BI': [], 'BO': []}
+        for name, pv in pairs:
             io = re.fullmatch(r"(BI|BO)(\d+)(.*)", name)
             if io:
                 digital[io[1]].append((name, pv, int(io[2]), io[3]))
@@ -720,14 +783,11 @@ class HardwarePanel(QtWidgets.QWidget):
                 channels.setdefault(int(number), {}).setdefault(kind + number, []).append((name, pv, suffix or "Value"))
             else:
                 other.append((name, pv, name))
-        header.addStretch(1)
         for kind, signals in digital.items():
             if signals:
                 layout.addWidget(self._digital_group(kind, signals), 0, QtCore.Qt.AlignLeft)
         grid = QtWidgets.QGridLayout()
-        self._channel_grid = grid
-        self._channel_widgets = []
-        self._channel_columns = 0
+        widgets = []
         for i, (ch, groups) in enumerate(sorted(channels.items())):
             col = QtWidgets.QWidget()
             col.setMaximumWidth(360)
@@ -741,7 +801,7 @@ class HardwarePanel(QtWidgets.QWidget):
             for group, rows in sorted(groups.items(), key=lambda item: ({"Drv":0,"Enc":1,"Tp":2}.get(re.sub(r"\d+$","",item[0]),3),item[0])):
                 stack.addWidget(self._group(group, rows))
             stack.addStretch(1)
-            self._channel_widgets.append(col)
+            widgets.append(col)
             grid.addWidget(col, i, 0, QtCore.Qt.AlignTop)
         grid.setColumnStretch(0, 0)
         layout.addLayout(grid)
@@ -749,12 +809,10 @@ class HardwarePanel(QtWidgets.QWidget):
         if other:
             layout.addWidget(self._group("Other signals", other))
         layout.addStretch(1)
-        self.cards.setWidget(root)
-        self._reflow_channels()
-        QtCore.QTimer.singleShot(0, self._reflow_channels)
+        return grid,widgets
 
     def eventFilter(self, watched, event):
-        if watched is self.cards.viewport() and event.type() == QtCore.QEvent.Resize:
+        if event.type() == QtCore.QEvent.Resize and (watched is self.cards.viewport() or (self._option_tabs is not None and self._option_tabs.currentWidget() is not None and watched is self._option_tabs.currentWidget().viewport())):
             QtCore.QTimer.singleShot(0, self._reflow_channels)
         return super().eventFilter(watched, event)
 
@@ -764,7 +822,8 @@ class HardwarePanel(QtWidgets.QWidget):
         required = max(w.minimumSizeHint().width() for w in self._channel_widgets)
         preferred = max(300, required, max(w.sizeHint().width() for w in self._channel_widgets))
         preferred = min(540, preferred)
-        columns = column_count(visible_width(self.cards.viewport())-12, len(self._channel_widgets), preferred)
+        viewport=self._option_tabs.currentWidget().viewport() if self._option_tabs is not None and self._option_tabs.currentWidget() is not None else self.cards.viewport()
+        columns = column_count(visible_width(viewport)-12, len(self._channel_widgets), preferred)
         if columns == self._channel_columns:
             return
         self._channel_columns = columns
