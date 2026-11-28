@@ -27,6 +27,8 @@ class HardwareDemo:
                         status = 64
                 elif control & 0x80:
                     status = 64
+                elif control & 0x0f == 2:
+                    status = 7 if status == 39 else 64
                 elif not control & 2:
                     status = 64
                 elif not control & 4:

@@ -44,3 +44,34 @@ def edit_controlword(original, changes):
             raise ValueError("Unsupported controlword bit")
         value = value | (1 << bit) if enabled else value & ~(1 << bit)
     return value
+
+TARGETS = ("Switch on disabled", "Ready to switch on", "Switched on",
+           "Operation enabled", "Quick stop active", "Reset fault")
+
+def transition_word(state, target, original):
+    """One standard transition, preserving mode-specific and manufacturer bits."""
+    if target not in TARGETS or word_number(original) is None:
+        raise ValueError("Invalid target or unavailable controlword")
+    if state == target:
+        return None
+    if target == "Reset fault":
+        if state != "Fault":
+            return None
+        return (original & ~0x80) if original & 0x80 else (original | 0x80)
+    if state in ("Fault", "Fault reaction active", "Not ready to switch on", "Unavailable", "Unknown state"):
+        raise ValueError("Drive is not ready for this transition")
+    if target == "Quick stop active" and state not in ("Operation enabled", "Quick stop active"):
+        raise ValueError("Quick stop requires operation enabled")
+    if target == "Switch on disabled":
+        command=0
+    elif target == "Ready to switch on":
+        command=6
+    elif target == "Quick stop active":
+        command=2
+    elif state in ("Switch on disabled", "Quick stop active"):
+        command=6
+    elif state == "Ready to switch on":
+        command=7
+    else:
+        command=15 if target=="Operation enabled" else 7
+    return (original & ~0x8f) | command

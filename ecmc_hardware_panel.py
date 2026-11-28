@@ -11,7 +11,8 @@ from ecmc_hardware_demo import HardwareDemo
 from ecmc_waveform_widget import WaveformValue, waveform_summary
 from ecmc_hardware_widgets import HardwareSymbol, CompactBit, SignalValue, WordValue, BooleanValue, BooleanStatus, AnalogValue, boolean_value, signal_role, AlarmSummary, signal_caption, digital_pair_status
 from ecmc_ds402_widget import DS402Status, DS402Word, DS402StateMap, controlword_dialog
-from ecmc_ds402 import word_number
+from ecmc_ds402 import word_number, decode_state, TARGETS, transition_word
+from ecmc_ds402_task import StateTask
 
 
 class ReadSignals(QtCore.QObject):
@@ -64,6 +65,7 @@ class HardwarePanel(QtWidgets.QWidget):
         self._expert_built = False
         self._closed = False
         self._write_task = None
+        self._state_controls = []
         self.writable = {}
         self.commands = {}
         self._enum_task = None
@@ -149,6 +151,8 @@ class HardwarePanel(QtWidgets.QWidget):
 
     def set_write_protected(self, protected):
         self._write_protected = bool(protected)
+        if protected and isinstance(self._write_task, StateTask):
+            self._write_task.cancelled.set()
         self.write_enable.setChecked(not protected)
         self._update_edit_cursors()
 
@@ -292,6 +296,8 @@ class HardwarePanel(QtWidgets.QWidget):
         QtCore.QTimer.singleShot(0, self._reflow_channels)
 
     def hideEvent(self, event):
+        if isinstance(self._write_task, StateTask):
+            self._write_task.cancelled.set()
         super().hideEvent(event)
         if self._scope_initialized and not self._closed:
             self._scope_changed(force=True)
@@ -442,6 +448,12 @@ class HardwarePanel(QtWidgets.QWidget):
             self._click_write(self.table.item(row, 3).text())
 
     def _update_edit_cursors(self, *_):
+        for mapping,targets,apply in self._state_controls:
+            target=targets.currentText()
+            trigger=mapping.get({'Operation enabled':'TrgDS402Ena','Switch on disabled':'TrgDS402Dis'}.get(target))
+            pv=trigger if trigger in self.commands else mapping.get('Cmd')
+            row=self.rows.get(mapping.get('Stat'))
+            apply.setEnabled(bool(row is not None and self.table.item(row,2).text() in ('Read OK','Simulated') and self._can_write(pv)))
         for pv, buttons in self._command_buttons.items():
             for button in buttons:
                 button.setEnabled(self._can_write(pv))
@@ -502,10 +514,12 @@ class HardwarePanel(QtWidgets.QWidget):
         detail = [r for r in rows if r not in primary and r not in status]
         ds402 = kind == 'Drv' and self._is_ds402(title)
         if ds402:
-            dedicated = [r for r in rows if r[2] in ('Stat', 'Cmd', 'Cmd-RB')]
+            dedicated = [r for r in rows if r[2] in ('Stat', 'Cmd', 'Cmd-RB', 'TrgDS402Ena', 'TrgDS402Dis')]
             if dedicated:
                 outer.addWidget(self._ds402_group(dedicated))
                 detail = [r for r in detail if r not in dedicated]
+                primary = [r for r in primary if r not in dedicated]
+                status = [r for r in status if r not in dedicated]
         if primary:
             hero = QtWidgets.QHBoxLayout()
             # Values are more useful than a repeated decorative schematic.
@@ -529,7 +543,7 @@ class HardwarePanel(QtWidgets.QWidget):
                 leds.addWidget(label, i // 2, (i % 2) * 2)
                 leds.addWidget(self._value_widget(name, pv), i // 2, (i % 2) * 2 + 1)
             outer.addLayout(leds)
-        command_rows = [(name,pv) for name,pv,_ in rows if pv in self.commands]
+        command_rows = [(name,pv) for name,pv,short in rows if pv in self.commands and not (ds402 and short in ('Cmd','TrgDS402Ena','TrgDS402Dis'))]
         if command_rows:
             actions = QtWidgets.QHBoxLayout()
             for name,pv in command_rows:
@@ -558,54 +572,112 @@ class HardwarePanel(QtWidgets.QWidget):
         suffixes = {pv.rsplit(':', 1)[-1].split('-', 1)[-1] for pv in self.rows}
         return title + '-TrgDS402Ena' in suffixes and title + '-TrgDS402Dis' in suffixes
 
+    def _state_request(self, mapping, target):
+        status=mapping.get('Stat')
+        control=mapping.get('Cmd')
+        trigger=mapping.get({'Operation enabled':'TrgDS402Ena','Switch on disabled':'TrgDS402Dis'}.get(target))
+        if trigger not in self.commands:
+            trigger=None
+        if self.writable.get(control)!='caByteController':
+            control=None
+        if not status or not self._can_write(trigger or control):
+            return
+        row=self.rows.get(status)
+        if row is None or self.table.item(row,2).text() not in ('Read OK','Simulated'):
+            return
+        if not self.demo and QtWidgets.QMessageBox.question(
+                self,'Confirm drive state',f'Request {target}? This may enable motion or remove torque.',
+                QtWidgets.QMessageBox.Yes|QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No)!=QtWidgets.QMessageBox.Yes:
+            return
+        if not self._can_write(trigger or control):
+            return
+        if self.demo:
+            try:
+                if trigger:
+                    self._demo_model.write(trigger,1,ds402=True)
+                else:
+                    for _ in range(8):
+                        state=decode_state(self._demo_value(status))
+                        if state==target or (target=='Reset fault' and state!='Fault'):
+                            break
+                        word=transition_word(state,target,word_number(self._demo_value(control)))
+                        if word is None: break
+                        self._demo_model.write(control,word,ds402=True)
+                self._demo_tick()
+                if target!='Reset fault' and decode_state(self._demo_value(status))!=target:
+                    raise RuntimeError('Target not reached')
+            except Exception as ex:
+                QtWidgets.QMessageBox.warning(self,'State request',str(ex))
+            return
+        self.selector.setEnabled(False)
+        self.refresh_button.setEnabled(False)
+        self.status.setText('Requesting '+target)
+        self._write_task=StateTask(status,control,trigger,target,self.timeout)
+        self._write_task.signals.finished.connect(self._write_finished)
+        self._update_edit_cursors()
+        QtCore.QThreadPool.globalInstance().start(self._write_task)
+
     def _ds402_group(self, rows):
-        group = QtWidgets.QGroupBox("CiA 402")
-        layout = QtWidgets.QGridLayout(group)
-        layout.setContentsMargins(4, 3, 4, 3)
-        layout.setSpacing(2)
-        by_suffix = {short: (name, pv) for name, pv, short in rows}
-        row = 0
+        group = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(group)
+        layout.setContentsMargins(0,0,0,0)
+        layout.setSpacing(3)
+        by_suffix = {short: (name,pv) for name,pv,short in rows}
+        mapping={short:pv for short,(name,pv) in by_suffix.items()}
         if 'Stat' in by_suffix:
-            name, pv = by_suffix['Stat']
-            state = DS402Status()
-            self._bind(state, pv)
-            self.card_values.setdefault(pv, []).append((name, state))
-            layout.addWidget(state, row, 0, 1, 3)
-            row += 1
-        for short in ('Cmd', 'Cmd-RB', 'Stat'):
-            if short not in by_suffix:
-                continue
-            name, pv = by_suffix[short]
-            label = QtWidgets.QLabel({'Cmd': 'CW', 'Cmd-RB': 'CW RB', 'Stat': 'SW'}[short])
-            self._bind(label, pv)
-            layout.addWidget(label, row, 0)
-            word = DS402Word(lambda pv=pv: self._click_write(pv), status=short == 'Stat',
-                             bit_callback=(lambda old, bit, pv=pv: self._direct_bit(pv, old, bit)) if short == 'Cmd' and self.writable.get(pv) == 'caByteController' else None)
-            self._bind(word, pv)
-            self.card_values.setdefault(pv, []).append((name, word))
-            layout.addWidget(word, row, 1)
-            number = SignalValue("—", lambda pv=pv: self._click_write(pv))
-            self._bind(number, pv)
-            self.card_values.setdefault(pv, []).append((name, number))
-            number.setProperty("ds402_hex", True)
-            layout.addWidget(number, row, 2)
-            row += 1
-        if 'Stat' in by_suffix:
-            name, pv = by_suffix['Stat']
-            details = QtWidgets.QToolButton()
-            details.setText("State details")
-            details.setCheckable(True)
-            details.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
-            details.setArrowType(QtCore.Qt.RightArrow)
-            layout.addWidget(details, row, 0, 1, 3)
-            state_map = DS402StateMap()
-            self._bind(state_map, pv)
-            self.card_values.setdefault(pv, []).append((name, state_map))
-            state_map.hide()
-            details.toggled.connect(state_map.setVisible)
-            details.toggled.connect(lambda on: details.setArrowType(QtCore.Qt.DownArrow if on else QtCore.Qt.RightArrow))
-            layout.addWidget(state_map, row+1, 0, 1, 3)
-        layout.setColumnStretch(1, 1)
+            name,pv=by_suffix['Stat']
+            state=DS402Status()
+            self._bind(state,pv)
+            self.card_values.setdefault(pv,[]).append((name,state))
+            layout.addWidget(state)
+            targets=QtWidgets.QComboBox()
+            for target in TARGETS:
+                trigger=mapping.get({'Operation enabled':'TrgDS402Ena','Switch on disabled':'TrgDS402Dis'}.get(target))
+                if trigger in self.commands or self.writable.get(mapping.get('Cmd'))=='caByteController':
+                    targets.addItem(target)
+            if targets.count():
+                line=QtWidgets.QHBoxLayout()
+                targets.setCurrentText('Operation enabled')
+                apply=QtWidgets.QPushButton('Apply')
+                line.addWidget(targets,1)
+                line.addWidget(apply)
+                layout.addLayout(line)
+                apply.clicked.connect(lambda checked=False,m=mapping,t=targets:self._state_request(m,t.currentText()))
+                self._state_controls.append((mapping,targets,apply))
+                targets.currentTextChanged.connect(self._update_edit_cursors)
+                apply.setEnabled(False)
+        details=QtWidgets.QToolButton()
+        details.setText('Words / bits')
+        details.setCheckable(True)
+        details.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+        details.setArrowType(QtCore.Qt.RightArrow)
+        layout.addWidget(details,0,QtCore.Qt.AlignLeft)
+        pane=QtWidgets.QWidget()
+        grid=QtWidgets.QGridLayout(pane)
+        grid.setContentsMargins(0,0,0,0)
+        grid.setSpacing(2)
+        for row,short in enumerate(('Cmd','Cmd-RB','Stat')):
+            if short not in by_suffix: continue
+            name,pv=by_suffix[short]
+            label=QtWidgets.QLabel({'Cmd':'CW','Cmd-RB':'CW RB','Stat':'SW'}[short])
+            self._bind(label,pv)
+            grid.addWidget(label,row,0)
+            word=DS402Word(lambda pv=pv,short=short:self._click_write(pv) if short=='Cmd' else False,
+                          status=short!='Cmd',
+                          bit_callback=(lambda old,bit,pv=pv:self._direct_bit(pv,old,bit)) if short=='Cmd' and self.writable.get(pv)=='caByteController' else None)
+            self._bind(word,pv)
+            self.card_values.setdefault(pv,[]).append((name,word))
+            grid.addWidget(word,row,1)
+            number=SignalValue('—',lambda pv=pv,short=short:self._click_write(pv) if short=='Cmd' else False)
+            self._bind(number,pv)
+            number.setProperty('ds402_hex',True)
+            self.card_values.setdefault(pv,[]).append((name,number))
+            grid.addWidget(number,row,2)
+        pane.hide()
+        details.toggled.connect(pane.setVisible)
+        details.toggled.connect(lambda on:details.setArrowType(QtCore.Qt.DownArrow if on else QtCore.Qt.RightArrow))
+        layout.addWidget(pane)
         return group
 
     def build_cards(self, pairs):
@@ -615,6 +687,7 @@ class HardwarePanel(QtWidgets.QWidget):
         layout.setSpacing(4)
         self.card_values = {}
         self._command_buttons = {}
+        self._state_controls = []
         self.device_values = {}
         self._digital_pairs = []
         self._alarm_values = {}
@@ -741,15 +814,15 @@ class HardwarePanel(QtWidgets.QWidget):
             by_channel.setdefault(ch,{})[suffix]=(name,pv)
         suffixes=[s for s in columns if any(s in row for row in by_channel.values())]
         suffixes+=sorted({s for row in by_channel.values() for s in row if s not in columns})
-        for bank,start in enumerate(range(0,len(channels),8)):
-            offset=bank*(len(suffixes)+2)
+        for start in (0,):
+            offset=0
             grid.addWidget(QtWidgets.QLabel("CH"),0,offset)
             for j,suffix in enumerate(suffixes,1):
                 heading=QtWidgets.QLabel(columns.get(suffix,signal_caption(suffix.lstrip("-"))))
                 heading.setAlignment(QtCore.Qt.AlignCenter)
                 grid.addWidget(heading,0,offset+j)
-            for row,ch in enumerate(channels[start:start+8],1):
-                grid.addWidget(QtWidgets.QLabel(f"{ch:02d}"),row,offset)
+            for row,ch in enumerate(channels,1):
+                grid.addWidget(QtWidgets.QLabel(f"{kind}{ch:02d}"),row,offset)
                 entries=by_channel[ch]
                 for j,suffix in enumerate(suffixes,1):
                     if suffix not in entries:
@@ -1053,6 +1126,8 @@ class HardwarePanel(QtWidgets.QWidget):
 
     def closeEvent(self, event):
         self._closed = True
+        if isinstance(self._write_task, StateTask):
+            self._write_task.cancelled.set()
         self._demo_timer.stop()
         self._stop_monitors()
         super().closeEvent(event)
