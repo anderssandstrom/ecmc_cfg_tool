@@ -301,10 +301,13 @@ class CompactBit(BooleanStatus):
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         color=QtGui.QColor(self.active_color if self.value==1 else "#89939e")
         p.setPen(QtGui.QPen(QtGui.QColor("#287bc0") if self._editable else color,1.2))
-        p.setBrush(color if self.value is not None else QtCore.Qt.NoBrush)
-        p.drawRoundedRect(QtCore.QRectF(5,4,12,12),2,2)
+        p.setBrush(QtGui.QColor("white") if self._editable else color if self.value is not None else QtCore.Qt.NoBrush)
+        if self.callback:
+            p.drawRoundedRect(QtCore.QRectF(5,4,12,12),2,2)
+        else:
+            p.drawEllipse(QtCore.QRectF(6,5,10,10))
         if self.callback and self.value==1:
-            p.setPen(QtGui.QPen(QtGui.QColor("white"),1.5))
+            p.setPen(QtGui.QPen(QtGui.QColor("#26804b" if self._editable else "white"),1.5))
             p.drawLine(7,10,10,13)
             p.drawLine(10,13,15,7)
         p.end()
@@ -341,6 +344,11 @@ class DigitalArrayValue(WordValue):
             p.drawText(QtCore.QRectF(x,0,cell,16),QtCore.Qt.AlignCenter,str(bit))
             color=QtGui.QColor('#26804b' if self.word is not None and self.word & (1<<bit) else '#89939e')
             p.setPen(QtGui.QPen(QtGui.QColor('#287bc0') if self._editable else color,1))
-            p.setBrush(color if self.word is not None else QtCore.Qt.NoBrush)
-            p.drawRoundedRect(QtCore.QRectF(x+1,18,max(2,cell-2),13),2,2)
+            p.setBrush(QtGui.QColor('white') if self._editable else color if self.word is not None else QtCore.Qt.NoBrush)
+            rect=QtCore.QRectF(x+1,18,max(2,cell-2),13)
+            p.drawRoundedRect(rect,2,2)
+            if self._editable and self.word is not None and self.word & (1<<bit):
+                p.setPen(QtGui.QPen(QtGui.QColor('#26804b'),1.5))
+                p.drawLine(QtCore.QPointF(rect.left()+2,rect.center().y()),QtCore.QPointF(rect.center().x(),rect.bottom()-3))
+                p.drawLine(QtCore.QPointF(rect.center().x(),rect.bottom()-3),QtCore.QPointF(rect.right()-2,rect.top()+3))
         p.end()

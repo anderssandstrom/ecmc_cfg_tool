@@ -1139,7 +1139,12 @@ class HardwarePanel(QtWidgets.QWidget):
         self._submit_write(pv, new, direct=True, expected=old)
 
     def _direct_array_bit(self,pv,old,bit):
-        if not re.search(r'-BO\d+-Arr
+        if not re.search(r'-BO\d+-Arr$',pv) or self.writable.get(pv)!='caByteController' or not self._can_write(pv):
+            return
+        if 0<=bit<16 and word_number(self.table.item(self.rows[pv],1).text())==old:
+            self._submit_write(pv,old ^ (1<<bit),expected=old)
+
+    def _direct_bit(self, pv, old, bit):
         if self.writable.get(pv) != 'caByteController' or not pv.endswith('-Cmd') or not self._can_write(pv):
             return
         if not 0 <= bit < 16 or word_number(self.table.item(self.rows[pv], 1).text()) != old:

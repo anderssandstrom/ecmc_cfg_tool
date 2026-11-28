@@ -192,14 +192,17 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.move_mode.addItem("Absolute","abs")
         self.move_mode.addItem("Relative","rel")
         self.move_mode.addItem("Velocity","vel")
+        self._draft_dirty = set()
         self.move_target = QtWidgets.QLineEdit()
         self.move_target.setPlaceholderText("Position / distance")
         self.move_target.setMaximumWidth(160)
         self.move_target.textChanged.connect(self._refresh_draft)
+        self.move_target.textEdited.connect(self._target_edited)
         self.move_mode.currentIndexChanged.connect(self._refresh_draft)
         self.move_mode.currentIndexChanged.connect(self._mode_changed)
         self.move_velocity = QtWidgets.QLineEdit()
         self.move_velocity.setPlaceholderText("Velocity")
+        self.move_velocity.textEdited.connect(lambda *_:self._draft_dirty.add("velocity"))
         self.move_velocity.setMaximumWidth(100)
         self.move_button = QtWidgets.QPushButton("▶ Move")
         self.move_button.setStyleSheet("font-weight: bold; color: #26804b;")
@@ -445,14 +448,19 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 self._launch_position_task(SourceModeTask(self.base,suffix,mode))
         return True
 
+    def _target_edited(self,*_):
+        self._draft_dirty.add('target')
+        self._refresh_draft()
+
     def _refresh_draft(self,*_):
         if self._overview is not None and hasattr(self,"move_target"):
-            self._overview.set_pending(self.move_target.text() if self.move_mode.currentData()=="abs" else None)
+            self._overview.set_pending(self.move_target.text() if self.move_mode.currentData()=="abs" and "target" in self._draft_dirty else None)
 
     def _stage_target(self,value):
         if not self.arm.isChecked() or self._writes or self._enum_task is not None or not self.isVisible() or self._jog_native is not None or self._jog_stops:
             return
         self.move_mode.setCurrentIndex(0)
+        self._draft_dirty.add('target')
         self.move_target.setText(format_axis_value(value,self._precision))
         if not self.move_velocity.text():
             suffix = "-TgtVelCmd" if self.interface.currentData()=="native" else ".VELO"
@@ -556,7 +564,27 @@ class AxisExpertPanel(QtWidgets.QWidget):
             return
         self._launch_position_task(HomeTask(self.base,procedure))
 
+    def _prefill_move(self,samples):
+        native=self.interface.currentData()=="native"
+        mode=self.move_mode.currentData()
+        fields=[("velocity",self.move_velocity,"-TgtVelCmd" if native else ".VELO")]
+        if mode=="abs":
+            fields.append(("target",self.move_target,"-TgtPosCmd" if native else ".VAL"))
+        for key,field,suffix in fields:
+            if key in self._draft_dirty or field.hasFocus():
+                continue
+            value=samples.get(suffix)
+            try:
+                valid=value is not None and math.isfinite(float(value))
+            except (ValueError,TypeError,OverflowError):
+                valid=False
+            text=format_axis_value(value,self._precision) if valid else ""
+            if field.text()!=text:
+                field.setText(text)
+
     def _mode_changed(self,*_):
+        self._draft_dirty.discard("target")
+        self.move_target.clear()
         velocity_mode = self.move_mode.currentData()=="vel"
         self.move_target.setVisible(not velocity_mode)
         self.move_velocity.setPlaceholderText("Signed velocity" if velocity_mode else "Velocity")
@@ -585,6 +613,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 return
             self._demo_motion[native].start(target,velocity)
             self._overrides.update({"-TgtPosCmd":target,"-TgtVelCmd":velocity} if native else {".VAL":target,".VELO":velocity})
+            self._draft_dirty.clear()
             self._tick()
             return
         self._launch_position_task(PositionTask(self.base,native,relative,target,velocity))
@@ -699,6 +728,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
                 self._update_controls()
                 if error:
                     QtWidgets.QMessageBox.warning(self,"Move not confirmed",error)
+                elif isinstance(task,PositionTask):
+                    self._draft_dirty.clear()
+                    self._refresh_draft()
         task.signals.finished.connect(done)
         self._update_controls()
         QtCore.QThreadPool.globalInstance().start(task)
@@ -941,7 +973,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
         if self._encoder_overview is not None:
             self._encoder_overview.set_axis_state(samples.get("-EncCnt"),samples.get("-SetEncIdCmd-RB"),samples.get("-EncMode-RB"),self.arm.isChecked() and not self._writes and self._jog_native is None and not self._jog_stops and all(samples.get(k)==0 for k in ("-EnaAct","-EnaCmd-RB","-Busy","-Moving")))
         self._readiness.update_samples(samples)
-        self.alarm_summary.set_summary(*axis_alarm_summary(samples, self.interface.currentData() == 'native'))
+        severity,message=axis_alarm_summary(samples, self.interface.currentData() == 'native')
+        self.alarm_summary.set_summary(severity, 'No active alarms or interlocks' if severity=='ok' else message)
+        self._prefill_move(samples)
         self._overview.set_values(samples)
         for suffix,label in self._summary_values.items():
             text = format_axis_value(samples.get(suffix),self._precision)
