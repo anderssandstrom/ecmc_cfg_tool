@@ -175,6 +175,7 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
         self.active=False
         self.stop_pending=False
         self.pvs={}
+        self._daq_windows=[]
         self.latest={}
         self.points=[]
         self.sim_pos=0.
@@ -276,6 +277,10 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
         export=QtWidgets.QPushButton('Export CSV')
         export.clicked.connect(self.export_csv)
         row.addWidget(export)
+        analyze=QtWidgets.QPushButton('Analyze in DAQ')
+        analyze.setToolTip('Open buffered position and following-error samples; no new acquisition or motion commands.')
+        analyze.clicked.connect(self.open_daq)
+        row.addWidget(analyze)
         layout.addLayout(row)
         readouts=QtWidgets.QGridLayout()
         self.readouts={}
@@ -566,6 +571,31 @@ class TuningWindow(NativeMotionMixin,QtWidgets.QDialog):
         self.stats_sum_sq=0.
         self.stats_min=self.stats_max=None
         self.stats_start=time.monotonic()
+
+    def open_daq(self):
+        from ecmc_acquisition import sanitize_samples
+        from ecmc_daq_qt import DaqWindow
+        series={}
+        for trend in (self.position,self.error):
+            source=trend.frozen[1] if trend.frozen is not None else trend.samples
+            for key,points in source.items():
+                clean=sanitize_samples(points)
+                if clean:
+                    series[self.base+'-'+key]=clean
+        if not series:
+            self.status.setText('No buffered samples to analyze')
+            return
+        origin=min(points[0][0] for points in series.values())
+        window=DaqWindow()
+        window._apply_session_payload({
+            'version':1,'pvs':list(series),'samples_by_pv':series,
+            'capture_start_ts':origin,'analysis':{'range_auto':True}
+        })
+        window.setWindowTitle('Tuning capture — '+self.base+(' [DEMO]' if self.demo else ''))
+        window.setAttribute(QtCore.Qt.WA_DeleteOnClose,True)
+        self._daq_windows.append(window)
+        window.destroyed.connect(lambda *_: self._daq_windows.remove(window) if window in self._daq_windows else None)
+        window.show()
 
     def export_csv(self):
         path,_=QtWidgets.QFileDialog.getSaveFileName(self,'Export buffered PV samples','tuning.csv','CSV (*.csv)')
