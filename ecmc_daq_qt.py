@@ -390,8 +390,8 @@ class FrfWindow(QtWidgets.QWidget):
         for combo in (self.input,self.output): combo.addItems(list(samples))
         self.output.setCurrentIndex(1)
         self.segment=QtWidgets.QComboBox()
-        self.segment.addItems(["64","128","256","512","1024","2048"])
-        self.segment.setCurrentText("256")
+        self.segment.addItems(["Auto","64","128","256","512","1024","2048"])
+        self.segment.setCurrentText("Auto")
         for label,widget in (("Input",self.input),("Output",self.output),("FFT N",self.segment)):
             row.addWidget(QtWidgets.QLabel(label))
             row.addWidget(widget)
@@ -425,7 +425,20 @@ class FrfWindow(QtWidgets.QWidget):
         a,b=self.input.currentText(),self.output.currentText()
         try:
             if a==b: raise ValueError("Select distinct input and output signals")
-            result,n,fs=estimate_frf(self.samples[a],self.samples[b],int(self.segment.currentText()))
+            choice=self.segment.currentText()
+            if choice=="Auto":
+                segment=min(2048,_largest_power_of_two_leq(min(len(self.samples[a]),len(self.samples[b]))//4))
+                while segment>=16:
+                    try:
+                        result,n,fs=estimate_frf(self.samples[a],self.samples[b],segment)
+                        break
+                    except ValueError:
+                        segment//=2
+                else:
+                    raise ValueError("Not enough overlapping samples for frequency response")
+            else:
+                segment=int(choice)
+                result,n,fs=estimate_frf(self.samples[a],self.samples[b],segment)
         except (ValueError,KeyError,ZeroDivisionError) as exc:
             self.note.setText(str(exc))
             for plot in self.plots.values(): plot.set_series({})
@@ -433,7 +446,7 @@ class FrfWindow(QtWidgets.QWidget):
         for key in ("Magnitude","Phase","Coherence"):
             self.plots[key].set_series({key:result[key]})
         self.plots["PSD"].set_series({a:result["input PSD"],b:result["output PSD"]})
-        self.note.setText(f"H1 · Hann · 50% overlap · {n} segments · Fs {fs:.3g} Hz. Verify excitation and timestamp quality.")
+        self.note.setText(f"H1 · Hann · 50% overlap · FFT {segment} · {n} segments · Fs {fs:.3g} Hz. Verify excitation and timestamp quality.")
 
 
 class SpectrumWindow(QtWidgets.QMainWindow):
@@ -1194,6 +1207,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         self.stop_capture()
         self._trigger=None
         self._trigger_deadline=None
+        self._rolling_capture=False
 
         prefix = str(data.get("prefix", ""))
         timeout_s = float(data.get("timeout_s", self.timeout_spin.value()))
@@ -1319,6 +1333,8 @@ class DaqWindow(QtWidgets.QMainWindow):
         self._refresh_views()
 
     def _add_pv_from_editor(self):
+        if self._capture_active:
+            return
         self._add_pv(self.pv_edit.text().strip())
         self.pv_edit.clear()
 
@@ -1372,6 +1388,7 @@ class DaqWindow(QtWidgets.QMainWindow):
             self._trigger=TriggerCapture(pvs,trigger_pv,self.trigger_edge.currentIndex(),self.trigger_threshold.value(),self.trigger_pre.value(),self.trigger_post.value(),self._capture_goal)
         self._capture_start_ts = None
         self._capture_active = True
+        self.frf_panel.set_samples({})
         self._rolling_capture = self.continuous.isChecked() and self._trigger is None
         self.analysis_tabs.setCurrentIndex(0)
         self._analysis_range_auto = True
@@ -1394,6 +1411,8 @@ class DaqWindow(QtWidgets.QMainWindow):
         self._refresh_timer.stop()
         self._refresh_views()
         self._update_capture_status()
+        if self.analysis_tabs.currentIndex()==2:
+            self._update_frf_samples()
 
     def _analysis_tab_changed(self,index):
         self._pending_refresh=True
@@ -1468,6 +1487,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         summary_parts = []
         selected = self._selected_pvs()
         self._sync_analysis_range_controls()
+        compute_fft = not self._capture_active or self.analysis_tabs.currentIndex()==1
         for pv in selected:
             samples = list(self._samples_by_pv.get(pv, []) or [])
             if samples and self._capture_start_ts is None:
@@ -1475,6 +1495,9 @@ class DaqWindow(QtWidgets.QMainWindow):
             if samples:
                 origin = self._capture_start_ts if self._capture_start_ts is not None else samples[0][0]
                 time_series[pv] = [(max(0.0, float(ts) - float(origin)), float(val)) for ts, val in samples]
+            if not compute_fft:
+                self._analysis_by_pv[pv] = {"span_s": max(0.0,samples[-1][0]-samples[0][0]) if len(samples)>1 else None}
+                continue
             analysis = _analyze_signal(
                 samples,
                 origin_ts=self._capture_start_ts,
@@ -1503,7 +1526,10 @@ class DaqWindow(QtWidgets.QMainWindow):
                 shown[key]=[(t,(v-lo)/(hi-lo) if hi>lo else 0.5) for t,v in points]
         self.time_plot.set_axes(title="Time Domain",x_label="Time [s]",y_label="Normalized [0–1]" if normalized else "Value",empty_text="Add signals and start a capture.")
         self.time_plot.set_series(shown)
-        self.spectrum_window.set_plots({}, {k:v for k,v in freq_series.items() if k in visible}, " | ".join(summary_parts))
+        if compute_fft:
+            self.spectrum_window.set_plots({}, {k:v for k,v in freq_series.items() if k in visible}, " | ".join(summary_parts))
+        else:
+            self.spectrum_window.plot_widget.set_series({})
         self._reload_stats_table(selected)
         self._update_capture_status()
 
