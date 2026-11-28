@@ -2,7 +2,14 @@ name: Publish validated hardware snapshot
 on:
   push:
     branches: [feature/native-hardware-diagnostics]
-    paths: ['.github/workflows/publish-hardware-snapshot.yml']
+    paths:
+      - '.github/workflows/publish-hardware-snapshot.yml'
+      - 'test_hardware_expansion.py'
+      - 'test_full_generated_catalog.py'
+      - 'ecmc_generated_catalog.py'
+      - 'build_hardware_catalog.py'
+      - 'ecmc_hardware_inventory.py'
+      - 'ecmc_hardware_database.py'
   workflow_dispatch:
 permissions:
   contents: read
