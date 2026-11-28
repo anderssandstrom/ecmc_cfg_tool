@@ -505,11 +505,12 @@ class HardwarePanel(QtWidgets.QWidget):
         self.card_values.setdefault(pv, []).append((name, value))
         return value
 
-    def _group(self, title, rows):
+    def _group(self, title, rows, compact_title=False):
         kind = re.sub(r"\d+$", "", title)
         number = title[len(kind):]
         display = {'Drv':'Drive', 'Enc':'Encoder', 'Tp':'Touch probe', 'AI':'Analog input', 'AO':'Analog output'}.get(kind)
-        card = QtWidgets.QGroupBox(f'{display} {number}' if display else 'Channel '+number if kind=='CH' else title)
+        heading = (display if compact_title else f'{display} {number}') if display else ('Channel' if compact_title else 'Channel '+number) if kind=='CH' else title
+        card = QtWidgets.QGroupBox(heading)
         card.setMaximumWidth(540)
         outer = QtWidgets.QVBoxLayout(card)
         outer.setContentsMargins(4, 2, 4, 2)
@@ -799,12 +800,13 @@ class HardwarePanel(QtWidgets.QWidget):
             stack.setSpacing(3)
             title = QtWidgets.QLabel(f"Channel {ch:02d}")
             title.setStyleSheet("font-weight: bold;")
-            if len(groups)>1 or not all(g.startswith("CH") for g in groups):
+            shared_heading=len(channels)>1 and len(groups)>1
+            if shared_heading:
                 stack.addWidget(title)
             else:
                 title.deleteLater()
             for group, rows in sorted(groups.items(), key=lambda item: ({"Drv":0,"Enc":1,"Tp":2}.get(re.sub(r"\d+$","",item[0]),3),item[0])):
-                stack.addWidget(self._group(group, rows))
+                stack.addWidget(self._group(group, rows, compact_title=shared_heading or len(channels)==1))
             stack.addStretch(1)
             widgets.append(col)
             grid.addWidget(col, i, 0, QtCore.Qt.AlignTop)
@@ -882,15 +884,23 @@ class HardwarePanel(QtWidgets.QWidget):
         if paired:
             suffixes.remove("-Arr-RB")
             columns["-Arr"]="Command / readback"
+        single_array=len(channels)==1 and set(suffixes)<= {"-Arr","-Arr-RB"}
+        show_channel=not single_array
+        show_headers=not single_array
         for start in (0,):
-            offset=0
-            grid.addWidget(QtWidgets.QLabel("CH"),0,offset)
+            offset=0 if show_channel else -1
+            if show_channel:
+                grid.addWidget(QtWidgets.QLabel("CH"),0,offset)
             for j,suffix in enumerate(suffixes,1):
                 heading=QtWidgets.QLabel(columns.get(suffix,signal_caption(suffix.lstrip("-"))))
                 heading.setAlignment(QtCore.Qt.AlignCenter)
-                grid.addWidget(heading,0,offset+j)
-            for row,ch in enumerate(channels,1):
-                grid.addWidget(QtWidgets.QLabel(f"{kind}{ch:02d}"),row,offset)
+                if show_headers:
+                    grid.addWidget(heading,0,offset+j)
+                else:
+                    heading.deleteLater()
+            for row,ch in enumerate(channels,1 if show_headers else 0):
+                if show_channel:
+                    grid.addWidget(QtWidgets.QLabel(f"{kind}{ch:02d}"),row,offset)
                 entries=by_channel[ch]
                 for j,suffix in enumerate(suffixes,1):
                     if paired and suffix=="-Arr":
@@ -924,7 +934,17 @@ class HardwarePanel(QtWidgets.QWidget):
                         self.card_values.setdefault(pv,[]).append((name,value))
                     else:
                         value=self._value_widget(name,pv)
-                    grid.addWidget(value,row,offset+j,QtCore.Qt.AlignCenter)
+                    if single_array and kind=="BO":
+                        line=QtWidgets.QWidget()
+                        line_layout=QtWidgets.QHBoxLayout(line)
+                        line_layout.setContentsMargins(0,0,0,0)
+                        caption=QtWidgets.QLabel("RB" if suffix=="-Arr-RB" else "Cmd")
+                        self._bind(caption,pv)
+                        line_layout.addWidget(caption)
+                        line_layout.addWidget(value,1)
+                        grid.addWidget(line,row,offset+j)
+                    else:
+                        grid.addWidget(value,row,offset+j,QtCore.Qt.AlignCenter)
         return card
 
     def _update_summary(self):
