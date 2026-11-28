@@ -813,6 +813,15 @@ class DaqWindow(QtWidgets.QMainWindow):
         pv_row.addWidget(QtWidgets.QLabel("PV"))
         pv_row.addWidget(self.pv_edit, 1)
         pv_row.addWidget(add_btn)
+        self.preset_btn=QtWidgets.QToolButton()
+        self.preset_btn.setText("Presets")
+        self.preset_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        preset_menu=QtWidgets.QMenu(self.preset_btn)
+        for label,key in (("Axis positioning","position"),("Controller tuning","controller"),("RT thread timing","thread"),("EtherCAT domain","domain"),("RT logger","logger")):
+            action=preset_menu.addAction(label)
+            action.triggered.connect(lambda checked=False,k=key:self._add_preset(k))
+        self.preset_btn.setMenu(preset_menu)
+        pv_row.addWidget(self.preset_btn)
 
         pv_row.addSpacing(12)
         pv_row.addWidget(start_btn)
@@ -1332,6 +1341,51 @@ class DaqWindow(QtWidgets.QMainWindow):
             self._log(f"Added PV: {name}")
         self._refresh_views()
 
+    def _add_preset(self, key):
+        if self._capture_active:
+            return
+        from ecmc_diagnostic_presets import axis_diagnostic_pvs
+        prefix=self.prefix_edit.text().strip().rstrip(":")
+        if key in ("position","controller"):
+            item=self.pv_list.currentItem()
+            guess=""
+            if item is not None:
+                name=item.text()
+                for suffix in ("PosAct","PosSet","PosErr","VelAct","TgtPosCmd","Busy","AtTarget","ErrId"):
+                    if name.endswith("-"+suffix):
+                        guess=name[:-(len(suffix)+1)]
+                        break
+            base,ok=QtWidgets.QInputDialog.getText(self,"Axis preset","Full axis PV base:",text=guess)
+            if not ok or not base.strip():
+                return
+            names=axis_diagnostic_pvs(base.strip(),key)
+        else:
+            if not prefix:
+                prefix,ok=QtWidgets.QInputDialog.getText(self,"IOC preset","IOC prefix:")
+                if not ok or not prefix.strip():
+                    return
+                prefix=prefix.strip().rstrip(":")
+                self.prefix_edit.setText(prefix)
+            if key=="thread":
+                names=[prefix+":MCU-Thd"+stem+edge for stem in ("Prd","Snd","Exe","Lat") for edge in ("Min","Max")]
+            elif key=="logger":
+                names=[prefix+":MCU-RTLog-"+suffix for suffix in ("Cnt","DropCnt","Level")]
+            else:
+                from ecmc_engineering_compare import domain_signals
+                master,ok=QtWidgets.QInputDialog.getInt(self,"EtherCAT domain","Master index:",0,0,255)
+                if not ok: return
+                domain,ok=QtWidgets.QInputDialog.getInt(self,"EtherCAT domain","Domain index:",0,0,255)
+                if not ok: return
+                names=[name for index,name in domain_signals(prefix,master,domain+1) if index==domain]
+        existing=set(self._selected_pvs())
+        for name in names:
+            if name not in existing:
+                self._add_signal_item(name)
+                self._samples_by_pv[name]=[]
+                self._analysis_by_pv[name]={}
+                existing.add(name)
+        self._refresh_views()
+
     def _add_pv_from_editor(self):
         if self._capture_active:
             return
@@ -1582,7 +1636,7 @@ class DaqWindow(QtWidgets.QMainWindow):
             self.capture_status.setText('Triggered — collecting post-trigger data' if self._trigger.fired else 'Armed — waiting for threshold crossing')
         self.start_btn.setEnabled(not self._capture_active)
         self.stop_btn.setEnabled(self._capture_active)
-        for w in (*self.trigger_controls,*self.capture_edit_buttons,self.sample_count_spin,self.continuous):
+        for w in (*self.trigger_controls,*self.capture_edit_buttons,self.sample_count_spin,self.continuous,self.preset_btn,self.pv_edit):
             w.setEnabled(not self._capture_active)
 
     def _log(self, message):
