@@ -612,9 +612,29 @@ class IocNavigator(QtWidgets.QMainWindow):
                 status=health_status(kind,a,b)
             item.setText(4,status)
             item.setToolTip(4, status)
+            # Correlation is presented separately from the observed status.
+            # Never infer physical topology from numerical slave order.
+
             problem=is_problem(status)
             item.setForeground(4,QtGui.QBrush(QtGui.QColor('#b91c1c' if problem else '#16803b' if status in ('OP','Enabled','Connected','Ready') else '#64748b')))
             self._health_values['|'.join(names)]={'status':status,'pvs':names}
+        hardware_faults=[]
+        axis_faults=[]
+        for item,kind,names in self._health_items():
+            status=item.text(4)
+            if kind=='hardware' and status in ('Offline','Not OP'):
+                hardware_faults.append((item,names[0],status))
+            elif kind=='axis' and status.startswith('Error'):
+                axis_faults.append(item)
+        if enabled and hardware_faults:
+            summary=', '.join(f'{name}: {status}' for _,name,status in hardware_faults[:5])
+            if len(hardware_faults)>5:
+                summary+=f' (+{len(hardware_faults)-5} more)'
+            for item in axis_faults:
+                item.setToolTip(4,item.text(4)+'\nConcurrent EtherCAT faults: '+summary+
+                    '\nPossible common cause; axis hardware mapping and event order must be checked.')
+            for item,_,status in hardware_faults:
+                item.setToolTip(4,status+f'\n{len(hardware_faults)} hardware faults and {len(axis_faults)} axis errors currently observed.')
         for i in range(self.tree.topLevelItemCount()):
             parent=self.tree.topLevelItem(i)
             statuses=[parent.child(j).text(4) for j in range(parent.childCount())]
