@@ -62,7 +62,13 @@ class HardwareDemo:
                 return 0
         if pv in self.overrides:
             return self.overrides[pv]
-        name = pv.split("-", 1)[-1]
+        name = pv.rsplit(":",1)[-1].split("-",1)[-1]
+        if re.fullmatch(r"BI\d+-Arr",name):
+            return int(time.monotonic()*2) & 0xffff
+        if re.fullmatch(r"BO\d+-Arr-RB",name):
+            return self.overrides.get(pv[:-3],0)
+        if re.fullmatch(r"BO\d+-Arr",name):
+            return 0
         t = time.monotonic() - self.started
         if name.endswith("-Arr") and re.match(r"(AI|AO|Enc)\d+", name):
             channel=int(re.search(r"\d+",name).group())

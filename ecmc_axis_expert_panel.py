@@ -7,6 +7,7 @@ from ecmc_hardware_widgets import SignalValue, BooleanValue, BooleanStatus, Alar
 from ecmc_axis_write import AxisWriteTask
 from ecmc_axis_position import PositionTask, HomeTask, VelocityTask, MotorStopTask, KillTask, EncoderModeTask, SourceModeTask
 from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
+from ecmc_compact_layout import BoundedTabWidget
 from ecmc_encoder_homing_panel import EncoderHomingPanel
 from ecmc_encoder_overview import EncoderOverview
 from ecmc_demo_model import DemoMotion
@@ -52,12 +53,15 @@ class AxisExpertPanel(QtWidgets.QWidget):
         layout.setSpacing(3)
         title = QtWidgets.QLabel(f"Axis {axis_id} — {base}")
         title.setWordWrap(True)
-        layout.addWidget(title)
+        header=QtWidgets.QHBoxLayout()
+        header.addWidget(title,1)
         self.interface = QtWidgets.QComboBox()
         self.interface.addItem("ECMC native interface","native")
         self.interface.addItem("EPICS motor record","motor")
         self.interface.setCurrentIndex(1 if interface == "motor" else 0)
-        layout.addWidget(self.interface)
+        self.interface.setMaximumWidth(210)
+        header.addWidget(self.interface)
+        layout.addLayout(header)
         self.status = QtWidgets.QLabel("Paused")
         layout.addWidget(self.status)
         self.alarm_summary = AlarmSummary()
@@ -180,9 +184,9 @@ class AxisExpertPanel(QtWidgets.QWidget):
             self._summary_values[suffix] = value
         layout.addWidget(self.position_summary)
         layout.addWidget(self._overview)
-        command = QtWidgets.QGroupBox("Move")
+        command = QtWidgets.QWidget()
         command_grid = QtWidgets.QGridLayout(command)
-        command_grid.setContentsMargins(4,2,4,2)
+        command_grid.setContentsMargins(0,0,0,0)
         command_grid.setSpacing(3)
         self.move_mode = QtWidgets.QComboBox()
         self.move_mode.addItem("Absolute","abs")
@@ -213,7 +217,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         self.enable_button=BooleanValue(lambda old,new:self._write("-EnaCmd" if native else ".CNEN",(new,)))
         self.enable_button.setFixedWidth(76)
         self.enable_button.setToolTip(self.base+("-EnaCmd-RB" if native else ".CNEN"))
-        action_row.addWidget(QtWidgets.QLabel("Drive enable"))
+        action_row.addWidget(QtWidgets.QLabel("Drive"))
         action_row.addWidget(self.enable_button)
         self._shortcut_readbacks={}
         available = {caption:(suffix,values) for caption,suffix,values in
@@ -266,13 +270,14 @@ class AxisExpertPanel(QtWidgets.QWidget):
             jog_row.addWidget(button)
         jog_row.addStretch()
         layout.addLayout(jog_row)
-        self.detail_tabs=QtWidgets.QTabWidget()
+        self.detail_tabs=BoundedTabWidget()
+        self.detail_tabs.setUsesScrollButtons(True)
         layout.addWidget(self.detail_tabs,1)
         pages={}
         for title in (("Motion","Encoders","Homing","Limits","Trajectory","Controller","Diagnostics") if native else ("Motion","Limits","Diagnostics")):
             page=QtWidgets.QWidget()
             page_layout=QtWidgets.QVBoxLayout(page)
-            page_layout.setContentsMargins(4,4,4,4)
+            page_layout.setContentsMargins(2,2,2,2)
             pages[title]=page_layout
             self.detail_tabs.addTab(page,title)
         from ecmc_axis_readiness_panel import AxisReadiness
@@ -284,7 +289,7 @@ class AxisExpertPanel(QtWidgets.QWidget):
         for index,(group,rows) in enumerate(axis_signals(self.base,self.interface.currentData())):
             box = QtWidgets.QGroupBox(group)
             grid = QtWidgets.QGridLayout(box)
-            grid.setContentsMargins(6,5,6,5)
+            grid.setContentsMargins(4,2,4,2)
             grid.setHorizontalSpacing(6)
             grid.setVerticalSpacing(2)
             compact = True
@@ -319,7 +324,11 @@ class AxisExpertPanel(QtWidgets.QWidget):
                     value.setFont(font)
                 if suffix in editable or suffix in BOOL_COMMANDS or suffix in MOTION_ENUMS:
                     self._edit_widgets[pv] = value
-                if soft:
+                if suffix in self._summary_values and suffix not in editable and group.startswith("Motion"):
+                    name.deleteLater()
+                    value.setParent(box)
+                    value.hide()
+                elif soft:
                     locations = {"-CfgDLLM":(1,1),"-CfgDHLM":(1,2),"-SftLimBwdEna-RB":(2,1),"-SftLimFwdEna-RB":(2,2),"-SftLimBwdIlock":(3,1),"-SftLimFwdIlock":(3,2),"-SftLimBwdEna":(4,1),"-SftLimFwdEna":(4,2)}
                     row,col = locations[suffix]
                     grid.addWidget(value,row,col)

@@ -9,7 +9,7 @@ from ecmc_hardware_options import variant, read_options, allowed_signal, demo_op
 from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
 from ecmc_waveform_widget import WaveformValue, waveform_summary
-from ecmc_hardware_widgets import HardwareSymbol, CompactBit, SignalValue, WordValue, BooleanValue, BooleanStatus, AnalogValue, boolean_value, signal_role, AlarmSummary, signal_caption, digital_pair_status
+from ecmc_hardware_widgets import HardwareSymbol, CompactBit, SignalValue, WordValue, BooleanValue, BooleanStatus, AnalogValue, boolean_value, signal_role, AlarmSummary, signal_caption, digital_pair_status, is_bit_array, DigitalArrayValue
 from ecmc_ds402_widget import DS402Status, DS402Word, DS402StateMap, controlword_dialog
 from ecmc_ds402 import word_number, decode_state, TARGETS, transition_word
 from ecmc_ds402_task import StateTask
@@ -408,7 +408,7 @@ class HardwarePanel(QtWidgets.QWidget):
         row = self.rows.get(pv)
         if row is None or pv not in self._active_scope:
             return
-        is_waveform = pv.endswith("-Arr")
+        is_waveform = pv.endswith("-Arr") and not is_bit_array(pv)
         summary = waveform_summary(value) if is_waveform else None
         text = (f"{summary[0]} samples · last {summary[1]:.6g}" if summary else "—") if is_waveform else str(value) if value is not None else "—"
         state = "Simulated" if simulated else "Read OK" if value is not None else "Unavailable"
@@ -478,7 +478,9 @@ class HardwarePanel(QtWidgets.QWidget):
         candidates = slave.get('panels') or [panel, slave.get('name', '')]
         known_word = any(str(c).removeprefix('ecmc').removesuffix('.ui') == 'EL70x1' for c in candidates) and name in ('Drv01-Cmd', 'Drv01-Stat')
         kind = self.writable.get(pv)
-        if name.endswith('-Arr'):
+        if is_bit_array(name):
+            value = DigitalArrayValue(lambda pv=pv: self._click_write(pv), bit_callback=(lambda old,bit,pv=pv:self._direct_array_bit(pv,old,bit)) if kind=='caByteController' and name.startswith('BO') and not name.endswith('-RB') else None)
+        elif name.endswith('-Arr'):
             value = WaveformValue()
         elif kind == 'caToggleButton':
             value = BooleanValue(lambda old, new, pv=pv: self._direct_boolean(pv, old, new))
@@ -507,7 +509,7 @@ class HardwarePanel(QtWidgets.QWidget):
         kind = re.sub(r"\d+$", "", title)
         number = title[len(kind):]
         display = {'Drv':'Drive', 'Enc':'Encoder', 'Tp':'Touch probe', 'AI':'Analog input', 'AO':'Analog output'}.get(kind)
-        card = QtWidgets.QGroupBox(f'{display} {number}' if display else title)
+        card = QtWidgets.QGroupBox(f'{display} {number}' if display else 'Channel '+number if kind=='CH' else title)
         card.setMaximumWidth(540)
         outer = QtWidgets.QVBoxLayout(card)
         outer.setContentsMargins(4, 2, 4, 2)
@@ -777,7 +779,7 @@ class HardwarePanel(QtWidgets.QWidget):
             if io:
                 digital[io[1]].append((name, pv, int(io[2]), io[3]))
                 continue
-            m = re.fullmatch(r"(Drv|Enc|Tp|AI|AO|BI|BO)(\d+)(?:-?(.*))", name)
+            m = re.fullmatch(r"(Drv|Enc|Tp|AI|AO|BI|BO|CH)(\d+)(?:-?(.*))", name)
             if m:
                 kind, number, suffix = m.groups()
                 channels.setdefault(int(number), {}).setdefault(kind + number, []).append((name, pv, suffix or "Value"))
@@ -797,7 +799,10 @@ class HardwarePanel(QtWidgets.QWidget):
             stack.setSpacing(3)
             title = QtWidgets.QLabel(f"Channel {ch:02d}")
             title.setStyleSheet("font-weight: bold;")
-            stack.addWidget(title)
+            if len(groups)>1 or not all(g.startswith("CH") for g in groups):
+                stack.addWidget(title)
+            else:
+                title.deleteLater()
             for group, rows in sorted(groups.items(), key=lambda item: ({"Drv":0,"Enc":1,"Tp":2}.get(re.sub(r"\d+$","",item[0]),3),item[0])):
                 stack.addWidget(self._group(group, rows))
             stack.addStretch(1)
@@ -932,7 +937,7 @@ class HardwarePanel(QtWidgets.QWidget):
                 column = QtWidgets.QVBoxLayout(page)
                 groups = {}
                 for name, pv in pairs:
-                    match = re.fullmatch(r"(Drv|Enc|Tp|AI|AO|BI|BO)(\d+)(?:-?(.*))", name)
+                    match = re.fullmatch(r"(Drv|Enc|Tp|AI|AO|BI|BO|CH)(\d+)(?:-?(.*))", name)
                     group = match[1] + match[2] if match else "Other signals"
                     short = match[3] or "Value" if match else name
                     groups.setdefault(group, []).append((name, pv, short))
@@ -1018,13 +1023,13 @@ class HardwarePanel(QtWidgets.QWidget):
         menu = QtWidgets.QMenu(self)
         trend = menu.addAction("Trend PV")
         row = self.rows.get(pv)
-        trend.setEnabled(not pv.endswith("-Arr") and (self.demo or self.on_plot is not None) and row is not None
+        trend.setEnabled((not pv.endswith("-Arr") or is_bit_array(pv)) and (self.demo or self.on_plot is not None) and row is not None
                          and self.table.item(row, 2).text() in ("Read OK", "Simulated"))
         trend.triggered.connect(lambda: self._trend_pv(pv))
         add = menu.addAction("Add to existing trend…")
         add.setEnabled(trend.isEnabled() and self.on_plot is not None)
         add.triggered.connect(lambda: self._trend_pv(pv, add=True))
-        if pv.endswith("-Arr"):
+        if pv.endswith("-Arr") and not is_bit_array(pv):
             action = menu.addAction("Inspect waveform in panel")
             action.triggered.connect(lambda: self.views.setCurrentWidget(self.cards))
         if pv in self.commands:
@@ -1057,7 +1062,7 @@ class HardwarePanel(QtWidgets.QWidget):
 
     def _can_write(self, pv):
         row = self.rows.get(pv)
-        return (not self._closed and self.isVisible() and pv in self._active_scope and not self._write_protected and self.write_enable.isChecked()
+        return (not (is_bit_array(pv or "") and not re.search(r"-BO\d+-Arr$",pv or "")) and not self._closed and self.isVisible() and pv in self._active_scope and not self._write_protected and self.write_enable.isChecked()
                 and self._task is None and self._write_task is None and self._enum_task is None
                 and pv in self.writable and row is not None
                 and self.table.item(row, 2).text() in ("Read OK", "Simulated"))
@@ -1097,6 +1102,9 @@ class HardwarePanel(QtWidgets.QWidget):
         except ValueError as ex:
             QtWidgets.QMessageBox.warning(self, "Invalid value", str(ex))
             return
+        if is_bit_array(pv) and word_number(value) is None:
+            QtWidgets.QMessageBox.warning(self,"Invalid value","Enter a 16-bit unsigned integer.")
+            return
         self._submit_write(pv, value)
 
     def _execute_command(self, pv):
@@ -1129,6 +1137,72 @@ class HardwarePanel(QtWidgets.QWidget):
         if boolean_value(self.table.item(self.rows[pv], 1).text()) != old:
             return
         self._submit_write(pv, new, direct=True, expected=old)
+
+    def _direct_array_bit(self,pv,old,bit):
+        if not re.search(r'-BO\d+-Arr
+        if self.writable.get(pv) != 'caByteController' or not pv.endswith('-Cmd') or not self._can_write(pv):
+            return
+        if not 0 <= bit < 16 or word_number(self.table.item(self.rows[pv], 1).text()) != old:
+            return
+        self._submit_write(pv, old ^ (1 << bit), direct=True, expected=old)
+
+    def _submit_write(self, pv, value, direct=False, expected=None):
+        if not self._can_write(pv):
+            return
+        if self.demo:
+            if self._can_write(pv):
+                self._demo_model.write(pv, value, ds402=bool(re.search(r'-Drv\d+-', pv)) and self._is_ds402(re.search(r'-(Drv\d+)-', pv)[1]))
+                self._demo_tick()
+            return
+        if not direct and QtWidgets.QMessageBox.question(
+                self, "Confirm hardware write",
+                f"Write {value} to {pv}?\nThis may directly affect connected hardware.",
+                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
+            return
+        if not self._can_write(pv):
+            return
+        self.selector.setEnabled(False)
+        self.refresh_button.setEnabled(False)
+        self.write_enable.setEnabled(False)
+        self.status.setText("Writing " + pv)
+        self._write_task = WriteTask(pv, value, self.timeout, self.writable[pv], expected=expected)
+        self._update_edit_cursors()
+        self._write_task.signals.finished.connect(self._write_finished)
+        QtCore.QThreadPool.globalInstance().start(self._write_task)
+
+    def _write_finished(self, error):
+        self._write_task = None
+        if self._closed:
+            return
+        self.selector.setEnabled(True)
+        self.refresh_button.setEnabled(True)
+        self.write_enable.setEnabled(True)
+        if error:
+            QtWidgets.QMessageBox.warning(self, "Write not confirmed", error)
+        if self._monitor_timer.isActive():
+            self._update_edit_cursors()
+        else:
+            self._scope_changed(force=True)
+
+    def plot_selected(self):
+        pvs = [self.table.item(i.row(), 3).text()
+               for i in self.table.selectionModel().selectedRows()
+               if self.table.item(i.row(), 2).text() == "Read OK"]
+        if pvs and self.on_plot:
+            self.on_plot(pvs)
+
+    def closeEvent(self, event):
+        self._closed = True
+        if isinstance(self._write_task, StateTask):
+            self._write_task.cancelled.set()
+        self._demo_timer.stop()
+        self._stop_monitors()
+        super().closeEvent(event)
+,pv) or self.writable.get(pv)!='caByteController' or not self._can_write(pv):
+            return
+        if 0<=bit<16 and word_number(self.table.item(self.rows[pv],1).text())==old:
+            self._submit_write(pv,old ^ (1<<bit),expected=old)
 
     def _direct_bit(self, pv, old, bit):
         if self.writable.get(pv) != 'caByteController' or not pv.endswith('-Cmd') or not self._can_write(pv):

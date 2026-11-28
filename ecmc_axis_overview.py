@@ -17,7 +17,7 @@ class AxisPositionBar(QtWidgets.QWidget):
         self.armed = False
         self.pending = None
         self.values = {}
-        self.setMinimumHeight(65)
+        self.setMinimumHeight(54)
         self.setSizePolicy(QtWidgets.QSizePolicy.Expanding,QtWidgets.QSizePolicy.Fixed)
         self.setToolTip("Click track to stage an absolute target. Click a limit number to edit it. Move executes the target.")
 
@@ -45,9 +45,9 @@ class AxisPositionBar(QtWidgets.QWidget):
         px,py = event.pos().x(),event.pos().y()
         keys = ("-CfgDLLM","-CfgDHLM") if self.native else (".LLM",".HLM")
         low,high = (number(self.values.get(k)) for k in keys)
-        if 44 <= py <= 64 and self.on_limit:
+        if 34 <= py <= 54 and self.on_limit:
             self.on_limit(keys[0 if px < self.width()/2 else 1])
-        elif 18 <= py < 44 and self.on_target and low is not None and high is not None and high > low:
+        elif 15 <= py < 34 and self.on_target and low is not None and high is not None and high > low:
             fraction = max(0.0,min(1.0,(px-left)/(right-left)))
             self.on_target(low+fraction*(high-low))
         else:
@@ -70,7 +70,7 @@ class AxisPositionBar(QtWidgets.QWidget):
             p.end()
             return
         left,right = 12.0,max(13.0,self.width()-12.0)
-        y = 29.0
+        y = 21.0
         def x(value):
             return left+(right-left)*max(0.0,min(1.0,(value-low)/(high-low)))
         p.setPen(QtCore.Qt.NoPen)
@@ -93,14 +93,14 @@ class AxisPositionBar(QtWidgets.QWidget):
             p.setPen(QtGui.QPen(QtGui.QColor("#8661c5"),2,QtCore.Qt.DashLine))
             p.drawLine(QtCore.QPointF(pos,y-12),QtCore.QPointF(pos,y+12))
         p.setPen(fg)
-        p.drawText(QtCore.QRectF(left,44,(right-left)/2,18),QtCore.Qt.AlignLeft,f"{low:.6g}")
-        p.drawText(QtCore.QRectF((left+right)/2,44,(right-left)/2,18),QtCore.Qt.AlignRight,f"{high:.6g}")
-        legend = "Actual (blue) · Target (green)"
+        p.drawText(QtCore.QRectF(left,34,(right-left)/2,18),QtCore.Qt.AlignLeft,f"{low:.6g}")
+        p.drawText(QtCore.QRectF((left+right)/2,34,(right-left)/2,18),QtCore.Qt.AlignRight,f"{high:.6g}")
+        legend = "Actual · Target"
         if self.pending is not None:
             legend += " · Draft (purple)"
         if native and (le != 1 or he != 1):
             legend += "   • Limit disabled/unknown"
-        p.drawText(QtCore.QRectF(0,0,self.width(),17),QtCore.Qt.AlignCenter,legend)
+        p.drawText(QtCore.QRectF(0,0,self.width(),12),QtCore.Qt.AlignCenter,legend)
         p.end()
 
 class AxisStatusIcon(QtWidgets.QLabel):

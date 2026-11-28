@@ -315,3 +315,32 @@ class CompactBit(BooleanStatus):
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+
+def is_bit_array(name):
+    import re
+    return bool(re.search(r'(?:^|-)(?:BI|BO)\d+-Arr(?:-RB)?$',name))
+
+class DigitalArrayValue(WordValue):
+    """Packed digital word: each indicator represents one bit."""
+    def __init__(self,callback,bit_callback=None):
+        super().__init__(callback,width=16,bit_callback=bit_callback)
+        self.setMinimumWidth(190)
+        self.setMinimumHeight(36)
+        self.bit_hit_y=(18,34)
+    def paintEvent(self,event):
+        p=QtGui.QPainter(self)
+        font=p.font()
+        font.setPointSize(max(7,font.pointSize()-2))
+        p.setFont(font)
+        cell=self.width_px()/16
+        for i in range(16):
+            bit=15-i
+            x=i*cell
+            p.setPen(self.palette().color(QtGui.QPalette.Text))
+            p.drawText(QtCore.QRectF(x,0,cell,16),QtCore.Qt.AlignCenter,str(bit))
+            color=QtGui.QColor('#26804b' if self.word is not None and self.word & (1<<bit) else '#89939e')
+            p.setPen(QtGui.QPen(QtGui.QColor('#287bc0') if self._editable else color,1))
+            p.setBrush(color if self.word is not None else QtCore.Qt.NoBrush)
+            p.drawRoundedRect(QtCore.QRectF(x+1,18,max(2,cell-2),13),2,2)
+        p.end()
