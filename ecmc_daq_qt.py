@@ -317,6 +317,115 @@ def _analyze_signal(samples, *, origin_ts=None, analysis_start_s=None, analysis_
     }
 
 
+def estimate_frf(input_samples, output_samples, segment=256, overlap=0.5):
+    """Welch H1, one-sided PSD and coherence on a shared uniform time grid."""
+    from bisect import bisect_right
+    x, y = _sanitize_samples(input_samples), _sanitize_samples(output_samples)
+    if min(len(x), len(y)) < 3:
+        raise ValueError("Both signals need captured samples")
+    if segment < 16 or segment & (segment-1) or not 0 <= overlap < 1:
+        raise ValueError("Invalid FFT segment or overlap")
+    dt = max(_median([b[0]-a[0] for a,b in zip(z,z[1:])]) for z in (x,y))
+    start, stop = max(x[0][0],y[0][0]), min(x[-1][0],y[-1][0])
+    count = min(65536, max(0,int(math.floor((stop-start)/dt))+1))
+    stride = max(1,int(segment*(1-overlap)))
+    if count < segment+stride:
+        raise ValueError("Capture needs at least two overlapping FFT segments")
+    def align(z):
+        times = [p[0] for p in z]
+        values = []
+        for i in range(count):
+            t = start+i*dt
+            j = min(len(z)-2,max(0,bisect_right(times,t)-1))
+            a,b = z[j],z[j+1]
+            if b[0]-a[0] > 4*dt:
+                values.append(None)
+            else:
+                values.append(a[1]+(b[1]-a[1])*(t-a[0])/(b[0]-a[0]))
+        return values
+    x,y = align(x),align(y)
+    win = [0.5-0.5*math.cos(2*math.pi*i/(segment-1)) for i in range(segment)]
+    bins = segment//2+1
+    xx,yy,xy = [0.0]*bins,[0.0]*bins,[0j]*bins
+    used = 0
+    for offset in range(0,count-segment+1,stride):
+        a,b = x[offset:offset+segment],y[offset:offset+segment]
+        if None in a or None in b: continue
+        ma,mb = sum(a)/segment,sum(b)/segment
+        X = _fft_complex([(v-ma)*w for v,w in zip(a,win)])
+        Y = _fft_complex([(v-mb)*w for v,w in zip(b,win)])
+        for k in range(bins):
+            xx[k]+=abs(X[k])**2
+            yy[k]+=abs(Y[k])**2
+            xy[k]+=X[k].conjugate()*Y[k]
+        used+=1
+    if used<2:
+        raise ValueError("Not enough continuous overlapping segments")
+    result = {key:[] for key in ("input PSD","output PSD","Magnitude","Phase","Coherence")}
+    scale = dt/(used*sum(w*w for w in win))
+    for k in range(1,bins):
+        f = k/(segment*dt)
+        factor = scale*(1 if k==bins-1 else 2)
+        result["input PSD"].append((f,xx[k]*factor))
+        result["output PSD"].append((f,yy[k]*factor))
+        if xx[k]>max(xx)*1e-12 and yy[k]>max(yy)*1e-12:
+            h=xy[k]/xx[k]
+            if abs(h)>0:
+                result["Magnitude"].append((f,20*math.log10(abs(h))))
+                result["Phase"].append((f,math.degrees(math.atan2(h.imag,h.real))))
+            result["Coherence"].append((f,min(1.0,abs(xy[k])**2/(xx[k]*yy[k]))))
+    return result,used,1/dt
+
+
+class FrfWindow(QtWidgets.QDialog):
+    def __init__(self, samples, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Frequency response / Welch PSD")
+        self.resize(850,700)
+        self.samples=samples
+        layout=QtWidgets.QVBoxLayout(self)
+        row=QtWidgets.QHBoxLayout()
+        self.input=QtWidgets.QComboBox()
+        self.output=QtWidgets.QComboBox()
+        for combo in (self.input,self.output): combo.addItems(list(samples))
+        self.output.setCurrentIndex(1)
+        self.segment=QtWidgets.QComboBox()
+        self.segment.addItems(["64","128","256","512","1024","2048"])
+        self.segment.setCurrentText("256")
+        for label,widget in (("Input",self.input),("Output",self.output),("FFT N",self.segment)):
+            row.addWidget(QtWidgets.QLabel(label))
+            row.addWidget(widget)
+        run=QtWidgets.QPushButton("Analyze")
+        run.clicked.connect(self.analyze)
+        row.addWidget(run)
+        layout.addLayout(row)
+        self.note=QtWidgets.QLabel("H1 · Hann window · 50% overlap · captured PV timestamps, not RT sampling")
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+        tabs=QtWidgets.QTabWidget()
+        self.plots={}
+        for label,unit in (("Magnitude","Gain [dB]"),("Phase","Phase [deg]"),("Coherence","Coherence"),("PSD","Power / Hz")):
+            plot=SeriesPlotWidget()
+            plot.set_axes(title=label,x_label="Frequency [Hz]",y_label=unit,empty_text="Select input/output and analyze.")
+            plot.set_x_floor(0.0)
+            self.plots[label]=plot
+            tabs.addTab(plot,label)
+        layout.addWidget(tabs)
+    def analyze(self):
+        a,b=self.input.currentText(),self.output.currentText()
+        try:
+            if a==b: raise ValueError("Select distinct input and output signals")
+            result,n,fs=estimate_frf(self.samples[a],self.samples[b],int(self.segment.currentText()))
+        except (ValueError,KeyError,ZeroDivisionError) as exc:
+            self.note.setText(str(exc))
+            for plot in self.plots.values(): plot.set_series({})
+            return
+        for key in ("Magnitude","Phase","Coherence"):
+            self.plots[key].set_series({key:result[key]})
+        self.plots["PSD"].set_series({a:result["input PSD"],b:result["output PSD"]})
+        self.note.setText(f"H1 · Hann · 50% overlap · {n} segments · Fs {fs:.3g} Hz. Verify excitation and timestamp quality.")
+
+
 class SpectrumWindow(QtWidgets.QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -676,6 +785,9 @@ class DaqWindow(QtWidgets.QMainWindow):
         pv_row.addWidget(stop_btn)
         pv_row.addWidget(clear_samples_btn)
         pv_row.addWidget(show_freq_btn)
+        frf_btn = QtWidgets.QPushButton("FRF / PSD")
+        frf_btn.clicked.connect(self._show_frf)
+        pv_row.addWidget(frf_btn)
         layout.addLayout(pv_row)
         trigger_row = QtWidgets.QHBoxLayout()
         self.trigger_enabled = QtWidgets.QCheckBox('Triggered capture')
@@ -1219,6 +1331,18 @@ class DaqWindow(QtWidgets.QMainWindow):
         self._refresh_timer.stop()
         self._refresh_views()
         self._update_capture_status()
+
+    def _show_frf(self):
+        if self._capture_active:
+            QtWidgets.QMessageBox.information(self,"Frequency response","Stop capture before analysis.")
+            return
+        samples={p:_slice_samples_by_relative_time(self._samples_by_pv.get(p,[]),self._capture_start_ts,self._analysis_start_s,self._analysis_end_s) for p in self._selected_pvs()}
+        if sum(bool(v) for v in samples.values())<2:
+            QtWidgets.QMessageBox.information(self,"Frequency response","Capture at least two signals.")
+            return
+        dialog=FrfWindow(samples,self)
+        execute=getattr(dialog,'exec',None) or dialog.exec_
+        execute()
 
     def _show_spectrum_window(self):
         if self.spectrum_window.isHidden():
