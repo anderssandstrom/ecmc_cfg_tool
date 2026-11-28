@@ -207,6 +207,7 @@ class RtLogWindow(QtWidgets.QMainWindow):
         self._monitor_pvs = []
         self._monitor_mode = False
         self._refresh_pending = False
+        self._daq_windows = []
 
         self._build_ui(timeout=float(timeout), poll_ms=int(poll_ms or 250), launch_axis_id=launch_axis_id)
         self.monitor_triggered.connect(self._schedule_monitor_refresh)
@@ -466,6 +467,10 @@ class RtLogWindow(QtWidgets.QMainWindow):
         history_layout.setSpacing(4)
         history_top = QtWidgets.QHBoxLayout()
         history_top.setSpacing(4)
+        trend_btn = QtWidgets.QPushButton("Axis + log DAQ")
+        trend_btn.setToolTip("Open live axis signals and logger counters in DAQ; does not reconstruct past samples")
+        trend_btn.clicked.connect(self._open_diagnostic_daq)
+        history_top.addWidget(trend_btn)
         history_top.addStretch(1)
         self.clear_history_btn = QtWidgets.QPushButton("Clear Log")
         self.clear_history_btn.setAutoDefault(False)
@@ -1042,6 +1047,20 @@ class RtLogWindow(QtWidgets.QMainWindow):
 
     def _open_stream_window(self):
         self._open_script("start.sh", "stream", [self._current_prefix()])
+
+    def _open_diagnostic_daq(self):
+        from ecmc_diagnostic_presets import axis_diagnostic_pvs
+        from ecmc_daq_qt import DaqWindow
+        prefix = self._current_prefix()
+        base = self._resolve_motor_record_name(self._current_axis_id())
+        counters = [self._pv(suffix) for suffix in
+                    ("MCU-RTLog-Cnt", "MCU-RTLog-DropCnt", "MCU-RTLog-Level")]
+        pvs = axis_diagnostic_pvs(base, "controller", extra=counters)
+        window = DaqWindow(default_prefix=prefix, initial_pvs=pvs)
+        window.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        self._daq_windows.append(window)
+        window.destroyed.connect(lambda *_: self._daq_windows.remove(window) if window in self._daq_windows else None)
+        window.show()
 
     def _open_daq_window(self):
         self._open_script("start_daq.sh", "DAQ", [self._current_prefix()])
