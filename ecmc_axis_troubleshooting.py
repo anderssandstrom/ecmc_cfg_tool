@@ -9,7 +9,7 @@ from ecmc_axis_write import AxisWriteTask
 from qt_compat import QtCore, QtWidgets
 from ecmc_axis_diagnostics import axis_alarm_summary, axis_status_value, format_axis_value
 from ecmc_hardware_widgets import AlarmSummary
-from ecmc_axis_overview import AxisPositionBar
+from ecmc_axis_overview import AxisPositionBar, AxisStatusIcon
 
 FIELDS = (
     ('Actual position','-PosAct'),('Target position','-TgtPosCmd'),
@@ -21,7 +21,7 @@ FIELDS = (
     ('Blocked','-Blocked'),('Error','-ErrId'),('Warning','-WrnId'),
 )
 EXTRA = ('-MsgTxt','-IlockTxt','-SftLimFwdIlock','-SftLimBwdIlock',
-         '-CfgDLLM','-CfgDHLM','-SftLimFwdEna-RB','-SftLimBwdEna-RB')
+         '-CfgDLLM','-CfgDHLM','-SftLimFwdEna-RB','-SftLimBwdEna-RB','-TgtVelCmd')
 SUFFIXES = tuple(s for _,s in FIELDS)+EXTRA
 FLAGS = {s for _,s in FIELDS[5:16]}
 BAD_FLAGS = {'-LimFwd','-LimBwd','-SumIlockFwd','-SumIlockBwd','-Blocked'}
@@ -66,6 +66,8 @@ class AxisTroubleshooting(QtWidgets.QWidget):
         self.protected=False
         self.pending={}
         self.controls={}
+        self.drafts={}
+        self.icons={}
         self.models={}
         self.demo_enabled={}
         self.demo_homed={}
@@ -85,10 +87,15 @@ class AxisTroubleshooting(QtWidgets.QWidget):
         stop.clicked.connect(self._stop_all)
         bar.addWidget(stop)
         if self.on_plot:
+            trend=QtWidgets.QToolButton()
+            trend.setText('Trend all')
+            trend.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+            menu=QtWidgets.QMenu(trend)
             for title,suffix in (('Positions','-PosAct'),('Velocities','-VelAct'),('Following errors','-PosErr')):
-                button=QtWidgets.QPushButton(title)
-                button.clicked.connect(lambda checked=False,s=suffix:self._trend_selected(s))
-                bar.addWidget(button)
+                action=menu.addAction(title)
+                action.triggered.connect(lambda checked=False,s=suffix:self._trend_selected(s))
+            trend.setMenu(menu)
+            bar.addWidget(trend)
         layout.addLayout(bar)
         self.scroll=QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -131,6 +138,8 @@ class AxisTroubleshooting(QtWidgets.QWidget):
         self._stop()
         self.cards=[]
         self.controls={}
+        self.drafts={}
+        self.icons={}
         root=QtWidgets.QWidget()
         row=QtWidgets.QGridLayout(root)
         row.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
@@ -151,8 +160,12 @@ class AxisTroubleshooting(QtWidgets.QWidget):
             alarm=AlarmSummary()
             col.addWidget(alarm)
             grid=QtWidgets.QGridLayout()
-            grid.setSpacing(3)
+            grid.setSpacing(2)
             labels={}
+            detail=QtWidgets.QWidget()
+            detail_grid=QtWidgets.QGridLayout(detail)
+            detail_grid.setContentsMargins(0,0,0,0)
+            detail_grid.setSpacing(1)
             for i,(caption,suffix) in enumerate(FIELDS):
                 label=QtWidgets.QLabel('—')
                 label.setAlignment(QtCore.Qt.AlignRight|QtCore.Qt.AlignVCenter)
@@ -162,10 +175,26 @@ class AxisTroubleshooting(QtWidgets.QWidget):
                     font.setBold(True)
                     font.setPointSize(max(13,font.pointSize()+2))
                     label.setFont(font)
-                grid.addWidget(QtWidgets.QLabel(caption),i,0)
-                grid.addWidget(label,i,1)
+                if i<4:
+                    captions=('Actual','Target','Following err.','Velocity')
+                    grid.addWidget(QtWidgets.QLabel(captions[i]),(i//2)*2,(i%2))
+                    grid.addWidget(label,(i//2)*2+1,(i%2))
+                elif i==4:
+                    grid.addWidget(label,4,1)
+                else:
+                    detail_grid.addWidget(QtWidgets.QLabel(caption),i-5,0)
+                    detail_grid.addWidget(label,i-5,1)
                 labels[suffix]=label
             col.addLayout(grid)
+            icons=QtWidgets.QGridLayout()
+            icons.setSpacing(2)
+            self.icons[axis['motor']]=[]
+            for i,(caption,glyph,suffix) in enumerate((('Enabled','⏻','-EnaAct'),('Homed','⌂','-Homed'),('Moving','↔','-Moving'),('At target','◎','-AtTarget'),('Busy','●','-Busy'),('RT','◷','-InRT'))):
+                icon=AxisStatusIcon(caption,glyph,suffix)
+                bind_pv_menu(icon,axis['motor']+suffix,self.on_plot,self._demo_value if self.demo else None)
+                icons.addWidget(icon,i//3,i%3)
+                self.icons[axis['motor']].append(icon)
+            col.addLayout(icons)
             track=AxisPositionBar(True)
             col.addWidget(track)
             base=axis['motor']
@@ -177,9 +206,15 @@ class AxisTroubleshooting(QtWidgets.QWidget):
             control.setSpacing(2)
             target=QtWidgets.QLineEdit()
             target.setPlaceholderText('Position')
-            track.on_target=lambda value,t=target: t.setText(format_axis_value(value,9)) if t.isEnabled() else None
+            self.drafts[base]=set()
+            track.on_target=lambda value,b=base,t=target:self._stage(b,t,value)
+            target.textEdited.connect(lambda *_,b=base:self.drafts[b].add('target'))
+            target.textChanged.connect(lambda text,b=base,tr=track:tr.set_pending(text if 'target' in self.drafts.get(b,set()) else None))
             speed=QtWidgets.QLineEdit()
             speed.setPlaceholderText('Velocity')
+            speed.textEdited.connect(lambda *_,b=base:self.drafts[b].add('speed'))
+            bind_pv_menu(target,base+'-TgtPosCmd',self.on_plot,self._demo_value if self.demo else None)
+            bind_pv_menu(speed,base+'-TgtVelCmd',self.on_plot,self._demo_value if self.demo else None)
             control.addWidget(target,0,0)
             control.addWidget(speed,0,1)
             buttons=[]
@@ -189,11 +224,12 @@ class AxisTroubleshooting(QtWidgets.QWidget):
                 ('Enable',lambda b=base:self._command(b,'enable')),
                 ('Disable',lambda b=base:self._command(b,'disable')),
                 ('Reset',lambda b=base:self._command(b,'reset')),
-                ('STOP',lambda b=base:self._command(b,'stop')))):
+                ('STOP',lambda b=base:self._command(b,'stop')),
+                ('KILL',lambda b=base:self._command(b,'kill')))):
                 button=QtWidgets.QPushButton(caption)
                 button.clicked.connect(lambda checked=False,fn=action:fn())
                 control.addWidget(button,1+i//2,i%2)
-                if caption=='STOP':
+                if caption in ('STOP','KILL'):
                     button.setStyleSheet('color: #c43c3c; font-weight: bold')
                 else:
                     buttons.append(button)
@@ -208,7 +244,17 @@ class AxisTroubleshooting(QtWidgets.QWidget):
                 button=QtWidgets.QPushButton('Trend')
                 button.clicked.connect(lambda checked=False,a=axis:self._trend(a))
                 actions.addWidget(button)
+            toggle=QtWidgets.QToolButton()
+            toggle.setText('Details')
+            toggle.setCheckable(True)
+            toggle.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            toggle.setArrowType(QtCore.Qt.RightArrow)
+            toggle.toggled.connect(detail.setVisible)
+            toggle.toggled.connect(lambda on,t=toggle:t.setArrowType(QtCore.Qt.DownArrow if on else QtCore.Qt.RightArrow))
+            actions.addWidget(toggle)
             col.addLayout(actions)
+            col.addWidget(detail)
+            detail.hide()
             col.addStretch()
             self._axis_widgets.append(card)
             row.addWidget(card,len(self._axis_widgets)-1,0,QtCore.Qt.AlignTop)
@@ -251,7 +297,7 @@ class AxisTroubleshooting(QtWidgets.QWidget):
                     task.cancelled.set()
 
     def _update_controls(self):
-        self.status.setText(f"{len(self.cards)} axes · "+('Protected' if self.protected else 'Control')+' · 2.5 Hz')
+        self.status.setText(f"{len(self.cards)} axes · "+('Protected' if self.protected else 'Control'))
         for base,(target,speed,buttons) in self.controls.items():
             enabled=not self.protected and not self.pending.get(base)
             for widget in [target,speed]+buttons:
@@ -268,6 +314,8 @@ class AxisTroubleshooting(QtWidgets.QWidget):
                 self._update_controls()
                 if error:
                     QtWidgets.QMessageBox.warning(self,'Command not confirmed',base+': '+error)
+                elif type(task) is PositionTask:
+                    self.drafts.get(base,set()).clear()
         task.signals.finished.connect(done)
         self._update_controls()
         (self.stop_pool if stop else QtCore.QThreadPool.globalInstance()).start(task)
@@ -285,12 +333,13 @@ class AxisTroubleshooting(QtWidgets.QWidget):
         if self.demo:
             if self.demo_enabled[base] and -50<=target<=50 and not self.models[base].active:
                 self.models[base].start(target,speed)
+                self.drafts[base].clear()
             self._tick()
             return
         self._launch(base,PositionTask(base,True,False,target,speed))
 
     def _command(self,base,action):
-        stop=action=='stop'
+        stop=action in ('stop','kill')
         if not stop and (self.protected or self.pending.get(base) or not self.isVisible()):
             return
         if stop:
@@ -301,6 +350,7 @@ class AxisTroubleshooting(QtWidgets.QWidget):
             if action=='enable': self.demo_enabled[base]=1
             elif action=='disable': self.demo_enabled[base]=0; self.models[base].stop()
             elif action=='stop': self.models[base].stop()
+            elif action=='kill': self.models[base].stop(); self.demo_enabled[base]=0
             elif action=='home' and self.demo_enabled[base]: self.demo_homed[base]=1
             self._tick()
             return
@@ -309,6 +359,8 @@ class AxisTroubleshooting(QtWidgets.QWidget):
                 return
         if action=='home':
             task=HomeTask(base)
+        elif action=='kill':
+            task=KillTask(base,True)
         else:
             suffix,values={'enable':('-EnaCmd',(1,)), 'disable':('-EnaCmd',(0,)), 'reset':('-ErrRst',(1,0)), 'stop':('-StpCmd',(1,))}[action]
             task=AxisWriteTask(base+suffix,values)
@@ -325,7 +377,7 @@ class AxisTroubleshooting(QtWidgets.QWidget):
                 suffix=name[len(base):]
                 model=self.models[base]
                 pos=model.position
-                values={'-PosAct':pos,'-TgtPosCmd':model.target,'-PosErr':0,'-VelAct':model.velocity,
+                values={'-PosAct':pos,'-TgtPosCmd':model.target,'-TgtVelCmd':abs(model.speed) or 1,'-PosErr':0,'-VelAct':model.velocity,
                         '-TgtPosCmd.EGU':'mm','-EnaAct':self.demo_enabled[base],'-Homed':self.demo_homed[base],'-AtTarget':int(not model.active),'-Busy':int(model.active),'-Moving':int(model.active),'-InRT':1,
                         '-LimFwd':1,'-LimBwd':1,'-CfgDLLM':-50,'-CfgDHLM':50,
                         '-SftLimFwdEna-RB':1,'-SftLimBwdEna-RB':1,'-MsgTxt':'','-IlockTxt':''}
@@ -365,6 +417,24 @@ class AxisTroubleshooting(QtWidgets.QWidget):
                 return snap.get('value')
         return None
 
+    def _stage(self,base,target,value):
+        if target.isEnabled():
+            self.drafts[base].add('target')
+            target.setText(format_axis_value(value,9))
+
+    def _prefill(self,base,samples,track):
+        target,speed,_=self.controls[base]
+        for key,field,suffix in (('target',target,'-TgtPosCmd'),('speed',speed,'-TgtVelCmd')):
+            if key in self.drafts[base] or field.hasFocus():
+                continue
+            value=samples.get(suffix)
+            try: valid=value is not None and math.isfinite(float(value))
+            except (TypeError,ValueError,OverflowError): valid=False
+            text=format_axis_value(value,9) if valid else ''
+            if field.text()!=text: field.setText(text)
+        track.set_pending(target.text() if 'target' in self.drafts[base] else None)
+        track.set_armed(target.isEnabled() and samples.get('-CfgDLLM') is not None and samples.get('-CfgDHLM') is not None)
+
     def _tick(self):
         now=time.monotonic()
         if self.demo:
@@ -381,7 +451,10 @@ class AxisTroubleshooting(QtWidgets.QWidget):
                 style='color: '+color+';' if color else ''
                 if label.styleSheet()!=style:
                     label.setStyleSheet(style)
-            alarm.set_summary(*axis_alarm_summary(samples))
+            severity,message=axis_alarm_summary(samples)
+            alarm.set_summary(severity,'No active alarms' if severity=='ok' else message)
+            for icon in self.icons[axis['motor']]: icon.set_values(samples)
+            self._prefill(axis['motor'],samples,track)
             track.set_values(samples)
 
     def _stop(self):
@@ -391,11 +464,13 @@ class AxisTroubleshooting(QtWidgets.QWidget):
             try: lease.close()
             except Exception: pass
         self.leases.clear()
-        for _,labels,alarm,track in self.cards:
+        for axis,labels,alarm,track in self.cards:
             for label in labels.values():
                 label.setText('—')
             alarm.set_summary('unknown','Monitoring paused')
             track.set_values({})
+            track.set_armed(False)
+            for icon in self.icons.get(axis['motor'],[]): icon.set_values({})
 
     def showEvent(self,event):
         super().showEvent(event)
