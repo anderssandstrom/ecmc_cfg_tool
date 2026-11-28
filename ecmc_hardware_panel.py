@@ -9,6 +9,7 @@ from ecmc_hardware_options import variant, read_options, allowed_signal, demo_op
 from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
 from ecmc_waveform_widget import WaveformValue, waveform_summary
+from ecmc_output_buffer import BufferTask, output_dialog
 from ecmc_hardware_widgets import HardwareSymbol, CompactBit, SignalValue, WordValue, BooleanValue, BooleanStatus, AnalogValue, boolean_value, signal_role, AlarmSummary, signal_caption, digital_pair_status, is_bit_array, DigitalArrayValue
 from ecmc_ds402_widget import DS402Status, DS402Word, DS402StateMap, controlword_dialog
 from ecmc_ds402 import word_number, decode_state, TARGETS, transition_word
@@ -154,7 +155,7 @@ class HardwarePanel(QtWidgets.QWidget):
 
     def set_write_protected(self, protected):
         self._write_protected = bool(protected)
-        if protected and isinstance(self._write_task, StateTask):
+        if protected and isinstance(self._write_task, (StateTask,BufferTask)):
             self._write_task.cancelled.set()
         self.write_enable.setChecked(not protected)
         self._update_edit_cursors()
@@ -211,6 +212,10 @@ class HardwarePanel(QtWidgets.QWidget):
         if key:
             self.writable = {}
             self.commands = {}
+        if str(slave.get('name',''))=='EL4732' or str(slave.get('panel',''))=='EL4732':
+            for name,pv in pairs:
+                if name in ('AO01-Arr','AO02-Arr'):
+                    self.writable[pv]='int16ArrayOut'
         for pv in self.commands:
             self.writable.setdefault(pv, 'caMessageButton')
         self.table.setRowCount(len(pairs))
@@ -303,7 +308,7 @@ class HardwarePanel(QtWidgets.QWidget):
         QtCore.QTimer.singleShot(0, self._reflow_channels)
 
     def hideEvent(self, event):
-        if isinstance(self._write_task, StateTask):
+        if isinstance(self._write_task, (StateTask,BufferTask)):
             self._write_task.cancelled.set()
         super().hideEvent(event)
         if self._scope_initialized and not self._closed:
@@ -766,7 +771,7 @@ class HardwarePanel(QtWidgets.QWidget):
             self._channel_columns=0
 
     def _option_page_changed(self,*_):
-        if isinstance(self._write_task,StateTask):
+        if isinstance(self._write_task,(StateTask,BufferTask)):
             self._write_task.cancelled.set()
         self._select_option_grid()
         self._reflow_channels()
@@ -856,6 +861,13 @@ class HardwarePanel(QtWidgets.QWidget):
             self._bind(title,pv)
             grid.addWidget(title,0,column)
             grid.addWidget(self._value_widget(name,pv,primary=True),1,column)
+            if self.writable.get(pv)=='int16ArrayOut':
+                button=QtWidgets.QPushButton('Edit output')
+                button.setEnabled(False)
+                button.clicked.connect(lambda checked=False,pv=pv:self._write_pv(pv))
+                self._command_buttons.setdefault(pv,[]).append(button)
+                self._bind(button,pv)
+                grid.addWidget(button,2,column)
             grid.setColumnStretch(column,1)
         note = QtWidgets.QLabel('PV units · readback is not necessarily a measured output' if kind=='AO' else 'PV units · history autoscaled')
         root.setToolTip(note.text())
@@ -1112,8 +1124,40 @@ class HardwarePanel(QtWidgets.QWidget):
                 and pv in self.writable and row is not None
                 and self.table.item(row, 2).text() in ("Read OK", "Simulated"))
 
+    def _edit_output_buffer(self,pv):
+        if not self._can_write(pv):
+            return
+        summary=next((widget.summary for _,widget in self.card_values.get(pv,[]) if isinstance(widget,WaveformValue) and widget.summary),None)
+        if not summary or not 1<=summary[0]<=100 or len(summary[-1])!=summary[0]:
+            QtWidgets.QMessageBox.warning(self,'Output unavailable','Complete output buffer not available')
+            return
+        n=summary[0]
+        values=output_dialog(self,n,summary[-1])
+        if values is None or not self._can_write(pv):
+            return
+        if self.demo:
+            self._demo_model.write(pv,values)
+            self._demo_tick()
+            return
+        if QtWidgets.QMessageBox.question(self,'Confirm voltage output',
+                f'Write {n} output samples to {pv}? The connected hardware may move or energize.',
+                QtWidgets.QMessageBox.Yes|QtWidgets.QMessageBox.No,
+                QtWidgets.QMessageBox.No)!=QtWidgets.QMessageBox.Yes or not self._can_write(pv):
+            return
+        self.selector.setEnabled(False)
+        self.refresh_button.setEnabled(False)
+        self.write_enable.setEnabled(False)
+        self.status.setText('Writing output buffer')
+        self._write_task=BufferTask(pv,values,self.timeout)
+        self._write_task.signals.finished.connect(self._write_finished)
+        self._update_edit_cursors()
+        QtCore.QThreadPool.globalInstance().start(self._write_task)
+
     def _write_pv(self, pv):
         if not self._can_write(pv):
+            return
+        if self.writable[pv]=='int16ArrayOut':
+            self._edit_output_buffer(pv)
             return
         current = self.table.item(self.rows[pv], 1).text()
         if self.writable[pv] == 'caByteController' and any(isinstance(widget, DS402Word) and not widget.status_word for _, widget in self.card_values.get(pv, [])):
@@ -1244,7 +1288,7 @@ class HardwarePanel(QtWidgets.QWidget):
 
     def closeEvent(self, event):
         self._closed = True
-        if isinstance(self._write_task, StateTask):
+        if isinstance(self._write_task, (StateTask,BufferTask)):
             self._write_task.cancelled.set()
         self._demo_timer.stop()
         self._stop_monitors()
