@@ -878,6 +878,10 @@ class HardwarePanel(QtWidgets.QWidget):
             by_channel.setdefault(ch,{})[suffix]=(name,pv)
         suffixes=[s for s in columns if any(s in row for row in by_channel.values())]
         suffixes+=sorted({s for row in by_channel.values() for s in row if s not in columns})
+        paired=kind=="BO" and "-Arr" in suffixes and "-Arr-RB" in suffixes
+        if paired:
+            suffixes.remove("-Arr-RB")
+            columns["-Arr"]="Command / readback"
         for start in (0,):
             offset=0
             grid.addWidget(QtWidgets.QLabel("CH"),0,offset)
@@ -889,6 +893,27 @@ class HardwarePanel(QtWidgets.QWidget):
                 grid.addWidget(QtWidgets.QLabel(f"{kind}{ch:02d}"),row,offset)
                 entries=by_channel[ch]
                 for j,suffix in enumerate(suffixes,1):
+                    if paired and suffix=="-Arr":
+                        if not any(s in entries for s in ("-Arr","-Arr-RB")):
+                            continue
+                        pair=QtWidgets.QWidget()
+                        pair_grid=QtWidgets.QGridLayout(pair)
+                        pair_grid.setContentsMargins(0,0,0,0)
+                        pair_grid.setHorizontalSpacing(5)
+                        pair_grid.setVerticalSpacing(1)
+                        pair_grid.setColumnStretch(1,1)
+                        for index,(key,caption) in enumerate((("-Arr","Cmd"),("-Arr-RB","RB"))):
+                            if key not in entries:
+                                continue
+                            name,pv=entries[key]
+                            value=self._value_widget(name,pv)
+                            value.set_bit_labels(index==0 or "-Arr" not in entries)
+                            label=QtWidgets.QLabel(caption)
+                            self._bind(label,pv)
+                            pair_grid.addWidget(label,index,0,QtCore.Qt.AlignBottom if value.show_bit_labels else QtCore.Qt.AlignVCenter)
+                            pair_grid.addWidget(value,index,1)
+                        grid.addWidget(pair,row,offset+j)
+                        continue
                     if suffix not in entries:
                         continue
                     name,pv=entries[suffix]

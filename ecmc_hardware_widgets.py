@@ -331,9 +331,18 @@ class DigitalArrayValue(WordValue):
     """Packed digital word: each indicator represents one bit."""
     def __init__(self,callback,bit_callback=None):
         super().__init__(callback,width=16,bit_callback=bit_callback)
-        self.setMinimumWidth(190)
-        self.setMinimumHeight(36)
-        self.bit_hit_y=(18,34)
+        font=self.font()
+        font.setPointSize(max(7,font.pointSize()-2))
+        metrics=QtGui.QFontMetrics(font)
+        self.setMinimumWidth(max(190,16*(metrics.horizontalAdvance('15')+3)))
+        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding,QtWidgets.QSizePolicy.Fixed)
+        self.set_bit_labels(True)
+
+    def set_bit_labels(self, visible):
+        self.show_bit_labels=bool(visible)
+        self.setFixedHeight(34 if visible else 16)
+        self.bit_hit_y=(18,34) if visible else (0,16)
+        self.update()
     def paintEvent(self,event):
         p=QtGui.QPainter(self)
         font=p.font()
@@ -344,11 +353,12 @@ class DigitalArrayValue(WordValue):
             bit=15-i
             x=i*cell
             p.setPen(self.palette().color(QtGui.QPalette.Text))
-            p.drawText(QtCore.QRectF(x,0,cell,16),QtCore.Qt.AlignCenter,str(bit))
+            if self.show_bit_labels:
+                p.drawText(QtCore.QRectF(x,0,cell,16),QtCore.Qt.AlignCenter,str(bit))
             color=QtGui.QColor('#26804b' if self.word is not None and self.word & (1<<bit) else '#89939e')
             p.setPen(QtGui.QPen(QtGui.QColor('#287bc0') if self._editable else color,1))
             p.setBrush(QtGui.QColor('white') if self._editable else color if self.word is not None else QtCore.Qt.NoBrush)
-            rect=QtCore.QRectF(x+1,18,max(2,cell-2),13)
+            rect=QtCore.QRectF(x+1,18 if self.show_bit_labels else 1,max(2,cell-2),13)
             p.drawRoundedRect(rect,2,2)
             if self._editable and self.word is not None and self.word & (1<<bit):
                 p.setPen(QtGui.QPen(QtGui.QColor('#26804b'),1.5))
