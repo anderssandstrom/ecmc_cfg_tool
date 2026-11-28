@@ -133,6 +133,26 @@ def axis_alarm_summary(samples, native=True):
             flag(key,label,warnings)
     severity = 'fault' if faults else 'warning' if warnings else 'unknown' if unknown else 'ok'
     messages = faults + warnings
+    if native:
+        # Prefer specific observed evidence over aggregate interlock flags.
+        causes = []
+        if samples.get('-InRT') == 0:
+            causes.append('Axis outside realtime; inspect IOC/thread state')
+        for direction, hard, soft, aggregate in (
+            ('Forward','-LimFwd','-SftLimFwdIlock','-SumIlockFwd'),
+            ('Backward','-LimBwd','-SftLimBwdIlock','-SumIlockBwd')):
+            if samples.get(aggregate) != 1:
+                continue
+            if axis_status_value(hard,samples.get(hard)) == 1:
+                causes.append(direction + ' hard limit active')
+            if samples.get(soft) == 1:
+                causes.append(direction + ' soft limit active')
+            if axis_status_value(hard,samples.get(hard)) != 1 and samples.get(soft) != 1:
+                causes.append(direction + ' interlock source not resolved; inspect interlock text and linked hardware')
+        if samples.get('-Blocked') == 1 and not causes:
+            causes.append('Motion blocked; inspect axis message and interlock text')
+        if causes:
+            messages.insert(0,'Diagnostic clues: ' + '; '.join(causes))
     if unknown:
         messages.append('Unavailable: ' + ', '.join(unknown))
     return severity, ' · '.join(messages) if messages else 'No active reported alarms or interlocks'
