@@ -377,7 +377,7 @@ def estimate_frf(input_samples, output_samples, segment=256, overlap=0.5):
     return result,used,1/dt
 
 
-class FrfWindow(QtWidgets.QDialog):
+class FrfWindow(QtWidgets.QWidget):
     def __init__(self, samples, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Frequency response / Welch PSD")
@@ -411,6 +411,16 @@ class FrfWindow(QtWidgets.QDialog):
             self.plots[label]=plot
             tabs.addTab(plot,label)
         layout.addWidget(tabs)
+    def set_samples(self, samples):
+        old_input,old_output=self.input.currentText(),self.output.currentText()
+        self.samples=samples
+        for combo,old,index in ((self.input,old_input,0),(self.output,old_output,1)):
+            combo.clear()
+            combo.addItems(list(samples))
+            combo.setCurrentIndex(combo.findText(old) if old in samples else min(index,len(samples)-1))
+        for plot in self.plots.values(): plot.set_series({})
+        self.note.setText("Select input and output, then Analyze. Captured PV timestamps, not RT sampling.")
+
     def analyze(self):
         a,b=self.input.currentText(),self.output.currentText()
         try:
@@ -798,7 +808,7 @@ class DaqWindow(QtWidgets.QMainWindow):
         show_freq_btn.hide()
         frf_btn = QtWidgets.QPushButton("FRF / PSD")
         frf_btn.clicked.connect(self._show_frf)
-        pv_row.addWidget(frf_btn)
+        frf_btn.hide()
         layout.addLayout(pv_row)
         trigger_row = QtWidgets.QHBoxLayout()
         self.trigger_enabled = QtWidgets.QCheckBox('Triggered capture')
@@ -861,6 +871,10 @@ class DaqWindow(QtWidgets.QMainWindow):
         signal_actions.addWidget(remove_btn)
         signal_actions.addWidget(clear_pvs_btn)
         left_layout.addLayout(signal_actions)
+        self.normalize_plot=QtWidgets.QCheckBox("Normalize each signal")
+        self.normalize_plot.setToolTip("Scale each visible time-domain signal independently to 0–1. Raw samples and FFT are unchanged.")
+        self.normalize_plot.toggled.connect(lambda *_: self._visibility_changed())
+        left_layout.addWidget(self.normalize_plot)
 
         note = QtWidgets.QLabel(
             "FFT uses the captured timestamps to estimate the effective sample rate per PV. "
@@ -889,6 +903,9 @@ class DaqWindow(QtWidgets.QMainWindow):
         self.analysis_tabs = QtWidgets.QTabWidget()
         self.analysis_tabs.addTab(self.time_plot, "Time domain")
         self.analysis_tabs.addTab(self.spectrum_window.plot_widget, "FFT")
+        self.frf_panel=FrfWindow({},self)
+        self.analysis_tabs.addTab(self.frf_panel,"Bode / PSD")
+        self.analysis_tabs.currentChanged.connect(self._analysis_tab_changed)
         upper_layout.addWidget(self.analysis_tabs, 1)
         splitter.addWidget(upper)
 
@@ -1068,7 +1085,8 @@ class DaqWindow(QtWidgets.QMainWindow):
         for samples in self._samples_by_pv.values():
             clean = _sanitize_samples(samples)
             if len(clean) >= 2:
-                max_span = max(max_span, float(clean[-1][0]) - float(clean[0][0]))
+                origin = self._capture_start_ts if self._capture_start_ts is not None else clean[0][0]
+                max_span = max(max_span, float(clean[-1][0]) - float(origin))
         return max_span
 
     def _sync_analysis_range_controls(self, *, keep_manual=True):
@@ -1377,17 +1395,23 @@ class DaqWindow(QtWidgets.QMainWindow):
         self._refresh_views()
         self._update_capture_status()
 
-    def _show_frf(self):
+    def _analysis_tab_changed(self,index):
+        self._pending_refresh=True
+        if not self._capture_active:
+            self._refresh_views()
+        if index==2:
+            self._update_frf_samples()
+
+    def _update_frf_samples(self):
         if self._capture_active:
-            QtWidgets.QMessageBox.information(self,"Frequency response","Stop capture before analysis.")
+            self.frf_panel.set_samples({})
+            self.frf_panel.note.setText("Stop capture before frequency response analysis.")
             return
         samples={p:_slice_samples_by_relative_time(self._samples_by_pv.get(p,[]),self._capture_start_ts,self._analysis_start_s,self._analysis_end_s) for p in self._selected_pvs()}
-        if sum(bool(v) for v in samples.values())<2:
-            QtWidgets.QMessageBox.information(self,"Frequency response","Capture at least two signals.")
-            return
-        dialog=FrfWindow(samples,self)
-        execute=getattr(dialog,'exec',None) or dialog.exec_
-        execute()
+        self.frf_panel.set_samples({p:v for p,v in samples.items() if v})
+
+    def _show_frf(self):
+        self.analysis_tabs.setCurrentIndex(2)
 
     def _show_spectrum_window(self):
         self.analysis_tabs.setCurrentIndex(1)
@@ -1434,6 +1458,10 @@ class DaqWindow(QtWidgets.QMainWindow):
             self._update_capture_status()
             return
         self._pending_refresh = False
+        if getattr(self,"_rolling_capture",False) and self._trigger is None:
+            starts=[q[0][0] for q in self._samples_by_pv.values() if q]
+            if starts and self._analysis_range_auto:
+                self._capture_start_ts=min(starts)
 
         time_series = {}
         freq_series = {}
@@ -1465,7 +1493,16 @@ class DaqWindow(QtWidgets.QMainWindow):
                 )
 
         visible = self._visible_pvs()
-        self.time_plot.set_series({k:v for k,v in time_series.items() if k in visible})
+        shown={k:v for k,v in time_series.items() if k in visible}
+        normalized=self.normalize_plot.isChecked()
+        if normalized:
+            for key,points in shown.items():
+                if not points: continue
+                lo=min(v for _,v in points)
+                hi=max(v for _,v in points)
+                shown[key]=[(t,(v-lo)/(hi-lo) if hi>lo else 0.5) for t,v in points]
+        self.time_plot.set_axes(title="Time Domain",x_label="Time [s]",y_label="Normalized [0–1]" if normalized else "Value",empty_text="Add signals and start a capture.")
+        self.time_plot.set_series(shown)
         self.spectrum_window.set_plots({}, {k:v for k,v in freq_series.items() if k in visible}, " | ".join(summary_parts))
         self._reload_stats_table(selected)
         self._update_capture_status()
