@@ -10,6 +10,7 @@ from ecmc_hardware_write import WriteTask, EnumTask
 from ecmc_hardware_demo import HardwareDemo
 from ecmc_waveform_widget import WaveformValue, waveform_summary
 from ecmc_output_buffer import BufferTask, output_dialog
+from ecmc_waveform_inspector import WaveformInspector
 from ecmc_hardware_widgets import HardwareSymbol, CompactBit, SignalValue, WordValue, BooleanValue, BooleanStatus, AnalogValue, boolean_value, signal_role, AlarmSummary, signal_caption, digital_pair_status, is_bit_array, DigitalArrayValue
 from ecmc_ds402_widget import DS402Status, DS402Word, DS402StateMap, controlword_dialog
 from ecmc_ds402 import word_number, decode_state, TARGETS, transition_word
@@ -67,6 +68,7 @@ class HardwarePanel(QtWidgets.QWidget):
         self._closed = False
         self._write_task = None
         self._state_controls = []
+        self._waveform_inspectors = {}
         self.writable = {}
         self.commands = {}
         self._enum_task = None
@@ -262,6 +264,8 @@ class HardwarePanel(QtWidgets.QWidget):
             self.table.item(row, 1).setText("—")
             self.table.item(row, 2).setText("Paused")
             self.update_card(pv, None, "Not currently monitored")
+        for inspector in self._waveform_inspectors.values():
+            inspector.feed(None,'Monitoring paused')
         self._update_summary()
         self._update_edit_cursors()
 
@@ -424,6 +428,8 @@ class HardwarePanel(QtWidgets.QWidget):
         item.setText(state)
         item.setToolTip(error)
         self.update_card(pv, value, error)
+        if is_waveform and pv in self._waveform_inspectors:
+            self._waveform_inspectors[pv].feed(value,error)
 
     def _finished(self, results):
         self._task = None
@@ -1087,8 +1093,8 @@ class HardwarePanel(QtWidgets.QWidget):
         add.setEnabled(trend.isEnabled() and self.on_plot is not None)
         add.triggered.connect(lambda: self._trend_pv(pv, add=True))
         if pv.endswith("-Arr") and not is_bit_array(pv):
-            action = menu.addAction("Inspect waveform in panel")
-            action.triggered.connect(lambda: self.views.setCurrentWidget(self.cards))
+            action = menu.addAction("Inspect waveform…")
+            action.triggered.connect(lambda: self._inspect_waveform(pv))
         if pv in self.commands:
             command = menu.addAction(self.commands[pv]["label"])
             command.setEnabled(self._can_write(pv))
@@ -1103,6 +1109,25 @@ class HardwarePanel(QtWidgets.QWidget):
             menu.exec(global_pos)
         else:
             menu.exec_(global_pos)
+
+    def _inspect_waveform(self,pv):
+        if pv not in self._active_scope or is_bit_array(pv):
+            return
+        if pv in self._waveform_inspectors:
+            self._waveform_inspectors[pv].raise_()
+            self._waveform_inspectors[pv].activateWindow()
+            return
+        window=WaveformInspector(pv,self)
+        self._waveform_inspectors[pv]=window
+        window.destroyed.connect(lambda *_:self._waveform_inspectors.pop(pv,None))
+        # Seed from the preview only when it contains every sample.
+        for _,widget in self.card_values.get(pv,[]):
+            if isinstance(widget,WaveformValue) and widget.summary:
+                n,*_,points=widget.summary
+                if len(points)==n:
+                    window.feed(points)
+                    break
+        window.show()
 
     def _trend_pv(self, pv, add=False):
         provider = None
@@ -1290,6 +1315,8 @@ class HardwarePanel(QtWidgets.QWidget):
         self._closed = True
         if isinstance(self._write_task, (StateTask,BufferTask)):
             self._write_task.cancelled.set()
+        for window in list(self._waveform_inspectors.values()):
+            window.close()
         self._demo_timer.stop()
         self._stop_monitors()
         super().closeEvent(event)
